@@ -1,13 +1,292 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// ============================================================================
+//  schema.prisma  —  Catálogo unificado multi-proveedor (Ganchito Estudio)
+// ----------------------------------------------------------------------------
+//  Idea central: TU base es la fuente de verdad. Zecat, la carga manual y
+//  futuros proveedores son solo "orígenes" que alimentan la misma tabla de
+//  productos. El campo `origen` distingue de dónde vino cada uno.
+//
+//  Precios: se guarda SIEMPRE el costo (lo que trae la API de Zecat). El precio
+//  de venta se calcula = costo * (1 + margen). El IVA va aparte, nunca embebido
+//  en el precio base (igual que la página actual: "$ X + IVA").
+//
+//  Flujo comercial inicial: catálogo + cotización (Quote), no pago online.
+// ============================================================================
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+// ----------------------------------------------------------------------------
+//  ENUMS
+// ----------------------------------------------------------------------------
+
+/// De dónde salió el producto. Este campo es el corazón de la migración:
+/// permite que Zecat, la carga manual y otros proveedores convivan igual.
+enum ProductOrigin {
+  ZECAT
+  MANUAL
+  OTHER
+}
+
+/// Moneda del costo que devuelve el proveedor. Zecat puede mandar ARS o USD
+/// (campo `currency` en la API), así que hay que normalizarlo.
+enum Currency {
+  ARS
+  USD
+}
+
+/// Estado de una cotización a lo largo de su ciclo de vida.
+enum QuoteStatus {
+  DRAFT       // el cliente la está armando
+  SUBMITTED   // el cliente la envió, esperando respuesta
+  QUOTED      // Ganchito respondió con precio final
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+// ----------------------------------------------------------------------------
+//  CONFIGURACIÓN GLOBAL DE PRECIOS
+//  Una sola fila. El margen y el IVA viven acá para poder cambiarlos sin tocar
+//  código ni re-sincronizar el catálogo.
+// ----------------------------------------------------------------------------
+
+model PricingConfig {
+  id              Int      @id @default(1)
+  /// Margen fijo global sobre el costo. Ej: 0.40 = 40% de markup.
+  marginRate      Decimal  @default(0.40) @db.Decimal(6, 4)
+  /// Alícuota de IVA a mostrar/calcular aparte. Ej: 0.21 = 21%.
+  vatRate         Decimal  @default(0.21) @db.Decimal(6, 4)
+  /// Tipo de cambio para normalizar costos que vengan en USD a ARS.
+  /// Actualizable a mano o por un job. Si un producto viene en ARS, se ignora.
+  usdToArsRate    Decimal  @default(1000) @db.Decimal(12, 4)
+  updatedAt       DateTime @updatedAt
+
+  // Garantiza que exista una sola fila de config (id siempre = 1).
+  @@map("pricing_config")
+}
+
+// ----------------------------------------------------------------------------
+//  CATEGORÍAS (mapea a "families" de Zecat, pero sirve para todos los orígenes)
+// ----------------------------------------------------------------------------
+
+model Category {
+  id            String    @id @default(cuid())
+  /// id de la familia en Zecat (para hacer upsert y no duplicar). Null si es
+  /// una categoría propia creada a mano.
+  zecatFamilyId String?   @unique
+  name          String
+  slug          String    @unique
+  description   String?
+  iconUrl       String?
+  /// Para ordenar/destacar en tu tienda, independiente de Zecat.
+  featured      Boolean   @default(false)
+  sortOrder     Int       @default(0)
+
+  products      Product[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("categories")
+}
+
+// ----------------------------------------------------------------------------
+//  PRODUCTO  (mapea a "generic_product" de Zecat)
+//  El precio de venta NO se guarda: se calcula desde costPrice + margen al vuelo
+//  o en una capa de servicio. Se guarda solo el costo para no perder el dato
+//  base cuando cambie el margen.
+// ----------------------------------------------------------------------------
+
+model Product {
+  id                String        @id @default(cuid())
+  origin            ProductOrigin @default(ZECAT)
+
+  /// id del generic_product en Zecat. Null para productos manuales.
+  /// Es la clave para el upsert del conector (no duplicar en cada sync).
+  zecatId           String?       @unique
+  /// external_id de Zecat (los kits no lo tienen, por eso es opcional).
+  externalId        String?
+
+  name              String
+  description       String?       @db.Text
+
+  /// COSTO base tal cual lo devuelve el proveedor (campo `price` de la API).
+  /// El precio de venta = costPrice * (1 + margin) y el IVA se suma aparte.
+  costPrice         Decimal       @db.Decimal(12, 2)
+  currency          Currency      @default(ARS)
+
+  /// Cantidad mínima para personalizar sin costo extra (minimum_order_quantity).
+  /// Por debajo de esto, Zecat aplica un recargo ("bonificación del costo").
+  minOrderQuantity  Int?
+
+  /// Dimensiones (objeto `dimensions` de la API). En cm y gramos.
+  heightCm          Decimal?      @db.Decimal(8, 2)
+  widthCm           Decimal?      @db.Decimal(8, 2)
+  lengthCm          Decimal?      @db.Decimal(8, 2)
+  weightG           Decimal?      @db.Decimal(10, 2)
+
+  /// Espejo de `published`/`active` de Zecat. Importás solo lo publicado, pero
+  /// guardás el flag por si un producto se despublica entre syncs.
+  active            Boolean       @default(true)
+
+  categoryId        String?
+  category          Category?     @relation(fields: [categoryId], references: [id])
+
+  variants          ProductVariant[]
+  images            ProductImage[]
+  printingAreas     PrintingArea[]
+  printingTypes     ProductPrintingType[]
+  quoteItems        QuoteItem[]
+
+  /// Marca de la última vez que el conector actualizó este producto.
+  /// Útil para detectar productos "huérfanos" (que Zecat ya no devuelve).
+  lastSyncedAt      DateTime?
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([origin])
+  @@index([categoryId])
+  @@map("products")
+}
+
+// ----------------------------------------------------------------------------
+//  VARIANTES  (color / talle)  — mapea a "products"/"variants" de la API
+//  Cada variante tiene su propio SKU y su propio stock.
+// ----------------------------------------------------------------------------
+
+model ProductVariant {
+  id             String   @id @default(cuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// SKU de la variante (campo `sku`). Único.
+  sku            String   @unique
+  colorName      String?  // elementDescription1 / attribute "Color"
+  sizeName       String?  // elementDescription2 / talle
+  materialName   String?  // elementDescription3 / material
+
+  /// Stock BRUTO y RESERVADO tal cual la API. El stock real que mostrás en la
+  /// tienda es (stock - reservedStock). No muestres el bruto.
+  stock          Int      @default(0)
+  reservedStock  Int      @default(0)
+
+  active         Boolean  @default(true)
+
+  images         ProductImage[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+// ----------------------------------------------------------------------------
+//  IMÁGENES  — URLs al S3 de Zecat (no se editan; son la foto del producto).
+//  Para productos manuales, acá van tus propias URLs.
+// ----------------------------------------------------------------------------
+
+model ProductImage {
+  id         String          @id @default(cuid())
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// Si la imagen es específica de una variante (color), se linkea acá.
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  url        String
+  isMain     Boolean         @default(false)
+  sortOrder  Int             @default(0)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+// ----------------------------------------------------------------------------
+//  PERSONALIZACIÓN  — áreas y técnicas de impresión (printing_areas / _types)
+//  No editás la foto: guardás la INFORMACIÓN de qué se puede imprimir y dónde.
+// ----------------------------------------------------------------------------
+
+model PrintingArea {
+  id          String  @id @default(cuid())
+  productId   String
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  zecatAreaId String?  // id del área en Zecat
+  name        String   // ej: "FRENTE"
+  heightCm    Decimal? @db.Decimal(8, 2)
+  widthCm     Decimal? @db.Decimal(8, 2)
+
+  @@index([productId])
+  @@map("printing_areas")
+}
+
+model ProductPrintingType {
+  id            String  @id @default(cuid())
+  productId     String
+  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  zecatTypeId   String?
+  name          String   // ej: "Transfer digital", "Serigrafía", "Bordado"
+
+  @@index([productId])
+  @@map("product_printing_types")
+}
+
+// ----------------------------------------------------------------------------
+//  COTIZACIONES  (en vez de órdenes de pago, para el flujo con logo)
+// ----------------------------------------------------------------------------
+
+model Quote {
+  id           String       @id @default(cuid())
+  status       QuoteStatus  @default(DRAFT)
+
+  // Datos del cliente que pide el presupuesto.
+  customerName  String
+  customerEmail String
+  customerPhone String?
+  companyName   String?
+
+  /// URL del logo/arte que sube el cliente (a tu storage). Opcional en DRAFT.
+  logoUrl       String?
+  notes         String?     @db.Text
+
+  items         QuoteItem[]
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([status])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id             String   @id @default(cuid())
+  quoteId        String
+  quote          Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id])
+
+  /// Variante elegida (color/talle). String libre para no romper si se borra.
+  variantSku     String?
+  quantity       Int
+
+  /// Técnica de impresión elegida por el cliente para este ítem.
+  printingType   String?
+
+  /// Precio de venta unitario CONGELADO al momento de cotizar (costo+margen,
+  /// sin IVA). Se guarda para que la cotización no cambie si después movés el
+  /// margen o Zecat cambia el costo.
+  unitPrice      Decimal  @db.Decimal(12, 2)
+
+  @@index([quoteId])
+  @@map("quote_items")
 }

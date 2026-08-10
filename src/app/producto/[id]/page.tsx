@@ -4,7 +4,8 @@ import { Gallery } from "@/components/product/gallery";
 import { PrintingInfo } from "@/components/product/printing-info";
 import { PurchasePanel } from "@/components/product/purchase-panel";
 import { getProductById } from "@/lib/product";
-import { computeSellPrice, formatPriceArs, getPricingConfig } from "@/lib/pricing";
+import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+import { formatPriceArs } from "@/lib/format";
 
 export default async function ProductoPage({
   params,

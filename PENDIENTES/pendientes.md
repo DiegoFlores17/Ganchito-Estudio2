@@ -38,6 +38,13 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Deploy (etapa final)
 
+- [ ] **Migrar `src/lib/storage.ts` a Vercel Blob antes de deployar.** Hoy los
+      logos de las cotizaciones se guardan en disco local (`uploads/`, gitignored) —
+      funciona en local pero el filesystem de las funciones serverless de Vercel
+      es efímero, no persiste. Es un solo punto de cambio: la función
+      `saveUploadedFile()`. La route handler que sirve los archivos
+      (`/api/uploads/[...path]`) también hay que reemplazarla por las URLs que
+      devuelve Blob directamente.
 - [ ] **Automatizar el sync con cron** (Vercel Cron), cada 3-6 hs, para la
       actualización semi-en-vivo. Hoy se corre a mano con `npm run sync:zecat`.
 - [ ] Configurar base de producción (Neon o Supabase) y variables de entorno en Vercel.

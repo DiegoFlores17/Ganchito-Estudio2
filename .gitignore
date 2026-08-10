@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# archivos subidos por clientes (storage local de desarrollo, ver PENDIENTES.md)
+/uploads/

@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
-import { formatPriceArs } from "@/lib/pricing";
+import { formatPriceArs } from "@/lib/format";
 
 type ProductCardData = Prisma.ProductGetPayload<{
   include: {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { addToQuoteCart } from "@/lib/quote-cart";
 
 interface VariantData {
   id: string;
@@ -29,6 +30,7 @@ export function PurchasePanel({
   minOrderQuantity: number | null;
   priceLabel: string;
 }) {
+  const router = useRouter();
   const activeVariants = useMemo(
     () => variants.filter((v) => v.active),
     [variants]
@@ -81,9 +83,14 @@ export function PurchasePanel({
     setSelectedSize(sizesForColor[0]);
   }
 
-  const quoteHref = selectedVariant
-    ? `/cotizar?producto=${productId}&variante=${encodeURIComponent(selectedVariant.sku)}&cantidad=${quantity}`
-    : `/cotizar?producto=${productId}&cantidad=${quantity}`;
+  function handleAddToQuote() {
+    addToQuoteCart({
+      productId,
+      variantSku: selectedVariant?.sku,
+      quantity,
+    });
+    router.push("/cotizar");
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -173,12 +180,13 @@ export function PurchasePanel({
         </p>
       )}
 
-      <Link
-        href={quoteHref}
+      <button
+        type="button"
+        onClick={handleAddToQuote}
         className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
       >
         Pedir cotizacion
-      </Link>
+      </button>
       <p className="text-xs text-foreground/50">
         No es una compra con pago inmediato. El logo se carga en el paso de
         cotizacion.

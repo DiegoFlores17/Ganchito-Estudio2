@@ -19,13 +19,3 @@ export function computeSellPrice(
   const marginMultiplier = defaultMarginPercent.dividedBy(100).plus(1);
   return costPrice.times(marginMultiplier);
 }
-
-const currencyFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  maximumFractionDigits: 0,
-});
-
-export function formatPriceArs(value: Prisma.Decimal | number): string {
-  return currencyFormatter.format(Number(value));
-}

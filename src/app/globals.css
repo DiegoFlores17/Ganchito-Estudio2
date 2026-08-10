@@ -16,12 +16,12 @@
   --color-brand-yellow: #fff835;
   --color-brand-yellow-bus: #ffd91f;
 
-  /* Alias semanticos: el violeta es protagonista, el amarillo es solo acento */
-  --color-primary: var(--color-brand-mauveine);
-  --color-primary-dark: var(--color-brand-indigo);
-  --color-primary-light: var(--color-brand-phlox);
-  --color-accent: var(--color-brand-yellow-bus);
-  --color-accent-light: var(--color-brand-yellow);
+  /* Alias semanticos (roles definidos en DISENO/DISENO.md) */
+  --color-primary: var(--color-brand-mauveine); /* titulos, elementos de marca */
+  --color-primary-dark: var(--color-brand-indigo); /* fondos de bloque: hero, footer */
+  --color-primary-light: var(--color-brand-phlox); /* hovers, detalles, estados activos */
+  --color-accent: var(--color-brand-yellow); /* CTAs y highlights */
+  --color-accent-hover: var(--color-brand-yellow-bus); /* hover del amarillo */
 
   --font-sans: var(--font-montserrat);
 }

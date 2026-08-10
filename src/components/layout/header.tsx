@@ -26,7 +26,7 @@ export function Header() {
             <Link
               key={link.href}
               href={link.href}
-              className="text-sm font-medium text-foreground/80 transition-colors hover:text-primary"
+              className="text-sm font-medium text-foreground/80 transition-colors hover:text-primary-light"
             >
               {link.label}
             </Link>
@@ -35,7 +35,7 @@ export function Header() {
 
         <Link
           href="/cotizar"
-          className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
+          className="rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
         >
           Pedi tu cotizacion
         </Link>

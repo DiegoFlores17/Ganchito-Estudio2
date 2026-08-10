@@ -1,9 +1,29 @@
 const SWATCHES = [
-  { name: "Indigo", token: "brand-indigo", hex: "#440670" },
-  { name: "Mauveine", token: "brand-mauveine", hex: "#750098" },
-  { name: "Phlox", token: "brand-phlox", hex: "#C744F2" },
-  { name: "Yellow", token: "brand-yellow", hex: "#FFF835" },
-  { name: "School bus yellow", token: "brand-yellow-bus", hex: "#FFD91F" },
+  {
+    name: "Indigo",
+    hex: "#440670",
+    role: "Fondos de bloque: hero, footer",
+  },
+  {
+    name: "Mauveine",
+    hex: "#750098",
+    role: "Protagonista: titulos, elementos de marca",
+  },
+  {
+    name: "Phlox",
+    hex: "#C744F2",
+    role: "Hovers, detalles, estados activos",
+  },
+  {
+    name: "Yellow",
+    hex: "#FFF835",
+    role: "Acento: CTAs y highlights",
+  },
+  {
+    name: "School bus yellow",
+    hex: "#FFD91F",
+    role: "Acento secundario / hover del amarillo",
+  },
 ];
 
 export default function Home() {
@@ -24,7 +44,7 @@ export default function Home() {
         <h2 className="text-2xl font-medium text-foreground">Paleta</h2>
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
           {SWATCHES.map((swatch) => (
-            <div key={swatch.token} className="flex flex-col gap-2">
+            <div key={swatch.hex} className="flex flex-col gap-2">
               <div
                 className="h-24 w-full rounded-lg"
                 style={{ backgroundColor: swatch.hex }}
@@ -34,6 +54,9 @@ export default function Home() {
                   {swatch.name}
                 </p>
                 <p className="text-xs text-foreground/60">{swatch.hex}</p>
+                <p className="mt-1 text-xs text-foreground/50">
+                  {swatch.role}
+                </p>
               </div>
             </div>
           ))}
@@ -71,18 +94,25 @@ export default function Home() {
       <section className="mt-16">
         <h2 className="text-2xl font-medium text-foreground">En uso</h2>
         <div className="mt-6 flex flex-wrap items-center gap-4">
-          <button className="rounded-full bg-primary px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-primary-dark">
+          <button className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover">
             Pedi tu cotizacion
           </button>
           <a
             href="#"
-            className="text-sm font-medium text-foreground/80 transition-colors hover:text-primary"
+            className="text-sm font-medium text-foreground/80 transition-colors hover:text-primary-light"
           >
             Ver catalogo
           </a>
           <span className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-primary-dark">
             Nuevo
           </span>
+        </div>
+
+        <div className="mt-6 rounded-xl bg-primary-dark px-8 py-10 text-white">
+          <p className="text-xs text-white/60">Fondo de bloque — Indigo</p>
+          <p className="mt-1 max-w-md text-2xl font-black tracking-tight">
+            Asi se ve un hero o un bloque protagonico sobre violeta oscuro.
+          </p>
         </div>
       </section>
     </div>

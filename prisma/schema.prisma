@@ -56,15 +56,14 @@ enum QuoteStatus {
 // ----------------------------------------------------------------------------
 
 model PricingConfig {
-  id              Int      @id @default(1)
-  /// Margen fijo global sobre el costo. Ej: 0.40 = 40% de markup.
-  marginRate      Decimal  @default(0.40) @db.Decimal(6, 4)
-  /// Alícuota de IVA a mostrar/calcular aparte. Ej: 0.21 = 21%.
-  vatRate         Decimal  @default(0.21) @db.Decimal(6, 4)
-  /// Tipo de cambio para normalizar costos que vengan en USD a ARS.
-  /// Actualizable a mano o por un job. Si un producto viene en ARS, se ignora.
-  usdToArsRate    Decimal  @default(1000) @db.Decimal(12, 4)
-  updatedAt       DateTime @updatedAt
+  id                  Int      @id @default(1)
+  /// Margen global sobre el costo, en porcentaje (no fracción). Ej: 45 = costo * 1.45.
+  /// Editable desde el panel admin. Preparado para eventualmente admitir un
+  /// margen por producto, pero eso no está implementado todavía.
+  defaultMarginPercent Decimal @default(45) @db.Decimal(5, 2)
+  /// Alícuota de IVA a mostrar/calcular aparte, como fracción. Ej: 0.21 = 21%.
+  vatRate             Decimal  @default(0.21) @db.Decimal(6, 4)
+  updatedAt           DateTime @updatedAt
 
   // Garantiza que exista una sola fila de config (id siempre = 1).
   @@map("pricing_config")

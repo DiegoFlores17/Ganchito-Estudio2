@@ -1,4 +1,5 @@
 import type {
+  ZecatAttributeLabel,
   ZecatFamily,
   ZecatGenericProduct,
   ZecatVariantGroup,
@@ -26,6 +27,71 @@ export function parseStock(value: unknown): number {
   if (value === null || value === undefined || value === "") return 0;
   const parsed = typeof value === "number" ? value : parseInt(String(value), 10);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+type AttributeKind = "color" | "size" | "material";
+
+/// Zecat no tiene una posición fija para color/talle/material: el orden
+/// cambia segun el producto (en indumentaria element1 suele ser Talle y
+/// element2 Color; en mochilas puede ser al reves, con element1 = material
+/// tipo "Telas"). Lo que SI es estable es la etiqueta de attribute_X.description,
+/// asi que clasificamos por texto en vez de por posicion.
+function classifyAttribute(
+  label: string | null | undefined
+): AttributeKind | null {
+  if (!label) return null;
+  const normalized = label.trim().toLowerCase();
+
+  if (normalized.includes("color")) return "color";
+  if (
+    normalized.includes("talle") ||
+    normalized.includes("size") ||
+    normalized.includes("tamaño") ||
+    normalized.includes("tamano")
+  )
+    return "size";
+  if (normalized.includes("tela") || normalized.includes("material"))
+    return "material";
+
+  return null;
+}
+
+export interface VariantAttributes {
+  colorName: string | null;
+  sizeName: string | null;
+  materialName: string | null;
+}
+
+export function mapVariantAttributes(
+  variant: ZecatVariantRecord
+): VariantAttributes {
+  const slots: Array<[ZecatAttributeLabel | null | undefined, string | null | undefined]> = [
+    [variant.attribute_one, variant.elementDescription1],
+    [variant.attribute_two, variant.elementDescription2],
+    [variant.attribute_three, variant.elementDescription3],
+  ];
+
+  // Algunos productos tienen mas de un atributo del mismo tipo (ej. "Color"
+  // Y "Color 2" en productos bicolor). Se combinan en vez de que el ultimo
+  // pise al primero, para no perder informacion.
+  const buckets: Record<AttributeKind, string[]> = {
+    color: [],
+    size: [],
+    material: [],
+  };
+
+  for (const [attribute, rawValue] of slots) {
+    const kind = classifyAttribute(attribute?.description);
+    const value = rawValue?.trim() || null;
+    if (!kind || !value) continue;
+    if (!buckets[kind].includes(value)) buckets[kind].push(value);
+  }
+
+  return {
+    colorName: buckets.color.length ? buckets.color.join(" / ") : null,
+    sizeName: buckets.size.length ? buckets.size.join(" / ") : null,
+    materialName: buckets.material.length ? buckets.material.join(" / ") : null,
+  };
 }
 
 /// La API agrupa las variantes por atributo ("colors" y "sizes"), lo que

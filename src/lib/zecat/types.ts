@@ -25,11 +25,21 @@ export interface ZecatImage {
   main?: boolean;
 }
 
+export interface ZecatAttributeLabel {
+  description?: string | null;
+}
+
 export interface ZecatVariantRecord {
   sku: string;
   elementDescription1?: string | null;
   elementDescription2?: string | null;
   elementDescription3?: string | null;
+  /// Dicen QUE es cada elementDescriptionN para este producto puntual
+  /// (ej: "Talle", "Color", "Telas"). La posición NO tiene un significado
+  /// fijo entre productos: hay que leer esto para saber que es cada una.
+  attribute_one?: ZecatAttributeLabel | null;
+  attribute_two?: ZecatAttributeLabel | null;
+  attribute_three?: ZecatAttributeLabel | null;
   /// La API los devuelve como string (ej: "2133"), no como number.
   stock?: string | number | null;
   reservedStock?: string | number | null;

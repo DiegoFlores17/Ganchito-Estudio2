@@ -4,6 +4,7 @@ import { fetchGenericProductDetail, iterateAllGenericProducts } from "./client";
 import {
   extractCostPrice,
   flattenVariants,
+  mapVariantAttributes,
   parseStock,
   resolveImageUrl,
   slugifyFamily,
@@ -95,13 +96,16 @@ export async function syncProduct(
 
     // Variantes: upsert por sku, es la clave real (no duplica en cada corrida).
     for (const variant of variants) {
+      const { colorName, sizeName, materialName } =
+        mapVariantAttributes(variant);
+
       await tx.productVariant.upsert({
         where: { sku: variant.sku },
         update: {
           productId: product.id,
-          colorName: variant.elementDescription1 ?? null,
-          sizeName: variant.elementDescription2 ?? null,
-          materialName: variant.elementDescription3 ?? null,
+          colorName,
+          sizeName,
+          materialName,
           stock: parseStock(variant.stock),
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,
@@ -109,9 +113,9 @@ export async function syncProduct(
         create: {
           productId: product.id,
           sku: variant.sku,
-          colorName: variant.elementDescription1 ?? null,
-          sizeName: variant.elementDescription2 ?? null,
-          materialName: variant.elementDescription3 ?? null,
+          colorName,
+          sizeName,
+          materialName,
           stock: parseStock(variant.stock),
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,

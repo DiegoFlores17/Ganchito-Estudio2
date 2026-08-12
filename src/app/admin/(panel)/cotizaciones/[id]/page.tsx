@@ -1,0 +1,162 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { formatPriceArs } from "@/lib/format";
+import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
+import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
+import { StatusBadge } from "@/components/admin/status-badge";
+
+export default async function CotizacionDetallePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const quote = await getQuoteById(id);
+  if (!quote) notFound();
+
+  const history = await getQuoteHistoryByEmail(quote.customerEmail, quote.id);
+  const total = quote.items.reduce(
+    (sum, item) => sum + Number(item.unitPrice) * item.quantity,
+    0
+  );
+
+  return (
+    <div>
+      <Link
+        href="/admin/cotizaciones"
+        className="text-sm text-foreground/50 transition-colors hover:text-primary"
+      >
+        ← Volver
+      </Link>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-medium text-foreground">
+            {quote.customerName}
+          </h1>
+          <p className="text-sm text-foreground/50">
+            {quote.createdAt.toLocaleString("es-AR")}
+          </p>
+        </div>
+        <QuoteStatusSelect quoteId={quote.id} initialStatus={quote.status} />
+      </div>
+
+      <div className="mt-8 grid grid-cols-1 gap-8 md:grid-cols-3">
+        <section className="md:col-span-2">
+          <h2 className="text-sm font-medium text-foreground/60">Items</h2>
+          <div className="mt-3 overflow-hidden rounded-xl border border-foreground/10 bg-background">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
+                  <th className="px-4 py-3 font-medium">Producto</th>
+                  <th className="px-4 py-3 font-medium">Variante</th>
+                  <th className="px-4 py-3 font-medium">Cant.</th>
+                  <th className="px-4 py-3 font-medium">Precio unit.</th>
+                  <th className="px-4 py-3 font-medium">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quote.items.map((item) => (
+                  <tr
+                    key={item.id}
+                    className="border-b border-foreground/5 last:border-0"
+                  >
+                    <td className="px-4 py-3 text-foreground">
+                      {item.product.name}
+                    </td>
+                    <td className="px-4 py-3 text-foreground/70">
+                      {item.variantSku ?? "—"}
+                    </td>
+                    <td className="px-4 py-3 text-foreground/70">
+                      {item.quantity}
+                    </td>
+                    <td className="px-4 py-3 text-foreground/70">
+                      {formatPriceArs(item.unitPrice)}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {formatPriceArs(Number(item.unitPrice) * item.quantity)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-right text-sm font-medium text-foreground">
+            Total: {formatPriceArs(total)}{" "}
+            <span className="text-foreground/50">+ IVA</span>
+          </p>
+
+          {quote.notes && (
+            <div className="mt-8">
+              <h2 className="text-sm font-medium text-foreground/60">Notas</h2>
+              <p className="mt-2 whitespace-pre-wrap rounded-xl border border-foreground/10 bg-background p-4 text-sm text-foreground/80">
+                {quote.notes}
+              </p>
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <div className="mt-8">
+              <h2 className="text-sm font-medium text-foreground/60">
+                Historial de este cliente ({quote.customerEmail})
+              </h2>
+              <div className="mt-3 flex flex-col gap-2">
+                {history.map((h) => (
+                  <Link
+                    key={h.id}
+                    href={`/admin/cotizaciones/${h.id}`}
+                    className="flex items-center justify-between rounded-lg border border-foreground/10 bg-background px-4 py-3 text-sm transition-colors hover:border-primary"
+                  >
+                    <span className="text-foreground/70">
+                      {h.createdAt.toLocaleDateString("es-AR")} ·{" "}
+                      {h.items.length} item(s)
+                    </span>
+                    <StatusBadge status={h.status} />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-6">
+          <div>
+            <h2 className="text-sm font-medium text-foreground/60">Contacto</h2>
+            <dl className="mt-2 flex flex-col gap-1.5 text-sm">
+              <Row label="Empresa" value={quote.companyName ?? "—"} />
+              <Row label="Email" value={quote.customerEmail} />
+              <Row label="Telefono" value={quote.customerPhone ?? "—"} />
+            </dl>
+          </div>
+
+          <div>
+            <h2 className="text-sm font-medium text-foreground/60">
+              Logo / arte
+            </h2>
+            {quote.logoUrl ? (
+              <a
+                href={quote.logoUrl}
+                className="mt-2 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
+              >
+                Descargar archivo
+              </a>
+            ) : (
+              <p className="mt-2 text-sm text-foreground/50">
+                No subio ningun archivo todavia.
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="text-foreground/50">{label}</dt>
+      <dd className="text-right text-foreground">{value}</dd>
+    </div>
+  );
+}

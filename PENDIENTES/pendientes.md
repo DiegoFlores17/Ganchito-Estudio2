@@ -5,21 +5,23 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ---
 
-## Pulido de diseño (pasada final, cuando estén todas las páginas)
+## Pulido de diseño (pasada final — en curso, fase por fase)
 
-- [ ] **Filtros de categoría en mobile:** las 27 categorías apiladas ocupan
-      demasiado espacio vertical y empujan los productos hacia abajo. Resolver con
-      desplegable, scroll horizontal, o botón "Filtrar" que abra un panel.
-- [ ] **Cards de producto se cortan en mobile:** la grilla se va fuera de pantalla
-      por el costado derecho (nombres y fotos tapados). Ajustar ancho de columnas /
-      padding del contenedor.
-- [ ] **Botón "Pedí tu cotización" del header se corta en mobile.** Header necesita
-      colapsar bien en pantalla chica (posible menú hamburguesa).
-- [ ] **Catálogo en general necesita pulido estético:** espaciados, jerarquía,
-      viñeta de las cards. Funciona, pero se ve "crudo".
-- [ ] Al ser un patrón reutilizable, la card de producto se usa también en
-      "destacados" (home) y "relacionados" (ficha). Pulirla UNA vez y que aplique
-      a todos lados.
+- [ ] **Filtros de categoría en mobile (Fase 2, pendiente):** las 27 categorías
+      apiladas ocupan demasiado espacio vertical y empujan los productos hacia
+      abajo. Resolver con un botón "Filtrar" que abra un panel (confirmado con
+      el usuario, mejor que scroll horizontal con tantos ítems).
+- [x] **Cards de producto se cortan en mobile:** re-verificado en la Fase 1, no
+      reproduce mas — probablemente resuelto en una pasada anterior.
+- [x] **Botón "Pedí tu cotización" del header se corta en mobile:** resuelto en
+      la Fase 1 con menú hamburguesa (`MobileNav`) que colapsa nav + CTA.
+- [ ] **Catálogo en general necesita pulido estético (Fase 2, pendiente):**
+      espaciados, jerarquía, separación buscador/filtros/grilla, contador de
+      resultados.
+- [x] **Card de producto pulida (Fase 1):** fondo de imagen consistente
+      (border sutil), jerarquía de precio marcada, `line-clamp` en el nombre
+      para altura pareja de card. Es el mismo componente reutilizable, listo
+      para destacados (home) y relacionados (ficha) cuando existan.
 
 ## Logo / marca
 
@@ -90,3 +92,23 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       de los productos manuales. Los dos usos se rompen en Vercel (filesystem
       efímero). Un solo punto de cambio (`saveUploadedFile()`), pero afecta a los
       dos flujos — verificar ambos después de migrar.
+
+## Margen Personalizado para cada producto 
+
+- [ ] Poder editar el margen de ganancia de cada precio para cada producto manualmente.
+
+## Editar Productos
+
+-[ ] Poder eliminar, editar precio cantidad margen etc en cada producto
+
+## Categorías (después del diseño)
+
+- [ ] **Limpiar las categorías del catálogo (Opción A: visibilidad editable).**
+      Hoy se muestran las 27 de Zecat crudas, mezcladas: campañas temporales
+      ("2026 Agro", "2026 Minería", "Próximos Arribos"), duplicados de oferta
+      ("70%OFF Bolsos y Mochilas") y categorías reales ("Drinkware", "Gorros").
+      Confunden al cliente. Solución: agregar un campo `visible` (bool) a la
+      tabla Category + una pantalla en el panel admin para ocultar/mostrar cada
+      una. Ocultar campañas y duplicados de oferta, dejar las reales. Los
+      productos de categorías ocultas siguen apareciendo en el catálogo (un
+      producto está en varias categorías); solo se saca la categoría como filtro.

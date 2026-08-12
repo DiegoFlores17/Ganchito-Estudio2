@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { MobileNav } from "./mobile-nav";
 
 const NAV_LINKS = [
   { label: "Catalogo", href: "/catalogo" },
@@ -35,10 +36,12 @@ export function Header() {
 
         <Link
           href="/cotizar"
-          className="rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
+          className="hidden rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover md:inline-block"
         >
           Pedi tu cotizacion
         </Link>
+
+        <MobileNav navLinks={NAV_LINKS} />
       </div>
     </header>
   );

@@ -22,15 +22,15 @@ export function ProductCard({
   const image = product.images[0];
 
   return (
-    <Link href={`/producto/${product.id}`} className="group flex flex-col gap-3">
-      <div className="relative aspect-square overflow-hidden rounded-xl bg-foreground/5">
+    <Link href={`/producto/${product.id}`} className="group flex flex-col gap-4">
+      <div className="relative aspect-square overflow-hidden rounded-xl border border-foreground/[0.06] bg-foreground/[0.03] transition-shadow duration-300 group-hover:shadow-lg group-hover:shadow-foreground/10">
         {image ? (
           <Image
             src={image.url}
             alt={product.name}
             fill
             sizes="(min-width: 1024px) 23vw, (min-width: 640px) 45vw, 90vw"
-            className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            className="object-cover transition-transform duration-300 group-hover:scale-[1.04]"
           />
         ) : null}
 
@@ -42,10 +42,12 @@ export function ProductCard({
       </div>
 
       <div>
-        <p className="text-sm font-medium text-foreground">{product.name}</p>
-        <p className="mt-1 text-sm text-foreground/70">
+        <p className="line-clamp-2 text-sm font-medium text-foreground transition-colors group-hover:text-primary-light">
+          {product.name}
+        </p>
+        <p className="mt-1.5 text-base font-semibold text-foreground">
           {formatPriceArs(sellPrice)}{" "}
-          <span className="text-foreground/50">+ IVA</span>
+          <span className="text-sm font-normal text-foreground/45">+ IVA</span>
         </p>
       </div>
     </Link>

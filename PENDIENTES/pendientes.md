@@ -35,6 +35,11 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       real en dólares.
 - [ ] **Productos en SALE:** el descuento ya viene en el `price` de Zecat. A futuro,
       si se quiere mostrar "precio tachado" original, resolverlo aparte.
+- [ ] **Índice de búsqueda:** la búsqueda del catálogo (`unaccent` + `ILIKE` vía
+      `$queryRaw`) hoy no tiene índice — no hace falta con 552 productos (instantáneo
+      igual). Si el catálogo crece a varios miles de productos, evaluar un índice
+      GIN con `pg_trgm` sobre `unaccent(lower(name))` (y lo mismo para
+      `description`/categoría) antes de que se note lento.
 
 ## Deploy (etapa final)
 

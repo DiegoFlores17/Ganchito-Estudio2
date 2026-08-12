@@ -3,16 +3,24 @@ import { getManualProducts } from "@/lib/admin-products";
 import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
 import { ToggleActiveButton } from "@/components/admin/toggle-active-button";
+import { SearchInput } from "@/components/search-input";
 
-export default async function ProductosPage() {
+export default async function ProductosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const params = await searchParams;
+  const search = params.q || undefined;
+
   const [products, pricingConfig] = await Promise.all([
-    getManualProducts(),
+    getManualProducts(search),
     getPricingConfig(),
   ]);
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-medium text-foreground">
             Productos manuales
@@ -23,10 +31,18 @@ export default async function ProductosPage() {
         </div>
         <Link
           href="/admin/productos/nuevo"
-          className="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
+          className="shrink-0 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
         >
           Nuevo producto
         </Link>
+      </div>
+
+      <div className="mt-6 max-w-sm">
+        <SearchInput
+          basePath="/admin/productos"
+          initialValue={search}
+          placeholder="Buscar por nombre, proveedor o categoria..."
+        />
       </div>
 
       <div className="mt-8 overflow-hidden rounded-xl border border-foreground/10 bg-background">
@@ -96,7 +112,9 @@ export default async function ProductosPage() {
 
         {products.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-foreground/50">
-            Todavia no cargaste ningun producto manual.
+            {search
+              ? `No se encontraron productos para "${search}".`
+              : "Todavia no cargaste ningun producto manual."}
           </p>
         )}
       </div>

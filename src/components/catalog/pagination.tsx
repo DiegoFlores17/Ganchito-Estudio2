@@ -1,8 +1,9 @@
 import Link from "next/link";
 
-function buildHref(page: number, categorySlug?: string) {
+function buildHref(page: number, categorySlug?: string, search?: string) {
   const params = new URLSearchParams();
   if (categorySlug) params.set("categoria", categorySlug);
+  if (search) params.set("q", search);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `/catalogo?${query}` : "/catalogo";
@@ -28,10 +29,12 @@ export function Pagination({
   currentPage,
   totalPages,
   categorySlug,
+  search,
 }: {
   currentPage: number;
   totalPages: number;
   categorySlug?: string;
+  search?: string;
 }) {
   if (totalPages <= 1) return null;
 
@@ -40,7 +43,7 @@ export function Pagination({
   return (
     <nav className="flex items-center justify-center gap-1">
       <PageLink
-        href={buildHref(currentPage - 1, categorySlug)}
+        href={buildHref(currentPage - 1, categorySlug, search)}
         disabled={currentPage <= 1}
         label="Anterior"
       />
@@ -56,7 +59,7 @@ export function Pagination({
         ) : (
           <Link
             key={page}
-            href={buildHref(page, categorySlug)}
+            href={buildHref(page, categorySlug, search)}
             className={
               "flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-colors " +
               (page === currentPage
@@ -70,7 +73,7 @@ export function Pagination({
       )}
 
       <PageLink
-        href={buildHref(currentPage + 1, categorySlug)}
+        href={buildHref(currentPage + 1, categorySlug, search)}
         disabled={currentPage >= totalPages}
         label="Siguiente"
       />

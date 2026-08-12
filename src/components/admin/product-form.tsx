@@ -8,7 +8,16 @@ import { saveProduct } from "@/app/admin/(panel)/productos/actions";
 interface VariantRow {
   colorName: string;
   sizeName: string;
-  stock: number;
+  /// String, no number: si esto convirtiera a Number() en cada tecla,
+  /// "37.000" tipeado pensando en separador de miles se transforma en 37
+  /// ANTES de poder validarlo. Se valida el string crudo recien al enviar.
+  stock: string;
+}
+
+const INTEGER_PATTERN = /^\d+$/;
+
+function isValidStockInput(value: string): boolean {
+  return INTEGER_PATTERN.test(value.trim());
 }
 
 interface ExistingImage {
@@ -42,15 +51,15 @@ export function ProductForm({
     initialProduct?.variants.map((v) => ({
       colorName: v.colorName ?? "",
       sizeName: v.sizeName ?? "",
-      stock: v.stock,
+      stock: String(v.stock),
     })) ?? []
   );
   const [simpleStock, setSimpleStock] = useState(
     initialProduct?.variants.length === 1 &&
       !initialProduct.variants[0].colorName &&
       !initialProduct.variants[0].sizeName
-      ? initialProduct.variants[0].stock
-      : 0
+      ? String(initialProduct.variants[0].stock)
+      : "0"
   );
 
   const [existingImages, setExistingImages] = useState<ExistingImage[]>(
@@ -59,7 +68,7 @@ export function ProductForm({
   const [deleteImageIds, setDeleteImageIds] = useState<string[]>([]);
 
   function addVariantRow() {
-    setVariants((rows) => [...rows, { colorName: "", sizeName: "", stock: 0 }]);
+    setVariants((rows) => [...rows, { colorName: "", sizeName: "", stock: "0" }]);
   }
 
   function updateVariantRow(index: number, patch: Partial<VariantRow>) {
@@ -82,23 +91,45 @@ export function ProductForm({
     // guardado no queremos perder lo que ya se cargo (mismo motivo que en
     // /cotizar y en equipo/configuracion).
     event.preventDefault();
+
+    setError(null);
+
+    const relevantVariants = variants.filter(
+      (v) => v.colorName.trim() || v.sizeName.trim()
+    );
+
+    // Validacion client-side (fail fast, sin round trip); la Server Action
+    // vuelve a validar esto igual, no confia en que el cliente lo haya hecho.
+    if (relevantVariants.length === 0 && !isValidStockInput(simpleStock)) {
+      setError(
+        "El stock no es valido. Escribi un numero entero sin puntos ni comas (ej: 50)."
+      );
+      return;
+    }
+    const invalidVariant = relevantVariants.find(
+      (v) => !isValidStockInput(v.stock)
+    );
+    if (invalidVariant) {
+      setError(
+        `El stock de la variante "${invalidVariant.colorName || invalidVariant.sizeName}" no es valido. Escribi un numero entero sin puntos ni comas (ej: 50).`
+      );
+      return;
+    }
+
     const formData = new FormData(event.currentTarget);
     if (initialProduct) formData.set("productId", initialProduct.id);
     formData.set(
       "variants",
       JSON.stringify(
-        variants
-          .filter((v) => v.colorName.trim() || v.sizeName.trim())
-          .map((v) => ({
-            colorName: v.colorName.trim() || undefined,
-            sizeName: v.sizeName.trim() || undefined,
-            stock: Number(v.stock) || 0,
-          }))
+        relevantVariants.map((v) => ({
+          colorName: v.colorName.trim() || undefined,
+          sizeName: v.sizeName.trim() || undefined,
+          stock: Number(v.stock),
+        }))
       )
     );
     formData.set("deleteImageIds", JSON.stringify(deleteImageIds));
 
-    setError(null);
     startTransition(async () => {
       const result = await saveProduct(formData);
       if (!result.success) {
@@ -145,13 +176,14 @@ export function ProductForm({
             name="costPrice"
             step="0.01"
             min="0.01"
+            placeholder="37000"
             required
             defaultValue={initialProduct?.costPrice}
             className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
           />
           <p className="text-xs text-foreground/50">
-            Se le aplica el margen global del catalogo, igual que a los
-            productos de Zecat.
+            Sin puntos de miles: escribi 37000, no 37.000. Se le aplica el
+            margen global del catalogo, igual que a los productos de Zecat.
           </p>
         </div>
 
@@ -251,8 +283,9 @@ export function ProductForm({
               type="number"
               name="simpleStock"
               min="0"
+              step="1"
               value={simpleStock}
-              onChange={(e) => setSimpleStock(Number(e.target.value))}
+              onChange={(e) => setSimpleStock(e.target.value)}
               className="w-40 rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
             />
           </div>
@@ -282,9 +315,10 @@ export function ProductForm({
                   type="number"
                   placeholder="Stock"
                   min="0"
+                  step="1"
                   value={variant.stock}
                   onChange={(e) =>
-                    updateVariantRow(index, { stock: Number(e.target.value) })
+                    updateVariantRow(index, { stock: e.target.value })
                   }
                   className="w-24 rounded-lg border border-foreground/15 px-3 py-2 text-sm outline-none focus:border-primary"
                 />

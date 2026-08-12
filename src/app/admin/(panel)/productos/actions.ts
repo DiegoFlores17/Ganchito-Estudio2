@@ -23,6 +23,35 @@ interface VariantInput {
   stock: number;
 }
 
+// Numeros "limpios" solamente: nada de separadores de miles ni comas. Un
+// input tipo="number" de HTML siempre usa "." como separador DECIMAL sin
+// importar el idioma — "37.000" tipeado pensando en separador de miles
+// argentino se lee como 37 con un Number() a secas, y eso paso una vez sin
+// que nadie lo notara. Mejor rechazar en vez de adivinar la intencion.
+const DECIMAL_PATTERN = /^\d+(\.\d{1,2})?$/;
+const INTEGER_PATTERN = /^\d+$/;
+
+/// Devuelve el numero si el string es un decimal positivo "limpio"
+/// (maximo 2 decimales, sin separadores de miles), o null si no.
+function parsePositiveDecimal(raw: FormDataEntryValue | null): number | null {
+  const value = String(raw ?? "").trim();
+  if (!DECIMAL_PATTERN.test(value)) return null;
+  return Number(value);
+}
+
+/// Devuelve el numero si el string es un entero no negativo "limpio", o
+/// null si no (nada de puntos, comas, ni signos).
+function parseNonNegativeInteger(raw: unknown): number | null {
+  const value = String(raw ?? "").trim();
+  if (!INTEGER_PATTERN.test(value)) return null;
+  return Number(value);
+}
+
+const PRICE_FORMAT_ERROR =
+  'El precio base no es valido. Escribi el numero sin puntos de miles (ej: 37000, no 37.000).';
+const STOCK_FORMAT_ERROR =
+  "El stock no es valido. Tiene que ser un numero entero sin puntos ni comas.";
+
 /// Crea o edita un producto manual. Ambos casos comparten la misma logica:
 /// si viene "productId" en el formulario, es edicion; si no, alta.
 export async function saveProduct(formData: FormData): Promise<ProductActionResult> {
@@ -33,14 +62,14 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
   const description = String(formData.get("description") ?? "").trim() || null;
   const supplierName = String(formData.get("supplierName") ?? "").trim() || null;
   const categoryId = String(formData.get("categoryId") ?? "").trim() || null;
-  const costPriceRaw = Number(formData.get("costPrice"));
-  const simpleStockRaw = Number(formData.get("simpleStock") ?? 0);
 
   if (!name) {
     return { success: false, error: "Falta el nombre." };
   }
-  if (!Number.isFinite(costPriceRaw) || costPriceRaw <= 0) {
-    return { success: false, error: "El precio base tiene que ser mayor a 0." };
+
+  const costPriceRaw = parsePositiveDecimal(formData.get("costPrice"));
+  if (costPriceRaw === null || costPriceRaw <= 0) {
+    return { success: false, error: PRICE_FORMAT_ERROR };
   }
 
   let variants: VariantInput[] = [];
@@ -50,6 +79,27 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     return { success: false, error: "No se pudieron leer las variantes." };
   }
   if (!Array.isArray(variants)) variants = [];
+
+  // Revalidar el stock ACA, no confiar en lo que ya valido el cliente: cada
+  // variante y el stock simple tienen que ser enteros no negativos limpios.
+  const validatedVariants: VariantInput[] = [];
+  for (const v of variants) {
+    const stock = parseNonNegativeInteger(v.stock);
+    if (stock === null) {
+      return { success: false, error: STOCK_FORMAT_ERROR };
+    }
+    validatedVariants.push({ ...v, stock });
+  }
+  variants = validatedVariants;
+
+  let simpleStockRaw = 0;
+  if (variants.length === 0) {
+    const parsed = parseNonNegativeInteger(formData.get("simpleStock") ?? "0");
+    if (parsed === null) {
+      return { success: false, error: STOCK_FORMAT_ERROR };
+    }
+    simpleStockRaw = parsed;
+  }
 
   const deleteImageIds = JSON.parse(
     String(formData.get("deleteImageIds") ?? "[]")
@@ -97,13 +147,14 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     await tx.productVariant.deleteMany({ where: { productId: saved.id } });
 
     if (variants.length > 0) {
+      // v.stock ya viene validado (entero no negativo) del bloque de arriba.
       await tx.productVariant.createMany({
         data: variants.map((v) => ({
           productId: saved.id,
           sku: `manual-${randomUUID()}`,
           colorName: v.colorName?.trim() || null,
           sizeName: v.sizeName?.trim() || null,
-          stock: Number.isFinite(v.stock) ? Math.max(0, v.stock) : 0,
+          stock: v.stock,
         })),
       });
     } else {
@@ -115,7 +166,7 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
         data: {
           productId: saved.id,
           sku: `manual-${randomUUID()}`,
-          stock: Number.isFinite(simpleStockRaw) ? Math.max(0, simpleStockRaw) : 0,
+          stock: simpleStockRaw,
         },
       });
     }

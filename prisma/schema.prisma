@@ -156,7 +156,13 @@ model Product {
 
   /// Espejo de `published`/`active` de Zecat. Importás solo lo publicado, pero
   /// guardás el flag por si un producto se despublica entre syncs.
+  /// Para productos MANUAL, "pausar" desde el panel es poner esto en false.
   active            Boolean       @default(true)
+
+  /// Proveedor en texto libre, SOLO para productos origin=MANUAL cargados a
+  /// mano desde el panel. No tiene relación con el modelo Supplier (esa es
+  /// la reserva para el sistema multi-proveedor automatizado futuro).
+  supplierName      String?
 
   categoryId        String?
   category          Category?     @relation(fields: [categoryId], references: [id])
@@ -313,4 +319,26 @@ model QuoteItem {
 
   @@index([quoteId])
   @@map("quote_items")
+}
+
+// ----------------------------------------------------------------------------
+//  PROVEEDORES — semilla para el sistema multi-proveedor futuro.
+//  TODAVIA NO está conectada a nada (ni a Product ni a ningún conector).
+//  Solo reserva la estructura para no migrar en caliente el día que haga
+//  falta. La lógica de conexión (fetch, normalización, sync) se construye
+//  recién cuando exista un segundo proveedor real con API, siguiendo el
+//  patrón de src/lib/zecat/. No usar esta tabla para nada hasta ese momento.
+// ----------------------------------------------------------------------------
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  apiKey    String?
+  apiUrl    String?
+  active    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("suppliers")
 }

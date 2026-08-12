@@ -49,6 +49,31 @@ enum QuoteStatus {
   EXPIRED
 }
 
+/// SUPER_ADMIN: configuración de negocio (margen, IVA, gestión de equipo).
+/// ADMIN: operación del día a día (cotizaciones). No ve equipo ni configuración.
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+}
+
+// ----------------------------------------------------------------------------
+//  PANEL DE ADMINISTRACIÓN
+//  Los clientes NO tienen cuenta. La única identidad del sistema es la del
+//  equipo de Ganchito, autenticado con Google (Auth.js) y autorizado acá.
+//  El primer SUPER_ADMIN se crea por bootstrap (ver src/lib/admin-auth.ts),
+//  no hay seed manual.
+// ----------------------------------------------------------------------------
+
+model AdminUser {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  role      AdminRole @default(ADMIN)
+  createdAt DateTime  @default(now())
+
+  @@map("admin_users")
+}
+
 // ----------------------------------------------------------------------------
 //  CONFIGURACIÓN GLOBAL DE PRECIOS
 //  Una sola fila. El margen y el IVA viven acá para poder cambiarlos sin tocar

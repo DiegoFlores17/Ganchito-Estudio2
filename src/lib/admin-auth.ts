@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AdminRole } from "@prisma/client";
-import { auth, signOut } from "@/auth";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 export interface CurrentAdmin {
@@ -32,7 +32,10 @@ export async function requireAdmin(): Promise<CurrentAdmin> {
     return bootstrapped;
   }
 
-  await signOut({ redirect: false });
+  // No se puede hacer signOut() aca: esto corre durante el render de un
+  // Server Component (el layout), y las cookies solo se pueden modificar
+  // en un Server Action o Route Handler. El cierre de sesion real queda
+  // en la pantalla /admin/sin-acceso, que SI es un lugar valido para eso.
   redirect("/admin/sin-acceso");
 }
 

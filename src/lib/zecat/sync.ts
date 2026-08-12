@@ -174,8 +174,17 @@ export async function syncProduct(
     }
 
     if (detail.printing_types?.length) {
+      // Zecat trae un registro POR NIVEL DE PRECIO interno (ej: "Bordado
+      // 20KP" y "Bordado 22KP" son ids distintos con distinto costo/setup),
+      // pero todos comparten el mismo name visible ("Bordado"). Nosotros
+      // solo mostramos que TECNICA admite el producto (sin precios, ver
+      // PrintingInfo), asi que se deduplica por nombre — si no, un producto
+      // con 3 niveles de "Bordado" mostraba "Bordado" repetido 3 veces.
+      const uniquePrintingTypes = new Map(
+        detail.printing_types.map((type) => [type.name, type])
+      );
       await tx.productPrintingType.createMany({
-        data: detail.printing_types.map((type) => ({
+        data: [...uniquePrintingTypes.values()].map((type) => ({
           productId: product.id,
           zecatTypeId: String(type.id),
           name: type.name,

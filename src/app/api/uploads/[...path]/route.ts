@@ -1,6 +1,7 @@
 import { readFile, stat } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
+import { PRODUCT_IMAGE_EXTENSIONS } from "@/lib/storage";
 
 const UPLOADS_ROOT = path.resolve(process.cwd(), "uploads");
 
@@ -8,6 +9,7 @@ const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
+  webp: "image/webp",
   pdf: "application/pdf",
   svg: "image/svg+xml",
   ai: "application/postscript",
@@ -36,12 +38,17 @@ export async function GET(
   const extension = resolved.split(".").pop()?.toLowerCase() ?? "";
   const contentType = CONTENT_TYPES[extension] ?? "application/octet-stream";
 
+  // Un raster (png/jpg/webp) no puede traer script embebido, asi que es
+  // seguro mostrarlo inline (fotos de producto en el catalogo). Todo lo
+  // demas (pdf/svg/ai/eps — logos de cotizacion) sigue forzando descarga:
+  // un SVG SI puede traer <script>, sin importar quien lo subio.
+  const isInlineSafe = PRODUCT_IMAGE_EXTENSIONS.has(extension);
+  const disposition = isInlineSafe ? "inline" : "attachment";
+
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": contentType,
-      // SIEMPRE como descarga, nunca inline: un SVG puede traer <script>
-      // embebido y no queremos que el navegador lo renderice.
-      "Content-Disposition": `attachment; filename="${path.basename(resolved)}"`,
+      "Content-Disposition": `${disposition}; filename="${path.basename(resolved)}"`,
       "Cache-Control": "private, no-store",
     },
   });

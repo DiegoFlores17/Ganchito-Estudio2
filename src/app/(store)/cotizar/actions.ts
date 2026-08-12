@@ -4,7 +4,11 @@ import { QuoteStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
-import { saveUploadedFile, UploadValidationError } from "@/lib/storage";
+import {
+  QUOTE_LOGO_EXTENSIONS,
+  saveUploadedFile,
+  UploadValidationError,
+} from "@/lib/storage";
 
 export interface QuoteCartItemInput {
   productId: string;
@@ -135,7 +139,10 @@ export async function submitQuote(
   let logoUrl: string | null = null;
   if (logo instanceof File && logo.size > 0) {
     try {
-      logoUrl = await saveUploadedFile(logo, { subdir: "quotes" });
+      logoUrl = await saveUploadedFile(logo, {
+        subdir: "quotes",
+        allowedExtensions: QUOTE_LOGO_EXTENSIONS,
+      });
     } catch (error) {
       if (error instanceof UploadValidationError) {
         return { success: false, error: error.message };

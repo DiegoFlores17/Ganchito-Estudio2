@@ -53,7 +53,7 @@ export async function getProducts({
   // Busqueda sin resultados: cortar aca, no tiene sentido pedirle a Prisma
   // un id: { in: [] } (Prisma lo resuelve bien, pero es una vuelta de mas).
   if (matchedIds && matchedIds.length === 0) {
-    return { products: [], totalPages: 1 };
+    return { products: [], totalPages: 1, total: 0 };
   }
 
   const where: Prisma.ProductWhereInput = {
@@ -79,6 +79,7 @@ export async function getProducts({
   return {
     products,
     totalPages: Math.max(1, Math.ceil(total / PRODUCTS_PER_PAGE)),
+    total,
   };
 }
 

@@ -7,17 +7,18 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Pulido de diseño (pasada final — en curso, fase por fase)
 
-- [ ] **Filtros de categoría en mobile (Fase 2, pendiente):** las 27 categorías
-      apiladas ocupan demasiado espacio vertical y empujan los productos hacia
-      abajo. Resolver con un botón "Filtrar" que abra un panel (confirmado con
-      el usuario, mejor que scroll horizontal con tantos ítems).
+- [x] **Filtros de categoría en mobile:** resuelto en la Fase 2 — boton
+      "Filtrar por categoria" que abre un panel (`fixed inset-0`, mismo patron
+      que el menu del header) con las 27 categorias en una lista, en vez de
+      pills apiladas. El boton muestra la categoria activa.
 - [x] **Cards de producto se cortan en mobile:** re-verificado en la Fase 1, no
       reproduce mas — probablemente resuelto en una pasada anterior.
 - [x] **Botón "Pedí tu cotización" del header se corta en mobile:** resuelto en
       la Fase 1 con menú hamburguesa (`MobileNav`) que colapsa nav + CTA.
-- [ ] **Catálogo en general necesita pulido estético (Fase 2, pendiente):**
-      espaciados, jerarquía, separación buscador/filtros/grilla, contador de
-      resultados.
+- [x] **Catálogo en general necesita pulido estético:** resuelto en la Fase 2 —
+      titulo mas grande (5xl), mas aire entre buscador/filtro/grilla, contador
+      de resultados ("553 productos" / "54 productos en X" / con busqueda),
+      mas espacio vertical entre filas de la grilla.
 - [x] **Card de producto pulida (Fase 1):** fondo de imagen consistente
       (border sutil), jerarquía de precio marcada, `line-clamp` en el nombre
       para altura pareja de card. Es el mismo componente reutilizable, listo

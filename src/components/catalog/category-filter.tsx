@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import type { Category } from "@prisma/client";
 
@@ -18,36 +21,166 @@ export function CategoryFilter({
   activeSlug?: string;
   search?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const activeCategory = categories.find((c) => c.slug === activeSlug);
+
   return (
-    <nav className="flex flex-wrap gap-2 overflow-x-auto">
-      <Link
-        href={buildHref(undefined, search)}
-        className={
-          "shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors " +
-          (activeSlug
-            ? "bg-foreground/5 text-foreground/70 hover:bg-foreground/10"
-            : "bg-primary text-white")
-        }
-      >
-        Todas
-      </Link>
-      {categories.map((category) => {
-        const isActive = category.slug === activeSlug;
-        return (
-          <Link
+    <>
+      {/* Desktop: pills envueltas, como siempre. */}
+      <nav className="hidden flex-wrap gap-2 md:flex">
+        <CategoryLink
+          href={buildHref(undefined, search)}
+          active={!activeSlug}
+          label="Todas"
+        />
+        {categories.map((category) => (
+          <CategoryLink
             key={category.id}
             href={buildHref(category.slug, search)}
-            className={
-              "shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors " +
-              (isActive
-                ? "bg-primary text-white"
-                : "bg-foreground/5 text-foreground/70 hover:bg-foreground/10")
-            }
-          >
-            {category.name}
-          </Link>
-        );
-      })}
-    </nav>
+            active={category.slug === activeSlug}
+            label={category.name}
+          />
+        ))}
+      </nav>
+
+      {/* Mobile: boton compacto que abre un panel, en vez de las 27 pills
+          apiladas ocupando toda la pantalla antes de llegar a un producto. */}
+      <div className="md:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex w-full items-center gap-2 rounded-full border border-foreground/15 px-4 py-2.5 text-sm font-medium text-foreground/80"
+        >
+          <FilterIcon />
+          {activeCategory ? activeCategory.name : "Filtrar por categoria"}
+        </button>
+
+        {open && (
+          <div className="fixed inset-0 z-50 flex flex-col bg-background">
+            <div className="flex items-center justify-between border-b border-black/5 px-6 py-4">
+              <p className="text-sm font-medium text-foreground">
+                Categorias
+              </p>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Cerrar filtro"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <PanelLink
+                href={buildHref(undefined, search)}
+                active={!activeSlug}
+                label="Todas"
+                onNavigate={() => setOpen(false)}
+              />
+              {categories.map((category) => (
+                <PanelLink
+                  key={category.id}
+                  href={buildHref(category.slug, search)}
+                  active={category.slug === activeSlug}
+                  label={category.name}
+                  onNavigate={() => setOpen(false)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function CategoryLink({
+  href,
+  active,
+  label,
+}: {
+  href: string;
+  active: boolean;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className={
+        "shrink-0 rounded-full px-4 py-2 text-sm font-medium transition-colors " +
+        (active
+          ? "bg-primary text-white"
+          : "bg-foreground/5 text-foreground/70 hover:bg-foreground/10")
+      }
+    >
+      {label}
+    </Link>
+  );
+}
+
+function PanelLink({
+  href,
+  active,
+  label,
+  onNavigate,
+}: {
+  href: string;
+  active: boolean;
+  label: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className={
+        "block rounded-lg px-3 py-3 text-base transition-colors " +
+        (active
+          ? "font-medium text-primary"
+          : "text-foreground/80 hover:text-primary-light")
+      }
+    >
+      {label}
+    </Link>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <circle cx="9" cy="7" r="2.2" fill="var(--background)" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+      <circle cx="16" cy="17" r="2.2" fill="var(--background)" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
+    </svg>
   );
 }

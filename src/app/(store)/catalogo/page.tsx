@@ -15,25 +15,29 @@ export default async function CatalogoPage({
   const categorySlug = params.categoria || undefined;
   const search = params.q || undefined;
 
-  const [{ products, totalPages }, categories, pricingConfig] =
+  const [{ products, totalPages, total }, categories, pricingConfig] =
     await Promise.all([
       getProducts({ page, categorySlug, search }),
       getCategories(),
       getPricingConfig(),
     ]);
 
+  const activeCategoryName = categories.find(
+    (c) => c.slug === categorySlug
+  )?.name;
+
   return (
-    <div className="mx-auto max-w-6xl px-6 py-12">
+    <div className="mx-auto max-w-6xl px-6 py-14 sm:py-16">
       <header className="max-w-2xl">
-        <h1 className="text-4xl font-black tracking-tight text-foreground">
+        <h1 className="text-5xl font-black tracking-tight text-foreground">
           Catalogo
         </h1>
-        <p className="mt-2 text-foreground/70">
+        <p className="mt-3 text-foreground/70">
           Merch corporativo para personalizar con el logo de tu empresa.
         </p>
       </header>
 
-      <div className="mt-8">
+      <div className="mt-10">
         <SearchInput
           basePath="/catalogo"
           initialValue={search}
@@ -42,13 +46,19 @@ export default async function CatalogoPage({
         />
       </div>
 
-      <div className="mt-6">
+      <div className="mt-4">
         <CategoryFilter
           categories={categories}
           activeSlug={categorySlug}
           search={search}
         />
       </div>
+
+      <p className="mt-6 text-sm text-foreground/50">
+        {total} {total === 1 ? "producto" : "productos"}
+        {activeCategoryName ? ` en ${activeCategoryName}` : ""}
+        {search ? ` para "${search}"` : ""}
+      </p>
 
       {products.length === 0 ? (
         <p className="mt-16 text-foreground/60">
@@ -57,7 +67,7 @@ export default async function CatalogoPage({
             : "No hay productos en esta categoria."}
         </p>
       ) : (
-        <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4">
           {products.map((product) => (
             <ProductCard
               key={product.id}
@@ -72,7 +82,7 @@ export default async function CatalogoPage({
         </div>
       )}
 
-      <div className="mt-16">
+      <div className="mt-20">
         <Pagination
           currentPage={page}
           totalPages={totalPages}

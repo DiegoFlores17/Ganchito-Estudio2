@@ -27,6 +27,12 @@ export default async function AdminPanelLayout({
               >
                 Cotizaciones
               </Link>
+              <Link
+                href="/admin/productos"
+                className="text-sm text-foreground/70 transition-colors hover:text-primary"
+              >
+                Productos
+              </Link>
               {isSuperAdmin && (
                 <>
                   <Link

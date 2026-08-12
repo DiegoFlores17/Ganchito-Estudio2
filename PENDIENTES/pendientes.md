@@ -58,3 +58,30 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 - [ ] **Margen por producto** que pise el global (el schema ya está preparado, sin
       implementar).
 - [ ] Mercado Pago / pago online (por ahora solo cotización).
+
+## Multi-proveedor (cuando aparezca un segundo proveedor real)
+
+- [ ] **Construir el sistema de conectores genérico + la gestión de proveedores
+      con API.** La tabla `Supplier` ya quedó plantada en el schema (vacía, sin
+      lógica) para reservar la estructura. El día que haya un segundo proveedor
+      real: escribir su conector siguiendo el patrón del de Zecat, refactorizar
+      el conector de Zecat para que ambos sigan el mismo contrato, y construir la
+      pantalla de admin para cargar proveedor + API key. NO se construye antes de
+      tener un caso concreto (diseñar en abstracto lleva a rehacer).
+
+      - [ ] **Sincronizar dos listas de acceso al panel al sumar/sacar admins:** los
+      "Test users" en Google Cloud Console Y la tabla `AdminUser`. Alguien tiene
+      que estar en las dos para entrar. Al agregar o sacar gente, acordarse de ambas.
+- [ ] **Sacar la app OAuth de Google del modo "Testing" si el equipo crece:** en
+      Testing hay límite de usuarios de prueba. Para el equipo chico actual alcanza,
+      pero si suma mucha gente, evaluar publicar la app.
+- [ ] **Agregar la URL de producción a Google Cloud Console:** hoy solo está
+      `localhost:3000` en los orígenes y redirect URIs. Al deployar, sumar el
+      dominio real (y el redirect `/api/auth/callback/google` de producción).
+
+
+      - [ ] **Migrar `src/lib/storage.ts` a Vercel Blob antes de deployar.** Ahora
+      `storage.ts` maneja DOS cosas: los logos de las cotizaciones Y las imágenes
+      de los productos manuales. Los dos usos se rompen en Vercel (filesystem
+      efímero). Un solo punto de cambio (`saveUploadedFile()`), pero afecta a los
+      dos flujos — verificar ambos después de migrar.

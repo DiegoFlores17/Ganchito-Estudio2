@@ -35,15 +35,34 @@ API), carga manual, y futuros proveedores.
   (ZECAT / MANUAL / OTHER). Ese campo es la solución al problema central del proyecto.
 - Todos los productos de Zecat se muestran (no hay lógica de ocultar productos puntuales).
 
-### Precios
-- Se guarda **solo el costo** (`costPrice`, lo que devuelve la API de Zecat).
-- El precio de venta se **calcula**: `costo * (1 + margen)`. NO se guarda hardcodeado.
-- El **margen es fijo y global**, y vive en la tabla `PricingConfig` (una sola fila),
-  para poder cambiarlo sin tocar código ni re-sincronizar.
-- El **IVA va siempre aparte**, nunca embebido en el precio base. Se calcula/muestra
-  por separado. (La página actual muestra "$ X + IVA".)
-- Zecat puede devolver costos en ARS o USD (`currency`). Normalizar USD→ARS con el
-  `usdToArsRate` de `PricingConfig`.
+### Precios (MODELO DEFINITIVO — validado contra datos reales)
+- El conector guarda el precio de Zecat (`price` / `unit_price`) como COSTO base,
+  en el campo `costPrice`. Ese valor es nuestro costo, NO el precio de venta.
+  (Validado: `price`/`unit_price` es el candidato correcto; NO usar `total_price`
+  ni nada pegado a los campos `*_profit_percentage`, que ya traen margen de Zecat.)
+- El precio de venta se CALCULA: `costPrice × (1 + defaultMarginPercent/100)`.
+- **Margen global editable:** vive en `PricingConfig` como `defaultMarginPercent`.
+  Valor inicial: **45** (o sea, precio de Zecat × 1.45). Se edita desde el panel admin,
+  sin tocar código ni re-sincronizar.
+- El **IVA va siempre aparte**, nunca embebido en el precio. Se suma encima del precio
+  de venta al hacer el pedido (como la página actual: "$ X + IVA"). Vive en
+  `PricingConfig` como `vatRate`.
+- **Diseño preparado** para, a futuro, permitir un margen por producto que pise el
+  global. Por ahora NO implementado: solo margen global.
+- Nota: los precios con 45% quedarán más altos que los de la web actual de Ganchito
+  (que hoy usa ~20% en varios productos). Es una decisión de negocio buscada, no un bug.
+
+### Currency (dato sucio de Zecat — manejar con cuidado)
+- El campo `currency` de Zecat viene poco confiable: devuelve "USD" en productos que
+  son claramente ARS (ej: un valor de ~218.000 marcado USD que en realidad es ARS).
+- Por ahora: **ignorar `currency` y asumir siempre ARS.** NO aplicar conversión.
+- Pero **loguear un warning** (con id y nombre del producto) cada vez que venga "USD",
+  para tener la lista de casos a revisar manualmente.
+
+### Ofertas / SALE
+- Los productos en SALE ya traen el descuento aplicado dentro del `price` de Zecat.
+- Por ahora entran con el precio ya rebajado (correcto). Pendiente a futuro: si se
+  quiere mostrar "precio tachado" original, hay que resolverlo aparte.
 
 ### Personalización
 - Los productos se venden con el logo del cliente, PERO las imágenes de Zecat no se
@@ -64,27 +83,41 @@ API), carga manual, y futuros proveedores.
 
 - API REST 2.0, **solo lectura**, autenticada con **Bearer token por partner** en el
   header `Authorization`. El token va en `ZECAT_API_TOKEN` (.env), solo backend, NUNCA
-  en el frontend ni en el repo.
+  en el frontend ni en el repo. La URL base va en `ZECAT_API_URL`.
 - Producción: `https://api.zecat.com/v1/` — Pruebas: `https://api-preprod.zecat.com/v1/`
 - Endpoints clave:
   - `GET /generic_product?page=1&limit=25` — listado paginado (~378 productos, ~19 páginas)
   - `GET /generic_product/{id}` — detalle de un producto
   - `GET /family/` — familias (categorías)
+- **OJO — el detalle viene envuelto:** `GET /generic_product/{id}` devuelve la respuesta
+  dentro de `{ "generic_product": {...} }`, NO plana. Hay que desenvolverla.
 - **No hay webhooks:** la sincronización es por polling (un job periódico), no tiempo real.
-- Stock real = `stock - reservedStock`. Nunca mostrar el stock bruto.
+- **Stock real = `stock - reservedStock`.** Nunca mostrar el stock bruto. Además, `stock`
+  y `reservedStock` vienen como STRING: parsear a Int con validación (nunca dejar NaN,
+  caer a 0 si viene vacío o no numérico).
 - El conector hace **upsert** usando `zecatId` (producto) y `sku` (variante) como claves
   únicas, para no duplicar en cada corrida.
-- La documentación completa de la API está en el PDF que te voy a pasar cuando trabajemos
-  el conector.
+- El nombre y la descripción del producto son campos SEPARADOS en la API (no el mismo).
+- Variantes: usar el objeto `variants` (colors/sizes) como fuente de verdad, no el array
+  `products[]` paralelo.
+- Imágenes: como no guardamos el id de imagen de Zecat, en cada sync se borran y recrean
+  las imágenes del producto (scoped a ese producto, dentro de la transacción del upsert).
+- Cada producto se procesa en su propia transacción; si uno falla, no frena a los demás
+  y no queda a medio escribir.
+- La documentación completa de la API está en el PDF del proyecto (carpeta docs).
 
 ## Referencia de diseño
 
 - Referencia de estructura y flujo (NO copiar el look): lamercheria.com.ar — hero potente,
   categorías claras, fotos de producto grandes, y un proceso explicado en pasos
   (Explorá → Personalizá → Revisamos → Listo). Ese flujo coincide con el nuestro.
-- **Identidad visual propia de Ganchito:** paleta violeta + amarillo, isotipo de un clip
-  ("ganchito"). El diseño debe ser inconfundiblemente Ganchito, no un clon en blanco y
-  negro de la referencia.
+- **Identidad visual propia de Ganchito** (ver DISENO.md para el detalle completo):
+  - Vibra minimalista y editorial. Violeta PROTAGONISTA, amarillo de ACENTO.
+  - Paleta: `440670` (indigo/violeta oscuro), `750098` (violeta principal), `C744F2`
+    (violeta claro/hover), `FFF835` y `FFD91F` (amarillos de acento).
+  - Tipografía: **Montserrat** en toda la tienda (Black/900 para titulares del hero).
+  - Isotipo: el clip ("ganchito"). Logo y colores reales en la carpeta de marca del proyecto.
+  - Hero grande e impactante. NO clonar el blanco y negro de la referencia.
 
 ## Seguridad (siempre)
 
@@ -92,12 +125,7 @@ API), carga manual, y futuros proveedores.
   DATABASE_URL.
 - El token de Zecat se usa exclusivamente en el backend (API routes / scripts de sync).
 
-<!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## Minimo de compra 
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+- [] Marcar en el detalle de la cotización (panel admin) cuando un producto está por debajo de su minOrderQuantity, para detectarlo al revisar.

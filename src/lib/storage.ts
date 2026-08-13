@@ -1,20 +1,10 @@
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
 import { randomUUID } from "crypto";
-
-// Storage LOCAL para desarrollo unicamente. El filesystem de las funciones
-// serverless de Vercel es efimero (no persiste entre requests/deploys), asi
-// que esto NO sirve en produccion. Antes de deployar hay que migrar
-// saveUploadedFile() a Vercel Blob — es el unico punto que hay que tocar
-// (ver PENDIENTES.md). Esto afecta DOS flujos que comparten esta funcion:
-// logos de cotizacion y fotos de producto — verificar los dos al migrar.
-const UPLOADS_ROOT = path.join(process.cwd(), "uploads");
+import { put } from "@vercel/blob";
 
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
 
 /// Logos/arte de cotizacion: contenido de CLIENTES no confiables, puede
-/// traer cualquier formato de arte. Se sirven siempre como descarga forzada
-/// (ver route handler) — un SVG puede traer script embebido.
+/// traer cualquier formato de arte.
 export const QUOTE_LOGO_EXTENSIONS = new Set([
   "png",
   "jpg",
@@ -31,6 +21,22 @@ export const QUOTE_LOGO_EXTENSIONS = new Set([
 /// inline con seguridad (un raster no puede traer script embebido).
 export const PRODUCT_IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp"]);
 
+/// La regla real de inline vs. descarga es por EXTENSION, no por origen del
+/// archivo: un raster (png/jpg/jpeg/webp) nunca puede traer script embebido,
+/// asi que es seguro mostrarlo inline sin importar si vino de un logo de
+/// cotizacion o de una foto de producto. Todo lo demas (pdf/svg/ai/eps) se
+/// sirve como descarga forzada — un SVG SI puede traer <script>.
+const CONTENT_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  svg: "image/svg+xml",
+  ai: "application/postscript",
+  eps: "application/postscript",
+};
+
 export class UploadValidationError extends Error {}
 
 function getExtension(filename: string): string {
@@ -38,10 +44,10 @@ function getExtension(filename: string): string {
 }
 
 /// Guarda un archivo subido TAL CUAL (sin parsear ni procesar el
-/// contenido) con un nombre generado (nunca el nombre original del
-/// cliente) y devuelve la URL para servirlo. Que se sirva inline o como
-/// descarga forzada lo decide el route handler de /api/uploads segun la
-/// extension, no esta funcion.
+/// contenido) en Vercel Blob, con un nombre generado (nunca el nombre
+/// original del cliente), y devuelve la URL para servirlo. Blob resuelve
+/// inline vs. descarga forzada el mismo (ver CONTENT_TYPES / downloadUrl),
+/// no hace falta un route handler propio.
 export async function saveUploadedFile(
   file: File,
   { subdir, allowedExtensions }: { subdir: string; allowedExtensions: Set<string> }
@@ -59,11 +65,11 @@ export async function saveUploadedFile(
   }
 
   const filename = `${randomUUID()}.${extension}`;
-  const dir = path.join(UPLOADS_ROOT, subdir);
-  await mkdir(dir, { recursive: true });
+  const blob = await put(`${subdir}/${filename}`, file, {
+    access: "public",
+    addRandomSuffix: false,
+    contentType: CONTENT_TYPES[extension],
+  });
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(dir, filename), buffer);
-
-  return `/api/uploads/${subdir}/${filename}`;
+  return PRODUCT_IMAGE_EXTENSIONS.has(extension) ? blob.url : blob.downloadUrl;
 }

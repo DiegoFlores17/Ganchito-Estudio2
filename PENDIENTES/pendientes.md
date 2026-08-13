@@ -46,13 +46,24 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Deploy (etapa final)
 
-- [ ] **Migrar `src/lib/storage.ts` a Vercel Blob antes de deployar.** Hoy los
-      logos de las cotizaciones se guardan en disco local (`uploads/`, gitignored) —
-      funciona en local pero el filesystem de las funciones serverless de Vercel
-      es efímero, no persiste. Es un solo punto de cambio: la función
-      `saveUploadedFile()`. La route handler que sirve los archivos
-      (`/api/uploads/[...path]`) también hay que reemplazarla por las URLs que
-      devuelve Blob directamente.
+- [x] **Migrar `src/lib/storage.ts` a Vercel Blob.** Resuelto — `saveUploadedFile()`
+      usa `put()` de `@vercel/blob` (`access: "public"`). La route handler
+      `/api/uploads/[...path]` se eliminó (Blob sirve los archivos directo desde
+      su propio dominio). Inline vs. descarga sigue siendo por extensión, no por
+      origen del archivo: raster (png/jpg/jpeg/webp) devuelve la `url` normal
+      (inline), todo lo demás (pdf/svg/ai/eps) devuelve la `downloadUrl` de Blob
+      (fuerza descarga). Cubre los dos usos: logos de cotización y fotos de
+      producto manual.
+- [ ] **Evaluar URLs firmadas (`access: "private"`) para los logos que suben los
+      clientes.** Hoy son URLs públicas no adivinables (mismo nivel de seguridad
+      que tenía el filesystem local) — si algún cliente sube arte confidencial,
+      conviene revisarlo.
+- [ ] **Archivos huérfanos en Blob.** Cuando se borra una imagen de producto
+      desde el admin, hoy solo se borra la fila `ProductImage` — el archivo en
+      Blob queda huérfano (esto ya pasaba con el filesystem local, no es nuevo).
+      La diferencia es que en Blob el almacenamiento tiene costo asociado, a
+      diferencia del filesystem local. Evaluar borrar el blob con `del()` al
+      borrar la imagen.
 - [ ] **Automatizar el sync con cron** (Vercel Cron), cada 3-6 hs, para la
       actualización semi-en-vivo. Hoy se corre a mano con `npm run sync:zecat`.
 - [ ] Configurar base de producción (Neon o Supabase) y variables de entorno en Vercel.
@@ -91,13 +102,6 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 - [ ] **Agregar la URL de producción a Google Cloud Console:** hoy solo está
       `localhost:3000` en los orígenes y redirect URIs. Al deployar, sumar el
       dominio real (y el redirect `/api/auth/callback/google` de producción).
-
-
-      - [ ] **Migrar `src/lib/storage.ts` a Vercel Blob antes de deployar.** Ahora
-      `storage.ts` maneja DOS cosas: los logos de las cotizaciones Y las imágenes
-      de los productos manuales. Los dos usos se rompen en Vercel (filesystem
-      efímero). Un solo punto de cambio (`saveUploadedFile()`), pero afecta a los
-      dos flujos — verificar ambos después de migrar.
 
 ## Margen Personalizado para cada producto 
 

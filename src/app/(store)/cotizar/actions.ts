@@ -27,6 +27,10 @@ export interface QuoteItemSummary {
   subtotal: number;
   subtotalLabel: string;
   inStock: boolean;
+  /** Minimo de personalizacion del proveedor, a nivel PRODUCTO (no por
+   * variante) — para agrupar y avisar en /cotizar si la suma de lineas de
+   * este producto no lo alcanza. */
+  minOrderQuantity: number | null;
 }
 
 /// Resumen de los items del borrador para mostrar en /cotizar. Recalcula
@@ -86,6 +90,7 @@ export async function getQuoteItemsSummary(
       subtotal,
       subtotalLabel: formatPriceArs(subtotal),
       inStock: variant ? variant.stock - variant.reservedStock > 0 : true,
+      minOrderQuantity: product.minOrderQuantity,
     });
   }
 

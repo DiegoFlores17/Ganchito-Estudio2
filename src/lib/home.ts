@@ -5,36 +5,42 @@ import { prisma } from "@/lib/prisma";
 /// son las de mayor volumen que NO son campanas ni ofertas temporales
 /// ("2026 Agro", "70%OFF...", "Proximos Arribos", etc). El producto de cada
 /// una se eligio a mano por su foto (ver conversacion), no es automatico.
+///
+/// Se referencia por zecatId (el id externo de la API de Zecat), NUNCA por
+/// Product.id: el cuid interno de Prisma lo genera cada base al crear la
+/// fila, asi que es DISTINTO entre local y produccion aunque sea "el mismo"
+/// producto. zecatId en cambio viene de la fuente y es igual en cualquier
+/// entorno sincronizado.
 const HOME_CATEGORY_PICKS = [
   {
     name: "Bolsos y Mochilas",
     slug: "bolsos-y-mochilas-corporativas",
-    representativeProductId: "cmshyfesy08b37lsxkenafazc",
+    zecatId: "5190", // Bolso Expand
   },
   {
     name: "Drinkware",
     slug: "termos-corporativos-y-drinkware",
-    representativeProductId: "cmshyi8d00etb7lsxoukki46e",
+    zecatId: "5742", // Botella Calypso
   },
   {
     name: "Indumentaria",
     slug: "Abrigos",
-    representativeProductId: "cmshyhy9e0duq7lsxjqxs94iu",
+    zecatId: "5704", // Campera Stream Men
   },
   {
     name: "Tecnologia",
     slug: "regalos-tecnologicos-corporativos",
-    representativeProductId: "cmshyffme08de7lsxfqelrobt",
+    zecatId: "5194", // Auriculares Tempo
   },
   {
     name: "Escritura",
     slug: "boligrafos-corporativos",
-    representativeProductId: "cmshyexbl074j7lsxaa7ja3qn",
+    zecatId: "5046", // Boligrafo COSMIC
   },
   {
     name: "Viajes",
     slug: "viajes",
-    representativeProductId: "cmshyfoyq09ae7lsxkxph9i6a",
+    zecatId: "5268", // Mochila FLIGHT
   },
 ] as const;
 
@@ -47,18 +53,20 @@ export interface HomeCategoryTile {
 export async function getHomeCategoryShowcase(): Promise<HomeCategoryTile[]> {
   const products = await prisma.product.findMany({
     where: {
-      id: { in: HOME_CATEGORY_PICKS.map((p) => p.representativeProductId) },
+      zecatId: { in: HOME_CATEGORY_PICKS.map((p) => p.zecatId) },
     },
     select: {
-      id: true,
+      zecatId: true,
       images: { where: { isMain: true }, take: 1, select: { url: true } },
     },
   });
-  const imageById = new Map(products.map((p) => [p.id, p.images[0]?.url ?? null]));
+  const imageByZecatId = new Map(
+    products.map((p) => [p.zecatId, p.images[0]?.url ?? null])
+  );
 
   return HOME_CATEGORY_PICKS.map((pick) => ({
     name: pick.name,
     slug: pick.slug,
-    imageUrl: imageById.get(pick.representativeProductId) ?? null,
+    imageUrl: imageByZecatId.get(pick.zecatId) ?? null,
   }));
 }

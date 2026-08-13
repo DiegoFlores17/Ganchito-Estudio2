@@ -255,8 +255,10 @@ export function ProductForm({
           className="mt-3 text-sm text-foreground/70 file:mr-4 file:rounded-full file:border-0 file:bg-foreground/5 file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-foreground/10"
         />
         <p className="mt-1 text-xs text-foreground/50">
-          PNG, JPG o WEBP. La primera foto que subas (si el producto no
-          tiene ninguna todavia) queda como foto principal.
+          Imagen cuadrada, idealmente 1200x1200 px, fondo blanco o neutro. Se
+          optimiza automaticamente. PNG, JPG o WEBP, hasta 5 MB. La primera
+          foto que subas (si el producto no tiene ninguna todavia) queda como
+          foto principal.
         </p>
       </div>
 

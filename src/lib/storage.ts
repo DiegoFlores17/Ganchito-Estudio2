@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { put } from "@vercel/blob";
+import sharp from "sharp";
 
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
 
@@ -72,4 +73,65 @@ export async function saveUploadedFile(
   });
 
   return PRODUCT_IMAGE_EXTENSIONS.has(extension) ? blob.url : blob.downloadUrl;
+}
+
+// Las fotos de producto SI se procesan antes de guardar, a diferencia de los
+// logos de cotizacion (que se guardan tal cual: son arte del cliente y
+// degradarlo seria perder informacion que no es nuestra). Por eso el limite
+// de entrada es mas bajo: 5MB alcanza para una foto de celular, y el archivo
+// que termina en Blob pesa mucho menos que eso igual.
+const PRODUCT_IMAGE_MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+const PRODUCT_IMAGE_MAX_DIMENSION = 1200;
+const PRODUCT_IMAGE_WEBP_QUALITY = 80;
+
+/// Optimiza y guarda una foto de producto: la redimensiona a 1200x1200 como
+/// maximo y la convierte a WebP. Se guarda SOLO el resultado, nunca el
+/// original. Devuelve la URL directa de Blob (WebP es raster: se sirve
+/// inline sin riesgo, ver la nota de CONTENT_TYPES arriba).
+export async function saveProductImage(file: File): Promise<string> {
+  const extension = getExtension(file.name);
+  if (!PRODUCT_IMAGE_EXTENSIONS.has(extension)) {
+    throw new UploadValidationError(
+      `Formato no permitido${extension ? ` (.${extension})` : ""}. Aceptamos: ${[...PRODUCT_IMAGE_EXTENSIONS].join(", ")}.`
+    );
+  }
+  if (file.size > PRODUCT_IMAGE_MAX_SIZE_BYTES) {
+    throw new UploadValidationError(
+      "La imagen supera el tamaño maximo permitido (5MB)."
+    );
+  }
+
+  let optimized: Buffer;
+  try {
+    optimized = await sharp(Buffer.from(await file.arrayBuffer()))
+      .resize(PRODUCT_IMAGE_MAX_DIMENSION, PRODUCT_IMAGE_MAX_DIMENSION, {
+        fit: "contain",
+        // Las fotos que no son cuadradas se completan con blanco, no se
+        // recortan: recortar es destructivo y, como no guardamos el
+        // original, un recorte que corta el producto no se puede deshacer.
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
+        // Nunca agrandar. Una foto mas chica que 1200 se centra en el lienzo
+        // a su tamaño real en vez de estirarse y quedar borrosa; el lienzo
+        // igual sale 1200x1200, asi la grilla del catalogo queda pareja.
+        withoutEnlargement: true,
+      })
+      .webp({ quality: PRODUCT_IMAGE_WEBP_QUALITY })
+      .toBuffer();
+  } catch {
+    // sharp falla si el archivo no es una imagen real aunque la extension
+    // diga que si — es una validacion de CONTENIDO que antes no teniamos.
+    throw new UploadValidationError(
+      "No pudimos procesar la imagen. Verifica que sea un archivo de imagen valido."
+    );
+  }
+
+  // Siempre .webp: la conversion es parte del procesamiento, la extension de
+  // entrada ya no describe el archivo que se guarda.
+  const blob = await put(`products/${randomUUID()}.webp`, optimized, {
+    access: "public",
+    addRandomSuffix: false,
+    contentType: CONTENT_TYPES.webp,
+  });
+
+  return blob.url;
 }

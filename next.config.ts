@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // sharp tiene binarios nativos (libvips): si el bundler intenta
+  // empaquetarlo, el binario se rompe. Se deja fuera del bundle y se carga
+  // como dependencia normal de Node en el servidor.
+  serverExternalPackages: ["sharp"],
   images: {
     // Hosts reales de las imagenes de producto sincronizadas desde Zecat.
     remotePatterns: [

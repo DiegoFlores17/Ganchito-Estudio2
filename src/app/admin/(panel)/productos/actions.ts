@@ -5,11 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
-import {
-  PRODUCT_IMAGE_EXTENSIONS,
-  saveUploadedFile,
-  UploadValidationError,
-} from "@/lib/storage";
+import { saveProductImage, UploadValidationError } from "@/lib/storage";
 
 export interface ProductActionResult {
   success: boolean;
@@ -114,11 +110,7 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
   const savedImageUrls: string[] = [];
   for (const file of newImageFiles) {
     try {
-      const url = await saveUploadedFile(file, {
-        subdir: "products",
-        allowedExtensions: PRODUCT_IMAGE_EXTENSIONS,
-      });
-      savedImageUrls.push(url);
+      savedImageUrls.push(await saveProductImage(file));
     } catch (error) {
       if (error instanceof UploadValidationError) {
         return { success: false, error: error.message };

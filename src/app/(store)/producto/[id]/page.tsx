@@ -9,10 +9,13 @@ import { formatPriceArs } from "@/lib/format";
 
 export default async function ProductoPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ desde?: string }>;
 }) {
   const { id } = await params;
+  const { desde } = await searchParams;
 
   const [product, pricingConfig] = await Promise.all([
     getProductById(id),
@@ -26,12 +29,24 @@ export default async function ProductoPage({
     pricingConfig.defaultMarginPercent
   );
 
+  // "desde" trae la pagina/categoria/busqueda que tenia el catalogo cuando
+  // el cliente entro a este producto (ver ProductCard) — asi "volver" no
+  // lo manda a un catalogo vacio de filtros.
+  const backToCatalogHref = desde ? `/catalogo?${desde}` : "/catalogo";
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-12">
+      <Link
+        href={backToCatalogHref}
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground/60 transition-colors hover:text-primary"
+      >
+        ← Volver al catalogo
+      </Link>
+
       {product.category && (
         <Link
           href={`/catalogo?categoria=${product.category.slug}`}
-          className="text-sm font-medium text-foreground/60 transition-colors hover:text-primary"
+          className="mt-3 block text-sm font-medium text-foreground/60 transition-colors hover:text-primary"
         >
           {product.category.name}
         </Link>

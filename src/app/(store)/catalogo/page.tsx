@@ -26,6 +26,16 @@ export default async function CatalogoPage({
     (c) => c.slug === categorySlug
   )?.name;
 
+  // Se pasa a cada ProductCard para que la ficha de producto pueda armar
+  // un "volver al catalogo" que preserve pagina/categoria/busqueda.
+  const catalogQueryParams = new URLSearchParams();
+  if (categorySlug) catalogQueryParams.set("categoria", categorySlug);
+  if (search) catalogQueryParams.set("q", search);
+  if (page > 1) catalogQueryParams.set("page", String(page));
+  const catalogQuery = catalogQueryParams.size
+    ? catalogQueryParams.toString()
+    : undefined;
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-14 sm:py-16">
       <header className="max-w-2xl">
@@ -77,6 +87,7 @@ export default async function CatalogoPage({
                 pricingConfig.defaultMarginPercent
               )}
               inStock={hasAvailableStock(product.variants)}
+              catalogQuery={catalogQuery}
             />
           ))}
         </div>

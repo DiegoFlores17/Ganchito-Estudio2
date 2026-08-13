@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { CartIndicator } from "./cart-indicator";
 import { MobileNav } from "./mobile-nav";
 
 const NAV_LINKS = [
@@ -41,7 +42,10 @@ export function Header() {
           Pedi tu cotizacion
         </Link>
 
-        <MobileNav navLinks={NAV_LINKS} />
+        <div className="flex items-center gap-1">
+          <CartIndicator />
+          <MobileNav navLinks={NAV_LINKS} />
+        </div>
       </div>
     </header>
   );

@@ -11,6 +11,12 @@ export interface QuoteCartItem {
 
 const STORAGE_KEY = "ganchito:cotizacion";
 
+// localStorage no dispara su evento "storage" en la misma pestana que hizo
+// el cambio (solo en las otras pestanas abiertas). El header necesita
+// enterarse en la MISMA pestana cuando se agrega/saca un item, asi que
+// disparamos este evento propio en cada escritura.
+export const QUOTE_CART_EVENT = "ganchito:quote-cart-updated";
+
 function readRaw(): QuoteCartItem[] {
   if (typeof window === "undefined") return [];
   try {
@@ -26,6 +32,7 @@ function readRaw(): QuoteCartItem[] {
 function writeRaw(items: QuoteCartItem[]): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  window.dispatchEvent(new Event(QUOTE_CART_EVENT));
 }
 
 export function getQuoteCart(): QuoteCartItem[] {

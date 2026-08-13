@@ -14,15 +14,22 @@ export function ProductCard({
   product,
   sellPrice,
   inStock,
+  catalogQuery,
 }: {
   product: ProductCardData;
   sellPrice: Prisma.Decimal;
   inStock: boolean;
+  /** Query string del catalogo actual (pagina/categoria/busqueda), para que
+   * la ficha de producto pueda ofrecer un "volver" que preserve el filtro. */
+  catalogQuery?: string;
 }) {
   const image = product.images[0];
+  const params = new URLSearchParams();
+  if (catalogQuery) params.set("desde", catalogQuery);
+  const href = `/producto/${product.id}${params.size ? `?${params}` : ""}`;
 
   return (
-    <Link href={`/producto/${product.id}`} className="group flex flex-col gap-4">
+    <Link href={href} className="group flex flex-col gap-4">
       <div className="relative aspect-square overflow-hidden rounded-xl border border-foreground/[0.06] bg-foreground/[0.03] transition-shadow duration-300 group-hover:shadow-lg group-hover:shadow-foreground/10">
         {image ? (
           <Image

@@ -43,3 +43,6 @@ next-env.d.ts
 
 # archivos subidos por clientes (storage local de desarrollo, ver PENDIENTES.md)
 /uploads/
+
+# configuracion local de Claude Code (sesion/permisos de esta maquina, no del proyecto)
+/.claude/

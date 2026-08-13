@@ -83,6 +83,21 @@ export async function getProducts({
   };
 }
 
+/// Productos destacados para la home. Sin flag "featured" en el modelo
+/// (ver PENDIENTES.md): por ahora se toman los ultimos sincronizados con
+/// foto principal, que es el criterio mas simple sin agregar campos nuevos.
+export async function getFeaturedProducts(take: number) {
+  return prisma.product.findMany({
+    where: { active: true, images: { some: { isMain: true } } },
+    orderBy: { lastSyncedAt: "desc" },
+    take,
+    include: {
+      images: { where: { isMain: true }, take: 1 },
+      variants: { select: { stock: true, reservedStock: true } },
+    },
+  });
+}
+
 /// Stock real = stock - reservedStock por variante (nunca el bruto). El
 /// producto tiene disponibilidad si ALGUNA variante tiene stock real > 0.
 export function hasAvailableStock(

@@ -61,6 +61,11 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Funcionalidad futura (post primer release)
 
+- [ ] **Flag `featured` en `Product`.** Hoy los "Productos destacados" de la
+      home (`getFeaturedProducts` en `src/lib/catalog.ts`) muestran los
+      últimos sincronizados con foto — sirve para arrancar, pero depende del
+      orden del sync, no de una elección real. Agregar un booleano editable
+      desde el admin para elegir a mano qué se destaca.
 - [ ] **Panel de administración:** editar `defaultMarginPercent`, cargar productos
       manuales, sumar otros proveedores. (Va después del circuito cliente completo.)
 - [ ] **Margen por producto** que pise el global (el schema ya está preparado, sin
@@ -113,3 +118,12 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       una. Ocultar campañas y duplicados de oferta, dejar las reales. Los
       productos de categorías ocultas siguen apareciendo en el catálogo (un
       producto está en varias categorías); solo se saca la categoría como filtro.
+
+## Minimo de compra 
+
+- [] Marcar en el detalle de la cotización (panel admin) cuando un producto está por debajo de su minOrderQuantity, para detectarlo al revisar.
+
+- [ ] **Header: el botón/link de "Catálogo" queda muy lejos o poco accesible.**
+      Revisar la jerarquía y el espaciado de la navegación (sidebar/topbar) para
+      que llegar al catálogo sea inmediato — es la acción más frecuente del
+      cliente. Evaluar en contexto de la Home terminada.

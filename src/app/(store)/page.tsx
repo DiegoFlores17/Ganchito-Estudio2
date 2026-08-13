@@ -1,118 +1,171 @@
-const SWATCHES = [
+import Image from "next/image";
+import Link from "next/link";
+import { ProductCard } from "@/components/catalog/product-card";
+import { getFeaturedProducts, hasAvailableStock } from "@/lib/catalog";
+import { WHATSAPP_URL } from "@/lib/contact";
+import { getHomeCategoryShowcase } from "@/lib/home";
+import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+
+const FEATURED_PRODUCTS_COUNT = 8;
+
+const PROCESS_STEPS = [
   {
-    name: "Indigo",
-    hex: "#440670",
-    role: "Fondos de bloque: hero, footer",
+    number: "01",
+    title: "Explora",
+    description:
+      "Recorre el catalogo y elegi los productos que representan a tu empresa.",
   },
   {
-    name: "Mauveine",
-    hex: "#750098",
-    role: "Protagonista: titulos, elementos de marca",
+    number: "02",
+    title: "Personaliza",
+    description:
+      "Suma tu logo, elegi color, talle y las cantidades que necesitas.",
   },
   {
-    name: "Phlox",
-    hex: "#C744F2",
-    role: "Hovers, detalles, estados activos",
+    number: "03",
+    title: "Revisamos",
+    description:
+      "Te mandamos un boceto y el precio final antes de que confirmes nada.",
   },
   {
-    name: "Yellow",
-    hex: "#FFF835",
-    role: "Acento: CTAs y highlights",
-  },
-  {
-    name: "School bus yellow",
-    hex: "#FFD91F",
-    role: "Acento secundario / hover del amarillo",
+    number: "04",
+    title: "Listo",
+    description: "Con tu aprobacion, coordinamos produccion y entrega.",
   },
 ];
 
-export default function Home() {
-  return (
-    <div className="mx-auto max-w-6xl px-6 py-16">
-      <p className="text-sm font-medium text-primary">
-        Pagina de prueba temporal — se reemplaza cuando construyamos el home real
-      </p>
-      <h1 className="mt-2 text-4xl font-black tracking-tight text-foreground">
-        Sistema de diseno
-      </h1>
-      <p className="mt-2 max-w-xl text-foreground/70">
-        Paleta de marca y tipografia aplicadas, para validar antes de maquetar
-        las paginas reales.
-      </p>
+export default async function HomePage() {
+  const [categories, featuredProducts, pricingConfig] = await Promise.all([
+    getHomeCategoryShowcase(),
+    getFeaturedProducts(FEATURED_PRODUCTS_COUNT),
+    getPricingConfig(),
+  ]);
 
-      <section className="mt-16">
-        <h2 className="text-2xl font-medium text-foreground">Paleta</h2>
-        <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
-          {SWATCHES.map((swatch) => (
-            <div key={swatch.hex} className="flex flex-col gap-2">
-              <div
-                className="h-24 w-full rounded-lg"
-                style={{ backgroundColor: swatch.hex }}
-              />
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  {swatch.name}
-                </p>
-                <p className="text-xs text-foreground/60">{swatch.hex}</p>
-                <p className="mt-1 text-xs text-foreground/50">
-                  {swatch.role}
-                </p>
+  return (
+    <div>
+      <section className="bg-primary-dark">
+        <div className="mx-auto max-w-6xl px-6 py-24 sm:py-32">
+          <h1 className="max-w-2xl text-5xl font-black tracking-tight text-white sm:text-6xl">
+            Merch corporativo con el logo de tu empresa
+          </h1>
+          <p className="mt-6 max-w-xl text-lg text-white/70">
+            Elegis los productos del catalogo, nosotros los personalizamos con
+            tu logo y te mandamos la cotizacion. Asi de simple.
+          </p>
+          <div className="mt-10 flex flex-wrap gap-4">
+            <Link
+              href="/catalogo"
+              className="rounded-full bg-accent px-7 py-3.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
+            >
+              Ver catalogo
+            </Link>
+            <a
+              href={WHATSAPP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-white/30 px-7 py-3.5 text-sm font-medium text-white transition-colors hover:border-white hover:bg-white/5"
+            >
+              Contacto
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+        <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
+          Explora por categoria
+        </h2>
+        <div className="mt-10 grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+          {categories.map((category) => (
+            <Link
+              key={category.slug}
+              href={`/catalogo?categoria=${category.slug}`}
+              className="group flex flex-col gap-4"
+            >
+              <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-foreground/[0.06] bg-foreground/[0.03]">
+                {category.imageUrl && (
+                  <Image
+                    src={category.imageUrl}
+                    alt={category.name}
+                    fill
+                    sizes="(min-width: 1024px) 30vw, (min-width: 640px) 45vw, 90vw"
+                    className="object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                  />
+                )}
               </div>
-            </div>
+              <p className="text-lg font-medium text-foreground transition-colors group-hover:text-primary-light">
+                {category.name}
+              </p>
+            </Link>
           ))}
         </div>
       </section>
 
-      <section className="mt-16">
-        <h2 className="text-2xl font-medium text-foreground">Tipografia</h2>
-        <p className="mt-1 text-sm text-foreground/60">Montserrat</p>
-
-        <div className="mt-6 flex flex-col gap-6">
-          <div>
-            <p className="text-xs text-foreground/50">Black 900 — display</p>
-            <p className="text-5xl font-black tracking-tight text-foreground">
-              Merch corporativo con tu logo
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-foreground/50">Medium 500 — h2</p>
-            <p className="text-2xl font-medium text-foreground">
-              Explora, personaliza y pedi tu cotizacion
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-foreground/50">Regular 400 — body</p>
-            <p className="max-w-xl text-base text-foreground/80">
-              Zecat es nuestro proveedor mayorista: importamos productos y los
-              personalizamos con el logo de tu empresa. Este parrafo usa el
-              peso regular de Montserrat para texto de lectura.
-            </p>
+      <section className="border-t border-foreground/[0.06] bg-foreground/[0.02]">
+        <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+          <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
+            Como funciona
+          </h2>
+          <div className="mt-12 grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-4">
+            {PROCESS_STEPS.map((step) => (
+              <div key={step.number}>
+                <p className="text-4xl font-black text-primary-light">
+                  {step.number}
+                </p>
+                <p className="mt-3 text-lg font-medium text-foreground">
+                  {step.title}
+                </p>
+                <p className="mt-2 text-sm text-foreground/60">
+                  {step.description}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section className="mt-16">
-        <h2 className="text-2xl font-medium text-foreground">En uso</h2>
-        <div className="mt-6 flex flex-wrap items-center gap-4">
-          <button className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover">
-            Pedi tu cotizacion
-          </button>
-          <a
-            href="#"
-            className="text-sm font-medium text-foreground/80 transition-colors hover:text-primary-light"
+      <section className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+        <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
+          Productos destacados
+        </h2>
+        <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4">
+          {featuredProducts.map((product) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              sellPrice={computeSellPrice(
+                product.costPrice,
+                pricingConfig.defaultMarginPercent
+              )}
+              inStock={hasAvailableStock(product.variants)}
+            />
+          ))}
+        </div>
+        <div className="mt-14 flex justify-center">
+          <Link
+            href="/catalogo"
+            className="rounded-full border border-foreground/15 px-7 py-3 text-sm font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+          >
+            Ver todo el catalogo
+          </Link>
+        </div>
+      </section>
+
+      <section className="bg-primary">
+        <div className="mx-auto flex max-w-6xl flex-col items-start gap-6 px-6 py-20 sm:items-center sm:py-24 sm:text-center">
+          <h2 className="max-w-2xl text-3xl font-black tracking-tight text-white sm:text-4xl">
+            Listo para vestir tu marca?
+          </h2>
+          <p className="max-w-xl text-white/75">
+            Armamos tu pedido, te mandamos el boceto y el precio final antes
+            de que confirmes nada.
+          </p>
+          <Link
+            href="/catalogo"
+            className="rounded-full bg-accent px-7 py-3.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
           >
             Ver catalogo
-          </a>
-          <span className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-primary-dark">
-            Nuevo
-          </span>
-        </div>
-
-        <div className="mt-6 rounded-xl bg-primary-dark px-8 py-10 text-white">
-          <p className="text-xs text-white/60">Fondo de bloque — Indigo</p>
-          <p className="mt-1 max-w-md text-2xl font-black tracking-tight">
-            Asi se ve un hero o un bloque protagonico sobre violeta oscuro.
-          </p>
+          </Link>
         </div>
       </section>
     </div>

@@ -1,9 +1,5 @@
 import { IsotipoGanchito } from "@/components/icons/isotipo-ganchito";
-
-// TODO: reemplazar por los datos de contacto reales de Ganchito Estudio.
-const CONTACT_EMAIL = "hola@ganchitoestudio.com";
-const WHATSAPP_NUMBER = "5491100000000";
-const WHATSAPP_LABEL = "+54 9 11 0000-0000";
+import { CONTACT_EMAIL, WHATSAPP_LABEL, WHATSAPP_URL } from "@/lib/contact";
 
 export function Footer() {
   return (
@@ -23,7 +19,7 @@ export function Footer() {
             {CONTACT_EMAIL}
           </a>
           <a
-            href={`https://wa.me/${WHATSAPP_NUMBER}`}
+            href={WHATSAPP_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="transition-colors hover:text-accent"

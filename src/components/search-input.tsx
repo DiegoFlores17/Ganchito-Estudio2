@@ -19,8 +19,20 @@ export function SearchInput({
   const router = useRouter();
   const [value, setValue] = useState(initialValue ?? "");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // El efecto de debounce corre tambien en el montaje. Sin este guard, entrar
+  // a cualquier pagina con el buscador dispara un router.replace que el
+  // usuario nunca pidio: la query se reconstruye desde cero con extraParams +
+  // q, y como "page" no esta en ninguno de los dos, se pierde. Efecto visible:
+  // entrar a /catalogo?page=3 devolvia a la pagina 1 sola, 350ms despues.
+  // Solo navegamos cuando el valor tipeado cambia de verdad.
+  const skipNextRef = useRef(true);
 
   useEffect(() => {
+    if (skipNextRef.current) {
+      skipNextRef.current = false;
+      return;
+    }
+
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
     timeoutRef.current = setTimeout(() => {

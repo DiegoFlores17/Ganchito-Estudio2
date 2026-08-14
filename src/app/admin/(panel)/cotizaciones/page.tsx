@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { QuoteStatus } from "@prisma/client";
+import { requireAdmin } from "@/lib/admin-auth";
 import { getQuotes } from "@/lib/admin-quotes";
 import { StatusBadge } from "@/components/admin/status-badge";
 
@@ -15,6 +16,10 @@ export default async function CotizacionesPage({
 }: {
   searchParams: Promise<{ email?: string; status?: string }>;
 }) {
+  // La autorizacion no puede quedar solo en el layout: ver el comentario de
+  // requireAdmin() en src/lib/admin-auth.ts.
+  await requireAdmin();
+
   const params = await searchParams;
   const status = STATUS_OPTIONS.find((s) => s.value === params.status)?.value;
   const email = params.email?.trim() || undefined;

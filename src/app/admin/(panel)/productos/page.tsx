@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAdmin } from "@/lib/admin-auth";
 import { getManualProducts } from "@/lib/admin-products";
 import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
@@ -10,6 +11,10 @@ export default async function ProductosPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  // La autorizacion no puede quedar solo en el layout: ver el comentario de
+  // requireAdmin() en src/lib/admin-auth.ts.
+  await requireAdmin();
+
   const params = await searchParams;
   const search = params.q || undefined;
 

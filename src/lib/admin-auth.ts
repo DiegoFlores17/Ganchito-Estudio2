@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { AdminRole } from "@prisma/client";
 import { auth } from "@/auth";
@@ -14,38 +15,59 @@ export interface CurrentAdmin {
 /// cada llamada (no confia en el JWT mas alla del email). Asi, sacar a
 /// alguien de AdminUser le corta el acceso en la proxima carga de pagina,
 /// no cuando le expire la cookie de sesion.
-export async function requireAdmin(): Promise<CurrentAdmin> {
-  const session = await auth();
-  const email = session?.user?.email;
+///
+/// Va envuelto en cache() de React para deduplicar dentro de un mismo render:
+/// el layout del panel Y cada page llaman a esta funcion (a proposito, ver
+/// abajo), y sin el cache serian dos consultas identicas a AdminUser por
+/// navegacion. El cache es por request, no persiste entre pedidos, asi que
+/// no debilita el chequeo.
+///
+/// Por que lo llaman el layout Y las pages, si con el layout alcanzaria:
+/// el layout es una barrera que corre ANTES de que se renderice nada, pero
+/// justamente por eso bloquea la navegacion y no deja que el loading.tsx de
+/// la ruta muestre su skeleton. La llamada en cada page corre DENTRO del
+/// limite de Suspense que abre loading.tsx, asi que ahi si hay fallback. Y
+/// como defensa en profundidad, cada pantalla del panel queda autorizada por
+/// si misma en vez de depender de que el layout la cubra.
+export const requireAdmin = cache(
+  async function requireAdmin(): Promise<CurrentAdmin> {
+    const session = await auth();
+    const email = session?.user?.email;
 
-  if (!email) {
-    redirect("/admin/login");
+    if (!email) {
+      redirect("/admin/login");
+    }
+
+    const existing = await prisma.adminUser.findUnique({ where: { email } });
+    if (existing) {
+      return existing;
+    }
+
+    const bootstrapped = await tryBootstrapSuperAdmin(
+      email,
+      session?.user?.name
+    );
+    if (bootstrapped) {
+      return bootstrapped;
+    }
+
+    // No se puede hacer signOut() aca: esto corre durante el render de un
+    // Server Component (el layout), y las cookies solo se pueden modificar
+    // en un Server Action o Route Handler. El cierre de sesion real queda
+    // en la pantalla /admin/sin-acceso, que SI es un lugar valido para eso.
+    redirect("/admin/sin-acceso");
   }
+);
 
-  const existing = await prisma.adminUser.findUnique({ where: { email } });
-  if (existing) {
-    return existing;
+export const requireSuperAdmin = cache(
+  async function requireSuperAdmin(): Promise<CurrentAdmin> {
+    const admin = await requireAdmin();
+    if (admin.role !== AdminRole.SUPER_ADMIN) {
+      redirect("/admin");
+    }
+    return admin;
   }
-
-  const bootstrapped = await tryBootstrapSuperAdmin(email, session?.user?.name);
-  if (bootstrapped) {
-    return bootstrapped;
-  }
-
-  // No se puede hacer signOut() aca: esto corre durante el render de un
-  // Server Component (el layout), y las cookies solo se pueden modificar
-  // en un Server Action o Route Handler. El cierre de sesion real queda
-  // en la pantalla /admin/sin-acceso, que SI es un lugar valido para eso.
-  redirect("/admin/sin-acceso");
-}
-
-export async function requireSuperAdmin(): Promise<CurrentAdmin> {
-  const admin = await requireAdmin();
-  if (admin.role !== AdminRole.SUPER_ADMIN) {
-    redirect("/admin");
-  }
-  return admin;
-}
+);
 
 /// Bootstrap del primer super-admin: SOLO si AdminUser esta completamente
 /// vacia y el email coincide con INITIAL_SUPER_ADMIN_EMAIL. En cuanto

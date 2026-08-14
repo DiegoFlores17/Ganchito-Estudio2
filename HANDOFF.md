@@ -4,8 +4,8 @@ Registro del estado real del proyecto para poder retomar sin reconstruir context
 Se actualiza al final de cada tanda de trabajo.
 
 **Última actualización:** 2026-08-14 — tanda 1 de estados de carga
-**Branch:** `main` (último commit en origin: `3dc2f4a`; la tanda 1 está en el
-working tree, sin commitear)
+**Branch:** `main`, pusheado. La tanda 1 son tres commits sobre `3dc2f4a`:
+`f6871d9` (fix de paginación), `b0dbcdd` (estados de carga), `c23b047` (docs).
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
@@ -204,12 +204,9 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   paginación quedó bien (entrar a `/catalogo?page=3` y verificar que la URL
   **no** pierde el `page`).
 
-### Desincronizaciones detectadas en la documentación
-
-- **`CLAUDE.md` tiene cambios sin commitear** (`git status` marca ` M CLAUDE.md`).
-  Son dos cosas: el bloque `nextjs-agent-rules` que `next dev` reescribe solo, y
-  la sección "Mínimo de compra" que se movió a `PENDIENTES/pendientes.md`.
-  Conviene commitearlo para dejar el árbol limpio.
+> Nota: `next dev` reescribe solo el bloque `nextjs-agent-rules` de `CLAUDE.md`.
+> Si vuelve a aparecer como cambio sin commitear, es eso — se commitea junto con
+> el trabajo y listo, borrarlo del diff solo lo regenera.
 
 ---
 

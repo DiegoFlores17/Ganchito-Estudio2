@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 const DEBOUNCE_MS = 350;
@@ -21,11 +21,11 @@ export function SearchInput({
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // El efecto de debounce corre tambien en el montaje. Sin este guard, entrar
   // a cualquier pagina con el buscador dispara un router.replace que el
-  // usuario nunca pidio: la query se reconstruye desde cero con extraParams +
-  // q, y como "page" no esta en ninguno de los dos, se pierde. Efecto visible:
-  // entrar a /catalogo?page=3 devolvia a la pagina 1 sola, 350ms despues.
-  // Solo navegamos cuando el valor tipeado cambia de verdad.
+  // usuario nunca pidio: ademas de encender el indicador de carga de la nada,
+  // reescribe la URL sin el parametro "page" y devuelve al cliente a la
+  // pagina 1 del catalogo. Solo navegamos cuando el valor cambia de verdad.
   const skipNextRef = useRef(true);
+  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     if (skipNextRef.current) {
@@ -44,8 +44,14 @@ export function SearchInput({
       if (value.trim()) params.set("q", value.trim());
 
       const query = params.toString();
-      router.replace(query ? `${basePath}?${query}` : basePath, {
-        scroll: false,
+      // El replace va dentro de la transicion para poder mostrar que se esta
+      // buscando: isPending queda en true hasta que el server devuelve los
+      // resultados nuevos. Sin esto, la grilla vieja se queda en pantalla sin
+      // ninguna señal y el usuario cree que no paso nada.
+      startTransition(() => {
+        router.replace(query ? `${basePath}?${query}` : basePath, {
+          scroll: false,
+        });
       });
     }, DEBOUNCE_MS);
 
@@ -58,12 +64,28 @@ export function SearchInput({
   }, [value]);
 
   return (
-    <input
-      type="search"
-      defaultValue={initialValue}
-      onChange={(event) => setValue(event.target.value)}
-      placeholder={placeholder ?? "Buscar..."}
-      className="w-full rounded-full border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary sm:w-72"
-    />
+    <div className="relative w-full sm:w-72">
+      <input
+        type="search"
+        defaultValue={initialValue}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder={placeholder ?? "Buscar..."}
+        className="w-full rounded-full border border-foreground/15 py-2.5 pl-4 pr-10 text-sm outline-none focus:border-primary"
+      />
+
+      {/* El spinner ocupa su lugar siempre (el input reserva pr-10) y solo
+          cambia de opacidad: asi aparecer o desaparecer no mueve el layout. */}
+      <span
+        aria-hidden
+        className={
+          "pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border-2 border-primary/25 border-t-primary transition-opacity duration-200 " +
+          (isPending ? "animate-spin opacity-100" : "opacity-0")
+        }
+      />
+
+      <span role="status" aria-live="polite" className="sr-only">
+        {isPending ? "Buscando productos…" : ""}
+      </span>
+    </div>
   );
 }

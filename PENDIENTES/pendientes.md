@@ -44,8 +44,17 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       GIN con `pg_trgm` sobre `unaccent(lower(name))` (y lo mismo para
       `description`/categoría) antes de que se note lento.
 
-## Deploy (etapa final)
+## Deploy (etapa final) — HECHO
 
+El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.app
+(Vercel + Neon + Vercel Blob).
+
+- [x] **Configurar base de producción y variables de entorno en Vercel.** Resuelto —
+      base en Neon (PostgreSQL), variables cargadas en Vercel. Verificado en
+      producción.
+- [x] **Agregar las URLs de producción a Google Cloud Console.** Resuelto —
+      orígenes autorizados y redirect URIs de Vercel agregados. Verificado: el
+      login del panel funciona en producción.
 - [x] **Migrar `src/lib/storage.ts` a Vercel Blob.** Resuelto — `saveUploadedFile()`
       usa `put()` de `@vercel/blob` (`access: "public"`). La route handler
       `/api/uploads/[...path]` se eliminó (Blob sirve los archivos directo desde
@@ -53,7 +62,16 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       origen del archivo: raster (png/jpg/jpeg/webp) devuelve la `url` normal
       (inline), todo lo demás (pdf/svg/ai/eps) devuelve la `downloadUrl` de Blob
       (fuerza descarga). Cubre los dos usos: logos de cotización y fotos de
-      producto manual.
+      producto manual. Verificado en producción: se cargó un producto con imagen
+      desde el panel de Vercel end-to-end.
+
+      > **Gotcha del `BLOB_READ_WRITE_TOKEN`.** Al conectar el store de Blob,
+      > Vercel creó la variable con el nombre autogenerado del store (algo tipo
+      > `<store>_READ_WRITE_TOKEN`), no con el nombre estándar. El SDK
+      > `@vercel/blob` busca exactamente `BLOB_READ_WRITE_TOKEN`, así que hubo
+      > que crearla a mano con ese nombre. **Si se cambia de store de Blob,
+      > revisar esto primero** — el síntoma es que las subidas fallan por falta
+      > de token aunque en el dashboard se vea el store conectado.
 - [ ] **Evaluar URLs firmadas (`access: "private"`) para los logos que suben los
       clientes.** Hoy son URLs públicas no adivinables (mismo nivel de seguridad
       que tenía el filesystem local) — si algún cliente sube arte confidencial,
@@ -66,7 +84,6 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       borrar la imagen.
 - [ ] **Automatizar el sync con cron** (Vercel Cron), cada 3-6 hs, para la
       actualización semi-en-vivo. Hoy se corre a mano con `npm run sync:zecat`.
-- [ ] Configurar base de producción (Neon o Supabase) y variables de entorno en Vercel.
 - [ ] Confirmar si el token de Zecat es de preprod o producción y apuntar la
       `ZECAT_API_URL` correcta.
 
@@ -99,9 +116,10 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 - [ ] **Sacar la app OAuth de Google del modo "Testing" si el equipo crece:** en
       Testing hay límite de usuarios de prueba. Para el equipo chico actual alcanza,
       pero si suma mucha gente, evaluar publicar la app.
-- [ ] **Agregar la URL de producción a Google Cloud Console:** hoy solo está
-      `localhost:3000` en los orígenes y redirect URIs. Al deployar, sumar el
-      dominio real (y el redirect `/api/auth/callback/google` de producción).
+- [x] **Agregar la URL de producción a Google Cloud Console:** resuelto — el
+      dominio de Vercel está en orígenes autorizados y el redirect
+      `/api/auth/callback/google` de producción está cargado. Verificado
+      entrando a `/admin` en producción.
 
 ## Margen Personalizado para cada producto 
 

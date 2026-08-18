@@ -29,18 +29,20 @@ export default function StoreError({
   return (
     <div className="mx-auto flex max-w-xl flex-col items-start gap-6 px-6 py-28 sm:items-center sm:text-center">
       <h1 className="text-4xl font-black tracking-tight text-foreground">
-        Se nos rompio algo
+        Se nos rompió algo
       </h1>
 
       <p className="text-foreground/70">
-        No pudimos cargar esta pagina. Suele ser algo pasajero: proba de nuevo
+        No pudimos cargar esta página. Suele ser algo pasajero: probá de nuevo
         en un momento. Si sigue apareciendo, escribinos y lo vemos.
       </p>
 
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
-          onClick={retry}
+          // Ver la nota en global-error.tsx: la arrow evita pasarle el evento
+          // de click a retry(), que no espera argumentos.
+          onClick={() => retry()}
           className="rounded-full bg-primary px-7 py-3 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
         >
           Reintentar
@@ -49,13 +51,13 @@ export default function StoreError({
           href="/catalogo"
           className="rounded-full border border-foreground/15 px-7 py-3 text-sm font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
         >
-          Ir al catalogo
+          Ir al catálogo
         </Link>
       </div>
 
       {error.digest && (
         <p className="text-xs text-foreground/40">
-          Codigo de referencia: {error.digest}
+          Código de referencia: {error.digest}
         </p>
       )}
     </div>

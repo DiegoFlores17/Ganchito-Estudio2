@@ -24,13 +24,15 @@ export default function AdminError({
         No se pudo cargar esta pantalla
       </h1>
       <p className="mt-2 text-sm text-foreground/60">
-        Suele ser la base de datos sin responder por un momento. Reintenta; si
-        persiste, revisa los logs con el codigo de abajo.
+        Suele ser la base de datos sin responder por un momento. Reintentá; si
+        persiste, revisá los logs con el código de abajo.
       </p>
 
       <button
         type="button"
-        onClick={retry}
+        // Ver la nota en global-error.tsx: la arrow evita pasarle el evento
+        // de click a retry(), que no espera argumentos.
+        onClick={() => retry()}
         className="mt-6 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
       >
         Reintentar
@@ -38,7 +40,7 @@ export default function AdminError({
 
       {error.digest && (
         <p className="mt-6 text-xs text-foreground/40">
-          Codigo de referencia: {error.digest}
+          Código de referencia: {error.digest}
         </p>
       )}
     </div>

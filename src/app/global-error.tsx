@@ -52,7 +52,7 @@ export default function GlobalError({
               letterSpacing: "-0.02em",
             }}
           >
-            Se nos rompio algo
+            Se nos rompió algo
           </h1>
 
           <p
@@ -62,12 +62,15 @@ export default function GlobalError({
               color: "rgba(255, 255, 255, 0.75)",
             }}
           >
-            No pudimos cargar el sitio. Proba de nuevo en un momento.
+            No pudimos cargar el sitio. Probá de nuevo en un momento.
           </p>
 
           <button
             type="button"
-            onClick={retry}
+            // Envuelto en una arrow y no `onClick={retry}` a secas: asi React
+            // no le pasa el evento sintetico de click a una funcion que no
+            // espera argumentos. Es la forma que usa la doc de Next.
+            onClick={() => retry()}
             style={{
               marginTop: "2rem",
               padding: "0.875rem 1.75rem",
@@ -91,7 +94,7 @@ export default function GlobalError({
                 color: "rgba(255, 255, 255, 0.4)",
               }}
             >
-              Codigo de referencia: {error.digest}
+              Código de referencia: {error.digest}
             </p>
           )}
         </div>

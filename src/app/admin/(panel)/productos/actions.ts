@@ -232,6 +232,9 @@ export async function toggleProductActive(
 
   revalidatePath("/admin/productos");
   revalidatePath("/catalogo");
+  // La ficha del producto faltaba: pausar lo saca del catalogo, pero quien
+  // tuviera /producto/{id} en el router cache del cliente lo seguia viendo.
+  revalidatePath(`/producto/${productId}`);
   revalidatePath("/");
   return { success: true };
 }

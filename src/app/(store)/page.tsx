@@ -8,6 +8,26 @@ import { WHATSAPP_URL } from "@/lib/contact";
 import { getHomeCategoryShowcase, HOME_CATEGORY_COUNT } from "@/lib/home";
 import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 
+/// La home se sirve cacheada, pero NO indefinidamente.
+///
+/// Muestra precios (destacados), y los precios cambian por dos caminos muy
+/// distintos:
+/// - Desde el panel (margen global, alta/baja de productos manuales): son
+///   Server Actions, asi que invalidan la home al instante con
+///   revalidatePath("/"). Ese es el camino preciso y sin costo.
+/// - Desde el sync de Zecat: corre como script suelto, FUERA del runtime de
+///   Next, asi que no puede llamar a revalidatePath. Para ese caso, y solo
+///   para ese, hace falta esta ventana de tiempo.
+///
+/// 300 y no un valor mas alto porque lo que se desfasa son precios: cinco
+/// minutos es comercialmente irrelevante y sirve practicamente todo el
+/// trafico desde cache igual. Ojo: el valor tiene que ser un literal — Next
+/// lo analiza estaticamente y `60 * 5` no es valido.
+///
+/// Si en algun momento el sync pasa a Vercel Cron, conviene darle un endpoint
+/// de revalidacion con secreto y bajar esto a false (ver PENDIENTES).
+export const revalidate = 300;
+
 const FEATURED_PRODUCTS_COUNT = 8;
 
 const PROCESS_STEPS = [

@@ -189,6 +189,10 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
   revalidatePath("/admin/productos");
   revalidatePath("/catalogo");
   revalidatePath(`/producto/${product.id}`);
+  // La home tambien muestra productos (destacados) y quedaba afuera de esta
+  // lista: sin esto, un cambio hecho desde el panel se veia en el catalogo
+  // pero no en la portada. Ver la nota de revalidate en (store)/page.tsx.
+  revalidatePath("/");
 
   return { success: true, productId: product.id };
 }
@@ -210,5 +214,6 @@ export async function toggleProductActive(
 
   revalidatePath("/admin/productos");
   revalidatePath("/catalogo");
+  revalidatePath("/");
   return { success: true };
 }

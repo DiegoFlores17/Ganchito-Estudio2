@@ -38,5 +38,10 @@ export async function updatePricingConfig(
 
   revalidatePath("/admin/configuracion");
   revalidatePath("/catalogo");
+  // El margen cambia el precio de TODO el catalogo, incluidos los destacados
+  // de la home. Sin esta linea la portada seguia mostrando los precios viejos
+  // mientras el catalogo ya tenia los nuevos: dos precios distintos para el
+  // mismo producto al mismo tiempo.
+  revalidatePath("/");
   return { success: true };
 }

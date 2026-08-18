@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageNavLabel, PageNumber } from "@/components/catalog/link-content";
 
 function buildHref(page: number, categorySlug?: string, search?: string) {
   const params = new URLSearchParams();
@@ -60,14 +61,9 @@ export function Pagination({
           <Link
             key={page}
             href={buildHref(page, categorySlug, search)}
-            className={
-              "flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium transition-colors " +
-              (page === currentPage
-                ? "bg-primary text-white"
-                : "text-foreground/70 hover:bg-foreground/5")
-            }
+            className="rounded-full"
           >
-            {page}
+            <PageNumber page={page} active={page === currentPage} />
           </Link>
         )
       )}
@@ -99,11 +95,8 @@ function PageLink({
   }
 
   return (
-    <Link
-      href={href}
-      className="px-3 text-sm font-medium text-foreground/70 transition-colors hover:text-primary"
-    >
-      {label}
+    <Link href={href}>
+      <PageNavLabel label={label} />
     </Link>
   );
 }

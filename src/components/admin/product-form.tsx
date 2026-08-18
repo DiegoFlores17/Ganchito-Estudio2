@@ -32,6 +32,7 @@ export interface ProductFormInitialData {
   supplierName: string | null;
   categoryId: string | null;
   costPrice: number;
+  minOrderQuantity: number | null;
   images: ExistingImage[];
   variants: { colorName: string | null; sizeName: string | null; stock: number }[];
 }
@@ -210,6 +211,26 @@ export function ProductForm({
             className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">
+          Cantidad mínima
+        </label>
+        <input
+          type="number"
+          name="minOrderQuantity"
+          min="1"
+          step="1"
+          placeholder="Sin mínimo"
+          defaultValue={initialProduct?.minOrderQuantity ?? ""}
+          className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary sm:max-w-[12rem]"
+        />
+        <p className="text-xs text-foreground/50">
+          Mínimo de unidades para poder cotizar este producto. Dejalo vacío si
+          no hay mínimo. Se valida sobre el total del producto, no por cada
+          combinación de color y talle.
+        </p>
       </div>
 
       <div className="flex flex-col gap-1.5">

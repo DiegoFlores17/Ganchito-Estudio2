@@ -48,6 +48,8 @@ const PRICE_FORMAT_ERROR =
   'El precio base no es válido. Escribí el número sin puntos de miles (ej: 37000, no 37.000).';
 const STOCK_FORMAT_ERROR =
   "El stock no es válido. Tiene que ser un número entero sin puntos ni comas.";
+const MIN_ORDER_FORMAT_ERROR =
+  "La cantidad mínima no es válida. Dejala vacía si no hay mínimo, o escribí un número entero de 1 o más.";
 
 /// Crea o edita un producto manual. Ambos casos comparten la misma logica:
 /// si viene "productId" en el formulario, es edicion; si no, alta.
@@ -85,6 +87,19 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
   const costPriceRaw = parsePositiveDecimal(formData.get("costPrice"));
   if (costPriceRaw === null || costPriceRaw <= 0) {
     return { success: false, error: PRICE_FORMAT_ERROR };
+  }
+
+  // Minimo de personalizacion. Vacio = sin minimo (null), que es como quedaban
+  // TODOS los productos manuales hasta ahora porque el campo no era editable.
+  // Si viene, tiene que ser un entero >= 1: un minimo de 0 no significa nada.
+  const minOrderRaw = String(formData.get("minOrderQuantity") ?? "").trim();
+  let minOrderQuantity: number | null = null;
+  if (minOrderRaw) {
+    const parsed = parseNonNegativeInteger(minOrderRaw);
+    if (parsed === null || parsed < 1) {
+      return { success: false, error: MIN_ORDER_FORMAT_ERROR };
+    }
+    minOrderQuantity = parsed;
   }
 
   let variants: VariantInput[] = [];
@@ -145,6 +160,7 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     supplierName,
     categoryId,
     costPrice: costPriceRaw,
+    minOrderQuantity,
   };
 
   const product = await prisma.$transaction(async (tx) => {

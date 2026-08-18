@@ -34,6 +34,7 @@ export default async function EditarProductoPage({
             supplierName: product.supplierName,
             categoryId: product.categoryId,
             costPrice: Number(product.costPrice),
+            minOrderQuantity: product.minOrderQuantity,
             images: product.images.map((img) => ({
               id: img.id,
               url: img.url,

@@ -3,11 +3,10 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-18 — tanda 2 de estados de carga
-**Branch:** `main`. La tanda 1 (`f6871d9`, `b0dbcdd`, `c23b047`) está pusheada y
-deployada. La tanda 2 está **commiteada pero SIN pushear**: `1278e4c` (fix de
-autorización del panel), `69432a1` (loading.tsx del resto de rutas), `7fcb106`
-(shimmer del catálogo), `d05b88e` (feedback de acciones del admin).
+**Última actualización:** 2026-08-18 — tanda 3
+**Branch:** `main`. Tandas 1 y 2 pusheadas y deployadas. La **tanda 3 está
+commiteada pero SIN pushear**: `46120d8` (revalidación de la home), `3c2a213`
+(pantallas de error).
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
@@ -102,12 +101,26 @@ paginación; **los skeletons todavía no se miraron en producción**.
 - Feedback de acciones: login del admin, filtro de cotizaciones, team-management,
   toggle-active, product-form.
 
+**Tanda 3** (commiteada, **sin pushear**).
+
+- Revalidación de la home — ver la sección dedicada más abajo.
+- `error.tsx` en tres niveles: `(store)/error.tsx` (cara al cliente, con marca),
+  `admin/(panel)/error.tsx` (más seca, la ve el equipo) y `global-error.tsx`
+  (último recurso, con estilos inline porque reemplaza el layout raíz y no puede
+  asumir que cargó la hoja de estilos). Las tres muestran `error.digest`, que es
+  el mismo identificador que queda en los logs del servidor.
+  **Usan `retry()`, no `reset()`**: `reset()` limpia el boundary sin volver a
+  pedir los datos, así que ante una base caída re-renderizaría el mismo error.
+  `retry` es estable desde Next 16.3, justo la versión del proyecto.
+
 | | Antes | Ahora |
 |---|---|---|
 | `loading.tsx` | 0 | 9 |
-| `error.tsx` | 0 | 0 (sigue sin cubrirse) |
+| `error.tsx` | 0 | 3 (tienda, panel, global) |
 | Skeletons / `animate-pulse` | 0 | primitiva + piezas compartidas |
 | `placeholder="blur"` | 0 | n/a — resuelto con shimmer (opción A) |
+
+Con esto **el relevamiento queda cerrado**: los cuatro frentes cubiertos.
 
 El único indicador que existía antes de todo esto era una línea de texto en
 `/cotizar` ("Cargando tu cotizacion...").
@@ -140,19 +153,36 @@ motivo.
 animaciones estridentes. El riesgo a evitar es una interfaz que parpadee por
 todos lados.
 
-### Hallazgo: la home se sirve estática (preexistente, NO es una regresión)
+### Resuelto: la home mostraba precios desfasados
 
-`npm run build` marca `/` como `○ (Static)`. Se verificó que **ya era así antes**
-de la refactorización (build del commit anterior con `git stash`), así que no lo
-introdujo este trabajo. Pero tiene dos consecuencias que conviene decidir:
+**El problema.** `/` se prerenderizaba estática sin revalidación: destacados y
+precios quedaban congelados al build. `/catalogo` es dinámica y siempre fresca,
+así que el mismo producto podía aparecer con **dos precios distintos** según por
+dónde entrara el cliente. (Verificado que la home ya era estática *antes* de la
+refactorización con `Suspense` — no fue una regresión de la tanda 2.)
 
-- Las categorías y los destacados de la home quedan **congelados al momento del
-  build**: no se actualizan cuando corre el sync, solo cuando hay un redeploy.
-- Por lo mismo, los `Suspense` de la home **no se van a ver en producción** hasta
-  que la ruta se sirva dinámica. La estructura queda lista para ese cambio.
+**La causa de fondo** no era solo que la ruta fuera estática: el proyecto ya
+revalida a demanda desde las Server Actions, pero `"/"` no estaba en **ninguna**
+de esas listas. Cambiar el margen global invalidaba `/catalogo` y no la portada.
 
-Es una decisión de negocio (datos frescos vs. home estática instantánea), por eso
-se deja planteada y no resuelta.
+**La solución** (`46120d8`), decidida con el usuario:
+
+- `revalidatePath("/")` agregado donde ya revalidaban `/catalogo`
+  (`configuracion/actions.ts`, `productos/actions.ts` ×2). Los cambios hechos
+  desde el panel impactan **al instante** y sin costo por visita.
+- `export const revalidate = 300` en la home, para el único camino que no puede
+  invalidar solo: el sync de Zecat corre como script suelto, fuera del runtime de
+  Next, y no tiene forma de llamar a `revalidatePath`.
+
+Se descartó `force-dynamic`: cobraría tres consultas a Neon en cada visita de la
+página más visitada para resolver algo que el resto del tiempo ya se resuelve
+gratis con la invalidación a demanda.
+
+> El build lo confirma: `/` ahora aparece con `Revalidate 5m`.
+
+**Pendiente asociado:** si el sync pasa a Vercel Cron, conviene darle un endpoint
+de revalidación con secreto y bajar `revalidate` a `false` — ahí la ventana de
+tiempo deja de hacer falta.
 
 ### Bug corregido: la paginación del catálogo se reseteaba sola
 
@@ -212,8 +242,13 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
-- **Toda la tanda 2.** Pasa typecheck, lint y build, pero **no está pusheada** y
-  nada se probó en producción. Al deployarla hay que mirar, como mínimo:
+- **Las pantallas de error** (tanda 3). Nunca se dispararon. Para verlas hay que
+  forzar un fallo: apuntar `DATABASE_URL` a una base inexistente en un preview.
+- **La revalidación de la home** (tanda 3). Confirmar que al cambiar el margen
+  desde el panel, la portada refleja el precio nuevo enseguida.
+- **Tandas 2 y 3.** Pasan typecheck, lint y build. La 2 ya está deployada pero
+  nada se miró en producción todavía; la 3 no está ni pusheada. Al verificar,
+  mirar como mínimo:
   - Que el panel siga entrando bien (se tocó la autorización).
   - Que los skeletons del admin aparezcan al navegar **entre** pantallas del
     panel. Al entrar por primera vez el layout bloquea por el chequeo de
@@ -232,23 +267,23 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Pushear la tanda 2 y verificarla en producción**, con la lista de "Pendiente de
-verificar" en la mano. En local no hay latencia: los estados de carga no se ven
-nunca, así que el deploy es lo único que valida el trabajo.
+**Pushear la tanda 3 y verificar todo lo acumulado en producción**, con la lista
+de "Pendiente de verificar" en la mano. En local no hay latencia: los estados de
+carga no se ven nunca, así que el deploy es lo único que valida el trabajo.
 
-Con eso confirmado, lo que queda del tema estados de carga:
+Para probar las pantallas de error hace falta forzar un fallo — lo más simple es
+apuntar `DATABASE_URL` a una base inexistente en un preview de Vercel.
 
-1. **`error.tsx`** — sigue sin haber ninguno en todo el proyecto. Si Neon falla,
-   el usuario ve la pantalla de error genérica de Next. Es el último hueco del
-   relevamiento sin cubrir.
-2. **Estado pending en `category-filter.tsx` y `pagination.tsx`** — son `<Link>`
-   puros. Ahora que `/catalogo` tiene `loading.tsx`, puede que ya alcance; hay que
-   mirarlo en producción antes de agregar nada (`useLinkStatus` existe para esto,
-   pero la doc advierte que si la ruta ya tiene fallback, no hace falta).
-3. **Decidir si la home pasa a dinámica** (ver el hallazgo más arriba).
+Lo único que queda abierto del tema estados de carga:
 
-Después de los estados de carga, la Home vuelve a la cola: quedó pendiente sumarle
-un bloque de logos de marcas clientes (falta conseguir los logos).
+- **Estado pending en `category-filter.tsx` y `pagination.tsx`** — son `<Link>`
+  puros. Ahora que `/catalogo` tiene `loading.tsx`, puede que ya alcance: hay que
+  mirarlo en producción **antes** de agregar nada. `useLinkStatus` existe para
+  esto, pero su propia doc advierte que si la ruta ya tiene fallback no hace
+  falta, y meter indicadores de más es justamente lo que se quería evitar.
+
+Después, la Home vuelve a la cola: quedó pendiente sumarle un bloque de logos de
+marcas clientes (falta conseguir los logos).
 
 Con eso confirmado, la **tanda 2 de estados de carga**:
 

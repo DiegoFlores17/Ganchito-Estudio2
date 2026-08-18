@@ -235,3 +235,43 @@ export async function toggleProductActive(
   revalidatePath("/");
   return { success: true };
 }
+
+/// Baja logica de un producto manual.
+///
+/// NO borra la fila. QuoteItem la referencia por FK con ON DELETE RESTRICT, y
+/// el detalle de cotizacion lee item.product.name — el nombre no se copia al
+/// cotizar. Un delete real quedaria bloqueado por la base, y forzarlo con
+/// CASCADE destruiria las lineas de cotizaciones historicas.
+///
+/// Se marca deletedAt Y ademas se apaga `active`. Lo segundo no es redundante:
+/// las cuatro consultas publicas ya filtran por active = true — incluido el
+/// $queryRaw de la busqueda del catalogo, que es el que siempre se olvida —
+/// asi que apagarlo saca el producto de todas las superficies publicas en el
+/// mismo momento, sin depender de que todas hayan sumado el filtro nuevo.
+export async function deleteProduct(
+  productId: string
+): Promise<ProductActionResult> {
+  await requireAdmin();
+
+  const product = await findManualProductForWrite(productId);
+  if (!product) {
+    return {
+      success: false,
+      error: "Ese producto no existe o no se elimina desde el panel.",
+    };
+  }
+
+  await prisma.product.update({
+    where: { id: productId },
+    data: { deletedAt: new Date(), active: false },
+  });
+
+  revalidatePath("/admin/productos");
+  revalidatePath("/catalogo");
+  // La ficha tambien: si alguien la tenia en el router cache del cliente,
+  // seguiria sirviendose despues de eliminar el producto.
+  revalidatePath(`/producto/${productId}`);
+  revalidatePath("/");
+
+  return { success: true };
+}

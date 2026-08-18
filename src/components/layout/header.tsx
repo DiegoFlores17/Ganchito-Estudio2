@@ -7,7 +7,7 @@ import { MobileNav } from "./mobile-nav";
 /// /como-funciona y /contacto, que nunca se crearon: eran dos links al 404 en
 /// el header de TODAS las paginas de la tienda, y encima en desktop y mobile,
 /// porque esta misma lista alimenta al MobileNav.
-const NAV_LINKS = [{ label: "Catalogo", href: "/catalogo" }];
+const NAV_LINKS = [{ label: "Catálogo", href: "/catalogo" }];
 
 export function Header() {
   return (
@@ -39,7 +39,7 @@ export function Header() {
           href="/cotizar"
           className="hidden rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover md:inline-block"
         >
-          Pedi tu cotizacion
+          Pedí tu cotización
         </Link>
 
         <div className="flex items-center gap-1">

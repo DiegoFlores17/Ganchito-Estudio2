@@ -26,8 +26,8 @@ export function CartIndicator() {
       href="/cotizar"
       aria-label={
         count > 0
-          ? `Ver mi cotizacion (${count} ${count === 1 ? "producto" : "productos"})`
-          : "Ver mi cotizacion"
+          ? `Ver mi cotización (${count} ${count === 1 ? "producto" : "productos"})`
+          : "Ver mi cotización"
       }
       className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
     >

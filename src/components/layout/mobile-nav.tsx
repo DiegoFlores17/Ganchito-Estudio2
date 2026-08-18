@@ -17,7 +17,7 @@ export function MobileNav({ navLinks }: { navLinks: NavLink[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Abrir menu"
+        aria-label="Abrir menú"
         className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
       >
         <HamburgerIcon />
@@ -37,7 +37,7 @@ export function MobileNav({ navLinks }: { navLinks: NavLink[] }) {
             <button
               type="button"
               onClick={() => setOpen(false)}
-              aria-label="Cerrar menu"
+              aria-label="Cerrar menú"
               className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
             >
               <CloseIcon />
@@ -61,7 +61,7 @@ export function MobileNav({ navLinks }: { navLinks: NavLink[] }) {
               onClick={() => setOpen(false)}
               className="mt-6 rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
             >
-              Pedi tu cotizacion
+              Pedí tu cotización
             </Link>
           </nav>
         </div>

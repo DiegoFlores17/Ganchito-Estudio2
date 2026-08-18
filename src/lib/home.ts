@@ -28,7 +28,7 @@ const HOME_CATEGORY_PICKS = [
     zecatId: "5704", // Campera Stream Men
   },
   {
-    name: "Tecnologia",
+    name: "Tecnología",
     slug: "regalos-tecnologicos-corporativos",
     zecatId: "5194", // Auriculares Tempo
   },

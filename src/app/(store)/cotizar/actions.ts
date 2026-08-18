@@ -121,7 +121,7 @@ export async function submitQuote(
     return { success: false, error: "Falta el nombre." };
   }
   if (!customerEmail || !EMAIL_REGEX.test(customerEmail)) {
-    return { success: false, error: "El email no es valido." };
+    return { success: false, error: "El email no es válido." };
   }
 
   let items: QuoteCartItemInput[];
@@ -130,13 +130,13 @@ export async function submitQuote(
   } catch {
     return {
       success: false,
-      error: "No se pudieron leer los productos de la cotizacion.",
+      error: "No se pudieron leer los productos de la cotización.",
     };
   }
   if (!Array.isArray(items) || items.length === 0) {
     return {
       success: false,
-      error: "Agrega al menos un producto antes de enviar.",
+      error: "Agregá al menos un producto antes de enviar.",
     };
   }
 
@@ -182,7 +182,7 @@ export async function submitQuote(
   if (quoteItemsData.length === 0) {
     return {
       success: false,
-      error: "Ninguno de los productos de la cotizacion esta disponible.",
+      error: "Ninguno de los productos de la cotización está disponible.",
     };
   }
 

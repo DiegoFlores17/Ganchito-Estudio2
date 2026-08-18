@@ -19,11 +19,11 @@ export default function CatalogoLoading() {
       aria-busy="true"
       className="mx-auto max-w-6xl px-6 py-14 sm:py-16"
     >
-      <span className="sr-only">Cargando el catalogo…</span>
+      <span className="sr-only">Cargando el catálogo…</span>
 
       <header className="max-w-2xl">
         <h1 className="text-5xl font-black tracking-tight text-foreground">
-          Catalogo
+          Catálogo
         </h1>
         <p className="mt-3 text-foreground/70">
           Merch corporativo para personalizar con el logo de tu empresa.

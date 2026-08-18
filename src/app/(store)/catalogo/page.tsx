@@ -40,7 +40,7 @@ export default async function CatalogoPage({
     <div className="mx-auto max-w-6xl px-6 py-14 sm:py-16">
       <header className="max-w-2xl">
         <h1 className="text-5xl font-black tracking-tight text-foreground">
-          Catalogo
+          Catálogo
         </h1>
         <p className="mt-3 text-foreground/70">
           Merch corporativo para personalizar con el logo de tu empresa.
@@ -74,7 +74,7 @@ export default async function CatalogoPage({
         <p className="mt-16 text-foreground/60">
           {search
             ? `No se encontraron productos para "${search}".`
-            : "No hay productos en esta categoria."}
+            : "No hay productos en esta categoría."}
         </p>
       ) : (
         <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4">

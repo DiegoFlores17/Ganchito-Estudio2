@@ -15,7 +15,7 @@ export function QuoteSkeleton() {
       aria-busy="true"
       className="mx-auto max-w-4xl px-6 py-12"
     >
-      <span className="sr-only">Cargando tu cotizacion…</span>
+      <span className="sr-only">Cargando tu cotización…</span>
 
       <Skeleton className="h-4 w-48" />
       <Skeleton className="mt-4 h-10 w-64" />

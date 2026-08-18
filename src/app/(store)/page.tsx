@@ -33,15 +33,15 @@ const FEATURED_PRODUCTS_COUNT = 8;
 const PROCESS_STEPS = [
   {
     number: "01",
-    title: "Explora",
+    title: "Explorá",
     description:
-      "Recorre el catalogo y elegi los productos que representan a tu empresa.",
+      "Recorré el catálogo y elegí los productos que representan a tu empresa.",
   },
   {
     number: "02",
-    title: "Personaliza",
+    title: "Personalizá",
     description:
-      "Suma tu logo, elegi color, talle y las cantidades que necesitas.",
+      "Sumá tu logo, elegí color, talle y las cantidades que necesitás.",
   },
   {
     number: "03",
@@ -52,7 +52,7 @@ const PROCESS_STEPS = [
   {
     number: "04",
     title: "Listo",
-    description: "Con tu aprobacion, coordinamos produccion y entrega.",
+    description: "Con tu aprobación, coordinamos producción y entrega.",
   },
 ];
 
@@ -72,15 +72,15 @@ export default function HomePage() {
             Merch corporativo con el logo de tu empresa
           </h1>
           <p className="mt-6 max-w-xl text-lg text-white/70">
-            Elegis los productos del catalogo, nosotros los personalizamos con
-            tu logo y te mandamos la cotizacion. Asi de simple.
+            Elegís los productos del catálogo, nosotros los personalizamos con
+            tu logo y te mandamos la cotización. Así de simple.
           </p>
           <div className="mt-10 flex flex-wrap gap-4">
             <Link
               href="/catalogo"
               className="rounded-full bg-accent px-7 py-3.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
             >
-              Ver catalogo
+              Ver catálogo
             </Link>
             <a
               href={WHATSAPP_URL}
@@ -96,7 +96,7 @@ export default function HomePage() {
 
       <section className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
         <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
-          Explora por categoria
+          Explorá por categoría
         </h2>
         <Suspense fallback={<CategoryShowcaseSkeleton />}>
           <CategoryShowcase />
@@ -106,7 +106,7 @@ export default function HomePage() {
       <section className="border-t border-foreground/[0.06] bg-foreground/[0.02]">
         <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
           <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
-            Como funciona
+            Cómo funciona
           </h2>
           <div className="mt-12 grid grid-cols-1 gap-10 sm:grid-cols-2 lg:grid-cols-4">
             {PROCESS_STEPS.map((step) => (
@@ -138,7 +138,7 @@ export default function HomePage() {
             href="/catalogo"
             className="rounded-full border border-foreground/15 px-7 py-3 text-sm font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
           >
-            Ver todo el catalogo
+            Ver todo el catálogo
           </Link>
         </div>
       </section>
@@ -146,7 +146,7 @@ export default function HomePage() {
       <section className="bg-primary">
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-6 px-6 py-20 sm:items-center sm:py-24 sm:text-center">
           <h2 className="max-w-2xl text-3xl font-black tracking-tight text-white sm:text-4xl">
-            Listo para vestir tu marca?
+            ¿Listo para vestir tu marca?
           </h2>
           <p className="max-w-xl text-white/75">
             Armamos tu pedido, te mandamos el boceto y el precio final antes
@@ -156,7 +156,7 @@ export default function HomePage() {
             href="/catalogo"
             className="rounded-full bg-accent px-7 py-3.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
           >
-            Ver catalogo
+            Ver catálogo
           </Link>
         </div>
       </section>

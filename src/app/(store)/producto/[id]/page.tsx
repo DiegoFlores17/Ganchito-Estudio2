@@ -40,7 +40,7 @@ export default async function ProductoPage({
         href={backToCatalogHref}
         className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground/60 transition-colors hover:text-primary"
       >
-        ← Volver al catalogo
+        ← Volver al catálogo
       </Link>
 
       {product.category && (

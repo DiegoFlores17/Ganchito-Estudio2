@@ -158,7 +158,7 @@ export function PurchasePanel({
         };
         return next;
       });
-      setNotice("Ya tenias esa combinacion agregada: sumamos la cantidad.");
+      setNotice("Ya tenías esa combinación agregada: sumamos la cantidad.");
     } else {
       setLines((prev) => [
         ...prev,
@@ -195,8 +195,8 @@ export function PurchasePanel({
       }
       showAddedToast(
         lines.length === 1
-          ? "Agregamos 1 combinacion a tu cotizacion."
-          : `Agregamos ${lines.length} combinaciones a tu cotizacion.`
+          ? "Agregamos 1 combinación a tu cotización."
+          : `Agregamos ${lines.length} combinaciones a tu cotización.`
       );
       setLines([]);
       setNotice(null);
@@ -206,7 +206,7 @@ export function PurchasePanel({
         variantSku: selectedVariant?.sku,
         quantity,
       });
-      showAddedToast("Agregado a tu cotizacion.");
+      showAddedToast("Agregado a tu cotización.");
       setQuantity(lineFloor);
     }
   }
@@ -284,15 +284,15 @@ export function PurchasePanel({
         </div>
         {!hasVariantOptions && minOrderQuantity ? (
           <p className="mt-2 text-xs text-foreground/50">
-            Cantidad minima: {minOrderQuantity} unidades
+            Cantidad mínima: {minOrderQuantity} unidades
           </p>
         ) : null}
       </div>
 
       {outOfStock ? (
         <p className="rounded-lg bg-primary-dark/5 px-3 py-2 text-sm text-primary-dark">
-          Consultar disponibilidad{hasVariantOptions ? " para esta combinacion" : ""}.
-          Igual podes agregarla a tu pedido.
+          Consultar disponibilidad{hasVariantOptions ? " para esta combinación" : ""}.
+          Igual podés agregarla a tu pedido.
         </p>
       ) : hasVariantOptions && available <= minQuantity + 2 ? (
         <p className="text-xs text-foreground/50">
@@ -307,7 +307,7 @@ export function PurchasePanel({
             onClick={handleAddLine}
             className="rounded-full border border-dashed border-primary px-4 py-2.5 text-center text-sm font-medium text-primary transition-colors hover:bg-primary/5"
           >
-            + Agregar combinacion{comboLabel ? ` (${comboLabel})` : ""}
+            + Agregar combinación{comboLabel ? ` (${comboLabel})` : ""}
           </button>
 
           {notice && (
@@ -320,7 +320,7 @@ export function PurchasePanel({
             </p>
             {lines.length === 0 ? (
               <p className="mt-2 text-sm italic text-foreground/50">
-                Todavia no agregaste ninguna combinacion.
+                Todavía no agregaste ninguna combinación.
               </p>
             ) : (
               <ul className="mt-2 divide-y divide-foreground/10">
@@ -366,9 +366,9 @@ export function PurchasePanel({
                   : "font-medium text-primary-dark")
               }
             >
-              Llevas {linesTotal} de {minOrderQuantity} unidades minimas
+              Llevás {linesTotal} de {minOrderQuantity} unidades mínimas
               {!minimumMet &&
-                ` — agrega ${minOrderQuantity - linesTotal} mas para poder cotizar este producto`}
+                ` — agregá ${minOrderQuantity - linesTotal} más para poder cotizar este producto`}
             </p>
           ) : null}
 
@@ -378,7 +378,7 @@ export function PurchasePanel({
             disabled={lines.length === 0 || !minimumMet}
             className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-foreground/10 disabled:text-foreground/40"
           >
-            Agregar a mi cotizacion
+            Agregar a mi cotización
           </button>
         </>
       ) : (
@@ -387,7 +387,7 @@ export function PurchasePanel({
           onClick={handleAddToQuote}
           className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
         >
-          Agregar a mi cotizacion
+          Agregar a mi cotización
         </button>
       )}
 
@@ -395,14 +395,14 @@ export function PurchasePanel({
         <p className="rounded-lg bg-primary/5 px-3 py-2.5 text-sm text-primary-dark">
           {addedToast}{" "}
           <Link href="/cotizar" className="font-medium underline underline-offset-2">
-            Ver mi cotizacion
+            Ver mi cotización
           </Link>
         </p>
       )}
 
       <p className="text-xs text-foreground/50">
         No es una compra con pago inmediato. El logo se carga en el paso de
-        cotizacion.
+        cotización.
       </p>
     </div>
   );

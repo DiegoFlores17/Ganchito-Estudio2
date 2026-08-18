@@ -66,7 +66,7 @@ export default function CotizarPage() {
     startTransition(async () => {
       const result = await submitQuote(formData);
       if (!result.success) {
-        setError(result.error ?? "No se pudo enviar la cotizacion.");
+        setError(result.error ?? "No se pudo enviar la cotización.");
         return;
       }
       clearQuoteCart();
@@ -107,13 +107,13 @@ export default function CotizarPage() {
           Recibimos tu solicitud
         </h1>
         <p className="mt-4 text-foreground/70">
-          Te contactamos a la brevedad para avanzar con tu cotizacion.
+          Te contactamos a la brevedad para avanzar con tu cotización.
         </p>
         <Link
           href="/catalogo"
           className="mt-8 inline-block rounded-full bg-accent px-6 py-3 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
         >
-          Volver al catalogo
+          Volver al catálogo
         </Link>
       </div>
     );
@@ -127,16 +127,16 @@ export default function CotizarPage() {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
         <h1 className="text-3xl font-black tracking-tight text-foreground">
-          Tu cotizacion esta vacia
+          Tu cotización está vacía
         </h1>
         <p className="mt-4 text-foreground/70">
-          Agrega productos desde el catalogo para armar tu pedido.
+          Agregá productos desde el catálogo para armar tu pedido.
         </p>
         <Link
           href="/catalogo"
           className="mt-8 inline-block rounded-full bg-accent px-6 py-3 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
         >
-          Ver catalogo
+          Ver catálogo
         </Link>
       </div>
     );
@@ -152,10 +152,10 @@ export default function CotizarPage() {
       </Link>
 
       <h1 className="mt-4 text-4xl font-black tracking-tight text-foreground">
-        Cotizacion
+        Cotización
       </h1>
       <p className="mt-2 text-foreground/70">
-        Revisa tu pedido y completa tus datos. No es una compra con pago
+        Revisá tu pedido y completá tus datos. No es una compra con pago
         inmediato: te contactamos con el boceto y el precio final.
       </p>
 
@@ -219,8 +219,8 @@ export default function CotizarPage() {
               className="rounded-lg border border-accent-hover/50 bg-accent/15 px-4 py-3 text-sm text-foreground"
             >
               <span className="font-medium">{p.productName}</span> tiene un
-              minimo de {p.min} unidades y llevas {p.total}. Podes ajustar las
-              cantidades o enviar la cotizacion igual — lo vemos juntos.
+              mínimo de {p.min} unidades y llevás {p.total}. Podés ajustar las
+              cantidades o enviar la cotización igual — lo vemos juntos.
             </p>
           ))}
         </div>
@@ -264,7 +264,7 @@ export default function CotizarPage() {
             />
           </Field>
 
-          <Field label="Telefono">
+          <Field label="Teléfono">
             <input
               type="tel"
               name="customerPhone"
@@ -281,8 +281,8 @@ export default function CotizarPage() {
             className="text-sm text-foreground/70 file:mr-4 file:rounded-full file:border-0 file:bg-foreground/5 file:px-4 file:py-2 file:text-sm file:font-medium file:text-foreground hover:file:bg-foreground/10"
           />
           <p className="mt-1 text-xs text-foreground/50">
-            Podes subirlo ahora o enviarnoslo despues por email o WhatsApp.
-            Formatos aceptados: PNG, JPG, PDF, SVG, AI, EPS (maximo 15MB).
+            Podés subirlo ahora o enviárnoslo después por email o WhatsApp.
+            Formatos aceptados: PNG, JPG, PDF, SVG, AI, EPS (máximo 15MB).
           </p>
         </Field>
 
@@ -305,7 +305,7 @@ export default function CotizarPage() {
           disabled={isPending}
           className="self-start rounded-full bg-accent px-8 py-3.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover disabled:opacity-60"
         >
-          {isPending ? "Enviando..." : "Enviar solicitud de cotizacion"}
+          {isPending ? "Enviando..." : "Enviar solicitud de cotización"}
         </button>
       </form>
     </div>

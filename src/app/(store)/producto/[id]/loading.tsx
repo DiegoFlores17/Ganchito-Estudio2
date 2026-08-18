@@ -18,7 +18,7 @@ export default function ProductoLoading() {
       <span className="sr-only">Cargando el producto…</span>
 
       <p className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground/40">
-        ← Volver al catalogo
+        ← Volver al catálogo
       </p>
 
       {/* Categoria */}

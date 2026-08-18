@@ -52,14 +52,14 @@ export function CategoryFilter({
           className="flex w-full items-center gap-2 rounded-full border border-foreground/15 px-4 py-2.5 text-sm font-medium text-foreground/80"
         >
           <FilterIcon />
-          {activeCategory ? activeCategory.name : "Filtrar por categoria"}
+          {activeCategory ? activeCategory.name : "Filtrar por categoría"}
         </button>
 
         {open && (
           <div className="fixed inset-0 z-50 flex flex-col bg-background">
             <div className="flex items-center justify-between border-b border-black/5 px-6 py-4">
               <p className="text-sm font-medium text-foreground">
-                Categorias
+                Categorías
               </p>
               <button
                 type="button"

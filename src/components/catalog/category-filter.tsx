@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Category } from "@prisma/client";
 import { CategoryChip, PanelRow } from "@/components/catalog/link-content";
+
+/// Tope para cerrar el panel si la navegacion nunca termina (red caida,
+/// servidor sin responder). Sin esto, el panel se quedaria abierto para
+/// siempre con una fila marcada y el usuario atrapado adentro.
+const PANEL_SALIDA_MS = 2000;
 
 function buildHref(categorySlug?: string, search?: string) {
   const params = new URLSearchParams();
@@ -24,6 +29,38 @@ export function CategoryFilter({
 }) {
   const [open, setOpen] = useState(false);
   const activeCategory = categories.find((c) => c.slug === activeSlug);
+
+  // Que categoria se toco y todavia no llego. El panel ya NO se cierra en el
+  // toque: si se cerrara ahi, el control que el usuario acaba de tocar
+  // desaparece de la pantalla justo cuando necesitaba devolverle una señal, y
+  // queda mirando el catalogo viejo sin ningun cambio. "" es "Todas".
+  const [pendingSlug, setPendingSlug] = useState<string | null>(null);
+
+  // El panel se cierra cuando la navegacion LLEGO, y eso se sabe mirando la
+  // prop: activeSlug lo manda el server con los searchParams nuevos. Es estado
+  // derivado, se ajusta en el render — no hace falta un efecto que escuche al
+  // hijo ni pasar callbacks para arriba.
+  if (pendingSlug !== null && (activeSlug ?? "") === pendingSlug) {
+    setPendingSlug(null);
+    setOpen(false);
+  }
+
+  // Salida de emergencia: si la navegacion nunca termina, el panel se cierra
+  // igual. El setState va adentro del timeout (no sincronico en el efecto), y
+  // el cleanup cancela el timer si la navegacion llega antes.
+  useEffect(() => {
+    if (pendingSlug === null) return;
+    const id = setTimeout(() => {
+      setPendingSlug(null);
+      setOpen(false);
+    }, PANEL_SALIDA_MS);
+    return () => clearTimeout(id);
+  }, [pendingSlug]);
+
+  function cerrarPanel() {
+    setOpen(false);
+    setPendingSlug(null);
+  }
 
   return (
     <>
@@ -62,9 +99,12 @@ export function CategoryFilter({
               <p className="text-sm font-medium text-foreground">
                 Categorías
               </p>
+              {/* Nunca se deshabilita, ni siquiera mientras hay una
+                  navegacion en curso: el usuario tiene que poder salir
+                  siempre. */}
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={cerrarPanel}
                 aria-label="Cerrar filtro"
                 className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
               >
@@ -77,7 +117,7 @@ export function CategoryFilter({
                 href={buildHref(undefined, search)}
                 active={!activeSlug}
                 label="Todas"
-                onNavigate={() => setOpen(false)}
+                onNavigate={() => setPendingSlug("")}
               />
               {categories.map((category) => (
                 <PanelLink
@@ -85,7 +125,7 @@ export function CategoryFilter({
                   href={buildHref(category.slug, search)}
                   active={category.slug === activeSlug}
                   label={category.name}
-                  onNavigate={() => setOpen(false)}
+                  onNavigate={() => setPendingSlug(category.slug)}
                 />
               ))}
             </div>

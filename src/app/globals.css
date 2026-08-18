@@ -30,3 +30,39 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Marca de "navegando" de los controles del catalogo (chip de categoria,
+   numero de pagina). La usa link-content.tsx cuando useLinkStatus reporta
+   pending.
+
+   El retardo es lo importante: sin el, CADA navegacion rapida tira un
+   parpadeo del control. Con 120ms de espera, el indicador solo aparece
+   cuando la navegacion de verdad tarda — que es el caso que estamos
+   cubriendo. La doc de useLinkStatus recomienda exactamente esto.
+
+   Se anima solo la opacidad, no el tamaño ni el color de fondo: asi no hay
+   layout shift ni hay que duplicar la paleta en CSS.
+
+   `both` mantiene el estado final mientras dure el pending, y respeta el
+   estado inicial durante el retardo. */
+@keyframes navegando {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.45;
+  }
+}
+
+.navegando {
+  animation: navegando 180ms ease-out 120ms both;
+}
+
+/* Quien pidió no ver animaciones tampoco deberia ver esta: se cae a un
+   atenuado fijo, sin transicion ni retardo. */
+@media (prefers-reduced-motion: reduce) {
+  .navegando {
+    animation: none;
+    opacity: 0.45;
+  }
+}

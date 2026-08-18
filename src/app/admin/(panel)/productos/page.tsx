@@ -103,11 +103,24 @@ export default async function ProductosPage({
                       {product.active ? "Activo" : "Pausado"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <ToggleActiveButton
-                      productId={product.id}
-                      active={product.active}
-                    />
+                  <td className="px-4 py-3">
+                    {/* "Editar" explicito y con forma de control. Antes el
+                        unico camino a la pantalla de edicion era el nombre del
+                        producto, que se ve igual que texto comun hasta que le
+                        pasas el mouse por encima: la funcionalidad existia
+                        pero no habia como descubrirla. */}
+                    <div className="flex items-center justify-end gap-3">
+                      <Link
+                        href={`/admin/productos/${product.id}`}
+                        className="rounded-lg border border-foreground/15 px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:border-primary hover:text-primary"
+                      >
+                        Editar
+                      </Link>
+                      <ToggleActiveButton
+                        productId={product.id}
+                        active={product.active}
+                      />
+                    </div>
                   </td>
                 </tr>
               );

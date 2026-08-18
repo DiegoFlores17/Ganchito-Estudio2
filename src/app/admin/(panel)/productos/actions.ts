@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
+import { findManualProductForWrite } from "@/lib/admin-products";
 import { saveProductImage, UploadValidationError } from "@/lib/storage";
 
 export interface ProductActionResult {
@@ -61,6 +62,24 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
 
   if (!name) {
     return { success: false, error: "Falta el nombre." };
+  }
+
+  // Editar: confirmar que el producto es MANUAL antes de tocarlo. Sin esto,
+  // mandando el id de un producto de Zecat se lo convertia en manual (el
+  // update escribe origin: MANUAL), se le borraban y recreaban las variantes,
+  // y quedaba con su zecatId intacto — o sea que el proximo sync lo volvia a
+  // pisar. Nunca se expuso en la UI, pero la accion lo aceptaba.
+  //
+  // Va ANTES de subir las imagenes a proposito: si el rechazo llegara despues,
+  // los archivos ya estarian en Blob sin ningun producto que los referencie.
+  if (productId) {
+    const editable = await findManualProductForWrite(productId);
+    if (!editable) {
+      return {
+        success: false,
+        error: "Ese producto no existe o no se edita desde el panel.",
+      };
+    }
   }
 
   const costPriceRaw = parsePositiveDecimal(formData.get("costPrice"));
@@ -203,9 +222,8 @@ export async function toggleProductActive(
 ): Promise<ProductActionResult> {
   await requireAdmin();
 
-  const product = await prisma.product.findFirst({
-    where: { id: productId, origin: ProductOrigin.MANUAL },
-  });
+  // Mismo guard que saveProduct, ahora compartido en vez de repetido.
+  const product = await findManualProductForWrite(productId);
   if (!product) {
     return { success: false, error: "Ese producto no existe." };
   }

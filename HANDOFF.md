@@ -3,13 +3,14 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-18 — tanda 6
-**Branch:** `main`, todo pusheado. Tanda 6: `03800c2` (refactor Link + hijo),
-`7adbdc5` (indicador de navegación y cierre del panel mobile).
+**Última actualización:** 2026-08-18 — tanda 6 cerrada y verificada
+**Branch:** `main`, todo pusheado (`bc736d7`). Tanda 6: `03800c2` (refactor
+Link + hijo), `7adbdc5` (indicador de navegación y cierre del panel mobile),
+`bc736d7` (el violeta pasa al control tocado).
 
-> Deployado **no es** verificado. Nada de las tandas 2 a 6 se miró todavía en
-> producción — ver "Pendiente de verificar". Lo de la tanda 6 sí se probó en
-> el navegador con el dev server, que es distinto de haberlo visto en Vercel.
+> **La tanda 6 está verificada en un teléfono real** y pasó a "Terminado y
+> verificado". Las tandas 2 a 5 siguen deployadas pero sin mirar: deployado
+> **no es** verificado — ver "Pendiente de verificar".
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
@@ -76,15 +77,29 @@ Construido, commiteado y visible funcionando en producción:
   > token aunque el store figure conectado en el dashboard.
 - **Fix de la paginación del catálogo** (`f6871d9`). Verificado en producción el
   2026-08-18: entrar a `/catalogo?page=3` ya no devuelve a la página 1.
+- **Skeleton del catálogo** (`b0dbcdd`). Verificado en producción: el esqueleto
+  aparece al cambiar de categoría y de página.
+- **Indicador de navegación del catálogo** (`03800c2`, `7adbdc5`, `bc736d7`).
+  **Verificado en un teléfono real**: la fila tocada queda en violeta atenuado,
+  la anterior suelta el violeta, el panel de categorías se mantiene abierto
+  hasta que llega la página, y no parpadea en las navegaciones rápidas. El
+  valor del keyframe (`0.45`) quedó aprobado como está.
+
+  > Lo único de esa tanda **no** probado en dispositivo es la salida de
+  > emergencia de 2s: se verificó localmente colgando `window.fetch`. Para
+  > cerrarlo en un teléfono, poner modo avión justo después de tocar una
+  > categoría y confirmar que el panel se cierra solo.
 
 ---
 
 ## En curso
 
-### Estados de carga — las dos tandas escritas, la 2 sin deployar
+### Estados de carga — construido entero, verificado a medias
 
-El relevamiento está cerrado y **las dos tandas están implementadas**. Todo pasa
-`tsc --noEmit`, `eslint` y `npm run build`.
+El relevamiento está cerrado y **no queda nada por construir**. Todo pasa
+`tsc --noEmit`, `eslint` y `npm run build`, y está deployado. Lo que falta es
+mirarlo: de las seis tandas, solo la 6 (y el fix de paginación de la 1) están
+confirmadas en producción.
 
 **Tanda 1** (pusheada y deployada). Del deploy solo está confirmado el fix de
 paginación; **los skeletons todavía no se miraron en producción**.
@@ -220,6 +235,39 @@ Verificado en el navegador con el dev server:
 | Panel mobile al tocar | 1ms: abierto · 106ms: fila marcada · 196ms: cerrado con URL nueva |
 | Red colgada (`window.fetch` anulado) | Abierto y marcado a 279/992/1787ms · **cerrado a 2037ms** |
 | Cerrar durante pending colgado | Botón habilitado, se pudo salir |
+
+### Corrección posterior: el violeta apuntaba al lugar equivocado (`bc736d7`)
+
+Al probarlo en el teléfono aparecieron dos problemas, los dos del mismo origen:
+el rol de activo se decidía con `activeSlug` / `currentPage`, o sea con el
+destino **viejo**.
+
+1. La fila en pending quedaba gris **más claro** que las filas neutras: se leía
+   como deshabilitada, y era el único ítem de la lista que se destacaba hacia
+   abajo.
+2. Peor: la categoría **anterior** seguía en violeta durante toda la espera. La
+   señal más fuerte de la pantalla apuntaba a la que el usuario acababa de
+   abandonar.
+
+Ahora el rol sale de un solo valor: `(pendingSlug ?? activeSlug)` y
+`(pendingPage ?? currentPage)`. La tocada lo toma, la anterior lo suelta.
+
+**Por qué el color no necesita retardo y la opacidad sí** (esto se razonó mal
+la primera vez y conviene dejarlo escrito): el color **no** es un indicador
+temporal, es el estado final adelantado. Cuando llega la página, el control ya
+está donde tiene que estar — no hay nada que revertir, así que tampoco hay
+parpadeo posible. La opacidad es lo único que sí revertiría si la navegación
+fallara, y por eso es lo único que espera 120ms.
+
+Detalles que conviene no deshacer:
+
+- La ventana de páginas se calcula con `currentPage`, **no** con la optimista:
+  recalcularla con la tocada reordenaría los números debajo del dedo antes de
+  que la página exista.
+- `Pagination` pasó a client component y los hooks van **antes** del
+  `if (totalPages <= 1) return null`.
+- Tiene el mismo tope de 2s que el panel: un número mintiendo que es la página
+  actual es peor que no tener indicador.
 
 El único indicador que existía antes de todo esto era una línea de texto en
 `/cotizar` ("Cargando tu cotizacion...").
@@ -359,11 +407,9 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   - El ancla "Cómo funciona" del header, desde una ruta que no sea la home.
     Verificada en local; en producción la home se sirve cacheada, así que
     conviene confirmar que el destino existe en el HTML servido.
-  - **El indicador de navegación en un mobile real, con red real.** Es lo único
-    que valida la tanda 6: se probó con el dev server, donde la latencia es
-    artificial. Mirar que el chip/número se atenúe cuando la navegación tarda,
-    que NO parpadee cuando es rápida, y que el panel de categorías se quede
-    abierto con la fila marcada hasta que llega la página.
+  - **La salida de emergencia de 2s, en un teléfono.** El resto de la tanda 6 ya
+    está verificado en dispositivo; esto no. Modo avión justo después de tocar
+    una categoría: el panel tiene que cerrarse solo en vez de quedar trabado.
   - Que no haya quedado ningún texto sin tilde ni, peor, alguna URL rota por la
     pasada de ortografía. El commit no tocó URLs ni slugs, pero se revisa.
 
@@ -375,11 +421,12 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Verificar en producción todo lo acumulado** (tandas 2 a 6), con la lista de
-"Pendiente de verificar" en la mano. Ya está todo deployado. En local no hay
-latencia: los estados de carga no se ven nunca, así que mirarlo en Vercel —y en
-un teléfono real, no en el navegador angostado— es lo único que valida el
-trabajo.
+**Verificar en producción las tandas 2 a 5**, con la lista de "Pendiente de
+verificar" en la mano. Ya está todo deployado. En local no hay latencia: los
+estados de carga no se ven nunca, así que mirarlo en Vercel —y en un teléfono
+real, no en el navegador angostado— es lo único que valida el trabajo.
+
+La tanda 6 ya está cerrada: se probó en un teléfono y quedó aprobada.
 
 Con el relevamiento cerrado, **no queda nada pendiente de construir en el tema
 estados de carga**. Lo que sigue es verificar y decidir.

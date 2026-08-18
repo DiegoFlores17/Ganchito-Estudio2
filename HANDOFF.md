@@ -3,10 +3,13 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-18 — tanda 6 cerrada y verificada
-**Branch:** `main`, todo pusheado (`bc736d7`). Tanda 6: `03800c2` (refactor
-Link + hijo), `7adbdc5` (indicador de navegación y cierre del panel mobile),
-`bc736d7` (el violeta pasa al control tocado).
+**Última actualización:** 2026-08-18 — tanda 7 (editar/eliminar productos)
+**Branch:** `main`. Tandas 1-6 pusheadas. **La tanda 7 está commiteada y SIN
+pushear** — 8 commits, de `f0e2801` a `1df9720`.
+
+> ⚠️ **Antes de pushear la tanda 7, leer "Regla de entornos" más abajo.** La
+> migración de `deletedAt` YA está aplicada en Neon, así que el orden seguro
+> está cumplido — pero el motivo por el que está aplicada no fue el planeado.
 
 > **La tanda 6 está verificada en un teléfono real** y pasó a "Terminado y
 > verificado". Las tandas 2 a 5 siguen deployadas pero sin mirar: deployado
@@ -15,6 +18,48 @@ Link + hijo), `7adbdc5` (indicador de navegación y cierre del panel mobile),
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
 > `PENDIENTES/pendientes.md`.
+
+---
+
+## Regla de entornos (leer antes de tocar cualquier base)
+
+**Hay DOS bases distintas, con datos distintos:**
+
+| | `.env` (local) | Vercel (Neon) |
+|---|---|---|
+| Host | `localhost:5432` (docker-compose) | Neon, `sa-east-1` |
+| Productos | 554 (553 Zecat + 1 manual) | 554 (mismos) |
+| **Cotizaciones** | **7** (de prueba) | **0** |
+
+**El `.env` apunta SIEMPRE a local.** Producción se toca únicamente pasando
+`DATABASE_URL=...` adelante del comando, y solo cuando se pide explícitamente.
+
+**Vercel NO aplica migraciones.** No hay `vercel.json`, el build es
+`next build` y el postinstall solo `prisma generate`. Cero apariciones de
+`migrate deploy` / `migrate dev` / `db push` en el repo. **Neon se migra a
+mano.** Consecuencia de orden: código que lea una columna nueva no puede
+llegar a Vercel antes de que Neon tenga la migración, o se rompe producción.
+
+**Antes de CUALQUIER escritura contra una base, verificar el destino en el
+mismo comando que la escritura**, con una guarda que aborte:
+
+```bash
+DEST=$(npx prisma migrate status 2>&1 | rg -o 'at "[^"]+"' | head -1)
+if ! echo "$DEST" | rg -q 'localhost'; then echo "ABORTADO"; exit 1; fi
+npx prisma migrate deploy
+```
+
+> Esta regla existe porque pasó: se aplicó una migración contra Neon creyendo
+> que iba a local. El `.env` había cambiado entre la verificación y la
+> ejecución. La migración era aditiva y el daño fue nulo, pero el método
+> estaba mal.
+
+**Comandos de Prisma:** `migrate dev` **NO** — puede ofrecer resetear la base.
+Para generar SQL sin tocar nada:
+`npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
+(solo lectura, sin shadow database). Para aplicar: `migrate deploy`, que nunca
+ofrece resetear. En Prisma 7 los flags cambiaron: es `--from-config-datasource`,
+ya no `--from-schema-datasource`.
 
 ---
 
@@ -236,6 +281,54 @@ Verificado en el navegador con el dev server:
 | Red colgada (`window.fetch` anulado) | Abierto y marcado a 279/992/1787ms · **cerrado a 2037ms** |
 | Cerrar durante pending colgado | Botón habilitado, se pudo salir |
 
+### Tanda 7 — editar y eliminar productos manuales (sin pushear)
+
+Ocho commits, `f0e2801` → `1df9720`. Todo pasa `tsc`, `eslint` y `build`.
+**Nada probado todavía, ni en local ni en producción.**
+
+**Por qué la eliminación es baja lógica y no borrado real** (esto es lo que
+decide el diseño, conviene no reabrirlo sin releerlo): `QuoteItem` referencia
+al producto por FK con `ON DELETE RESTRICT` — verificado en el SQL de la
+migración inicial, no supuesto — y el detalle de cotización lee
+`item.product.name`. **El nombre no se copia al cotizar; solo el precio se
+congela.** Un `delete` real quedaría bloqueado por la base, y forzarlo con
+`CASCADE` destruiría las líneas de cotizaciones históricas.
+
+**Por qué un campo nuevo y no reusar `active`:** `active` significa "pausado",
+un estado reversible que el admin ve y puede volver a prender. Si eliminar
+fuera `active = false`, "Pausar" y "Eliminar" serían el mismo botón con dos
+nombres.
+
+Los commits, en orden:
+
+- `f0e2801` — **bug preexistente**: `saveProduct` no verificaba el `origin`.
+  Mandando el id de un producto de Zecat, el update lo escribía con
+  `origin: MANUAL`, le borraba y recreaba las variantes, y lo dejaba con su
+  `zecatId` intacto — el próximo sync lo volvía a pisar por esa clave, ya con
+  las variantes destruidas. `toggleProductActive` **sí** lo verificaba: el
+  chequeo estaba copiado y una de las dos se lo olvidó. Ahora es
+  `findManualProductForWrite()`, compartido por las tres acciones.
+- `a00412f` — columna `deletedAt` + migración.
+- `dc92ed2` — acción `deleteProduct`: marca `deletedAt` **y** apaga `active`.
+- `341d17c` — UI de eliminar, en la pantalla de edición y no en la grilla, con
+  confirmación en dos pasos. El aviso trae el `_count` real de cotizaciones.
+- `98d6530` — filtros `deletedAt` en todas las consultas, **incluidos los dos
+  `$queryRaw`** (búsqueda del catálogo público y del panel), que son los que
+  se olvidan.
+- `ef0c999` — `toggleProductActive` no revalidaba `/producto/{id}`.
+- `846f731` — `minOrderQuantity` editable. Existía en el modelo y lo escribía
+  el conector, pero no era editable: todo producto manual quedaba sin mínimo,
+  aunque el campo gobierna el piso de cantidad del panel de compra y la
+  validación de `/cotizar`.
+- `1df9720` — **la pantalla de editar no tenía cómo llegarse**: el único camino
+  era el nombre del producto en la grilla, que se ve igual que texto común.
+
+> **Hueco conocido:** un producto eliminado desaparece del panel para siempre.
+> No hay pantalla de "eliminados" ni forma de restaurarlo desde la interfaz —
+> hay que poner `deletedAt = NULL` a mano en la base. Es deliberado (mantiene
+> el panel simple), pero si se elimina algo por error, hoy no hay camino de
+> vuelta.
+
 ### Corrección posterior: el violeta apuntaba al lugar equivocado (`bc736d7`)
 
 Al probarlo en el teléfono aparecieron dos problemas, los dos del mismo origen:
@@ -421,8 +514,12 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Verificar en producción las tandas 2 a 5**, con la lista de "Pendiente de
-verificar" en la mano. Ya está todo deployado. En local no hay latencia: los
+**Probar la tanda 7 en local** (editar un producto, eliminarlo, verificar que
+desaparece del catálogo y del panel y que la cotización que lo incluya lo
+sigue mostrando), y recién ahí pushear. Está commiteada pero sin probar.
+
+Después, **verificar en producción las tandas 2 a 5**, con la lista de
+"Pendiente de verificar" en la mano. Ya está todo deployado. En local no hay latencia: los
 estados de carga no se ven nunca, así que mirarlo en Vercel —y en un teléfono
 real, no en el navegador angostado— es lo único que valida el trabajo.
 

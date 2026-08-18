@@ -21,7 +21,7 @@ export async function addAdmin(formData: FormData): Promise<AdminActionResult> {
   const role = roleRaw === AdminRole.SUPER_ADMIN ? AdminRole.SUPER_ADMIN : AdminRole.ADMIN;
 
   if (!EMAIL_REGEX.test(email)) {
-    return { success: false, error: "El email no es valido." };
+    return { success: false, error: "El email no es válido." };
   }
 
   const existing = await prisma.adminUser.findUnique({ where: { email } });

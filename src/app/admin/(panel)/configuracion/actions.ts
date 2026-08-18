@@ -21,10 +21,10 @@ export async function updatePricingConfig(
   const vatPercent = Number(formData.get("vatPercent"));
 
   if (!Number.isFinite(marginPercent) || marginPercent < 0 || marginPercent > 1000) {
-    return { success: false, error: "El margen tiene que ser un numero entre 0 y 1000." };
+    return { success: false, error: "El margen tiene que ser un número entre 0 y 1000." };
   }
   if (!Number.isFinite(vatPercent) || vatPercent < 0 || vatPercent > 100) {
-    return { success: false, error: "El IVA tiene que ser un numero entre 0 y 100." };
+    return { success: false, error: "El IVA tiene que ser un número entre 0 y 100." };
   }
 
   await getPricingConfig(); // garantiza que exista la fila (id=1)

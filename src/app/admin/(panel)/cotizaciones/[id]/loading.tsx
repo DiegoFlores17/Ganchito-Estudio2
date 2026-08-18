@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/skeleton";
 export default function CotizacionDetalleLoading() {
   return (
     <div role="status" aria-busy="true">
-      <span className="sr-only">Cargando la cotizacion…</span>
+      <span className="sr-only">Cargando la cotización…</span>
 
       <Skeleton className="h-4 w-40" />
 

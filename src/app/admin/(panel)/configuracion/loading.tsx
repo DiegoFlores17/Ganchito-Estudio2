@@ -6,7 +6,7 @@ import {
 export default function ConfiguracionLoading() {
   return (
     <div role="status" aria-busy="true">
-      <span className="sr-only">Cargando la configuracion…</span>
+      <span className="sr-only">Cargando la configuración…</span>
       <AdminPageHeaderSkeleton />
       <AdminFormSkeleton fields={2} />
     </div>

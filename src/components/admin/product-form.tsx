@@ -106,7 +106,7 @@ export function ProductForm({
     // vuelve a validar esto igual, no confia en que el cliente lo haya hecho.
     if (relevantVariants.length === 0 && !isValidStockInput(simpleStock)) {
       setError(
-        "El stock no es valido. Escribi un numero entero sin puntos ni comas (ej: 50)."
+        "El stock no es válido. Escribí un número entero sin puntos ni comas (ej: 50)."
       );
       return;
     }
@@ -115,7 +115,7 @@ export function ProductForm({
     );
     if (invalidVariant) {
       setError(
-        `El stock de la variante "${invalidVariant.colorName || invalidVariant.sizeName}" no es valido. Escribi un numero entero sin puntos ni comas (ej: 50).`
+        `El stock de la variante "${invalidVariant.colorName || invalidVariant.sizeName}" no es válido. Escribí un número entero sin puntos ni comas (ej: 50).`
       );
       return;
     }
@@ -168,7 +168,7 @@ export function ProductForm({
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">
-          Descripcion
+          Descripción
         </label>
         <textarea
           name="description"
@@ -214,14 +214,14 @@ export function ProductForm({
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">
-          Categoria
+          Categoría
         </label>
         <select
           name="categoryId"
           defaultValue={initialProduct?.categoryId ?? ""}
           className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
         >
-          <option value="">Sin categoria</option>
+          <option value="">Sin categoría</option>
           {categories.map((category) => (
             <option key={category.id} value={category.id}>
               {category.name}
@@ -268,8 +268,8 @@ export function ProductForm({
         />
         <p className="mt-1 text-xs text-foreground/50">
           Imagen cuadrada, idealmente 1200x1200 px, fondo blanco o neutro. Se
-          optimiza automaticamente. PNG, JPG o WEBP, hasta 5 MB. La primera
-          foto que subas (si el producto no tiene ninguna todavia) queda como
+          optimiza automáticamente. PNG, JPG o WEBP, hasta 5 MB. La primera
+          foto que subas (si el producto no tiene ninguna todavía) queda como
           foto principal.
         </p>
       </div>

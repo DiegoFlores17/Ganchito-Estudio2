@@ -45,7 +45,7 @@ export default async function AdminPanelLayout({
                     href="/admin/configuracion"
                     className="text-sm text-foreground/70 transition-colors hover:text-primary"
                   >
-                    Configuracion
+                    Configuración
                   </Link>
                 </>
               )}
@@ -66,7 +66,7 @@ export default async function AdminPanelLayout({
                 type="submit"
                 className="text-xs font-medium text-foreground/50 transition-colors hover:text-primary"
               >
-                Cerrar sesion
+                Cerrar sesión
               </button>
             </form>
           </div>

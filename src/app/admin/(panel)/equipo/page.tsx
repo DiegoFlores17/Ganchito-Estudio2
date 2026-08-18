@@ -12,7 +12,7 @@ export default async function EquipoPage() {
     <div>
       <h1 className="text-2xl font-medium text-foreground">Equipo</h1>
       <p className="mt-1 text-sm text-foreground/60">
-        Quien tiene acceso al panel. Solo super-admins ven esta pantalla.
+        Quién tiene acceso al panel. Solo super-admins ven esta pantalla.
       </p>
 
       <div className="mt-6">

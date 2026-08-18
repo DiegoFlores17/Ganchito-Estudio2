@@ -31,7 +31,7 @@ export default async function ProductosPage({
             Productos manuales
           </h1>
           <p className="mt-1 text-sm text-foreground/60">
-            Los productos de Zecat no se listan ni se editan aca.
+            Los productos de Zecat no se listan ni se editan acá.
           </p>
         </div>
         <Link
@@ -46,7 +46,7 @@ export default async function ProductosPage({
         <SearchInput
           basePath="/admin/productos"
           initialValue={search}
-          placeholder="Buscar por nombre, proveedor o categoria..."
+          placeholder="Buscar por nombre, proveedor o categoría..."
         />
       </div>
 
@@ -119,7 +119,7 @@ export default async function ProductosPage({
           <p className="px-4 py-10 text-center text-sm text-foreground/50">
             {search
               ? `No se encontraron productos para "${search}".`
-              : "Todavia no cargaste ningun producto manual."}
+              : "Todavía no cargaste ningún producto manual."}
           </p>
         )}
       </div>

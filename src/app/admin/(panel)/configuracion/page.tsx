@@ -8,9 +8,9 @@ export default async function ConfiguracionPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-medium text-foreground">Configuracion</h1>
+      <h1 className="text-2xl font-medium text-foreground">Configuración</h1>
       <p className="mt-1 text-sm text-foreground/60">
-        Margen e IVA globales. Afecta el precio de todo el catalogo al instante.
+        Margen e IVA globales. Afecta el precio de todo el catálogo al instante.
       </p>
 
       <div className="mt-6">

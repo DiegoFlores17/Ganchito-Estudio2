@@ -5,10 +5,10 @@ export default function SinAccesoPage() {
     <div className="flex min-h-screen items-center justify-center bg-foreground/5 px-6 py-24">
       <div className="w-full max-w-sm rounded-2xl bg-background p-8 text-center shadow-sm">
         <h1 className="text-2xl font-black tracking-tight text-foreground">
-          No tenes acceso a este panel
+          No tenés acceso a este panel
         </h1>
         <p className="mt-3 text-sm text-foreground/60">
-          Tu cuenta de Google no esta autorizada. Si te parece que es un
+          Tu cuenta de Google no está autorizada. Si te parece que es un
           error, pedile a un administrador que te agregue al equipo.
         </p>
 

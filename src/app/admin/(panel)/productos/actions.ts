@@ -44,9 +44,9 @@ function parseNonNegativeInteger(raw: unknown): number | null {
 }
 
 const PRICE_FORMAT_ERROR =
-  'El precio base no es valido. Escribi el numero sin puntos de miles (ej: 37000, no 37.000).';
+  'El precio base no es válido. Escribí el número sin puntos de miles (ej: 37000, no 37.000).';
 const STOCK_FORMAT_ERROR =
-  "El stock no es valido. Tiene que ser un numero entero sin puntos ni comas.";
+  "El stock no es válido. Tiene que ser un número entero sin puntos ni comas.";
 
 /// Crea o edita un producto manual. Ambos casos comparten la misma logica:
 /// si viene "productId" en el formulario, es edicion; si no, alta.

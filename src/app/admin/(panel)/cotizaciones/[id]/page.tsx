@@ -125,7 +125,7 @@ export default async function CotizacionDetallePage({
             <dl className="mt-2 flex flex-col gap-1.5 text-sm">
               <Row label="Empresa" value={quote.companyName ?? "—"} />
               <Row label="Email" value={quote.customerEmail} />
-              <Row label="Telefono" value={quote.customerPhone ?? "—"} />
+              <Row label="Teléfono" value={quote.customerPhone ?? "—"} />
             </dl>
           </div>
 
@@ -142,7 +142,7 @@ export default async function CotizacionDetallePage({
               </a>
             ) : (
               <p className="mt-2 text-sm text-foreground/50">
-                No subio ningun archivo todavia.
+                No subió ningún archivo todavía.
               </p>
             )}
           </div>

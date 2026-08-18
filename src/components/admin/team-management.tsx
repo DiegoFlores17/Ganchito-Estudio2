@@ -13,6 +13,11 @@ interface AdminRow {
   createdAt: Date;
 }
 
+/// Que accion esta corriendo. Hay un solo useTransition para el alta y las
+/// bajas, asi que isPending por si solo no alcanza: sin esto, sacar a una
+/// persona pondria "Sacando..." en TODAS las filas de la tabla.
+type PendingAction = { kind: "add" } | { kind: "remove"; id: string } | null;
+
 export function TeamManagement({
   admins,
   currentAdminId,
@@ -23,6 +28,15 @@ export function TeamManagement({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+
+  // No se limpia pendingAction al terminar: se lee SIEMPRE junto con
+  // isPending, asi que cuando la transicion cierra, los botones vuelven solos
+  // a su texto normal y el valor viejo queda inerte hasta la proxima accion.
+  // Limpiarlo desde un efecto seria disparar un render en cascada al pedo.
+  const addPending = isPending && pendingAction?.kind === "add";
+  const removingId =
+    isPending && pendingAction?.kind === "remove" ? pendingAction.id : null;
 
   function handleAdd(event: FormEvent<HTMLFormElement>) {
     // onSubmit + preventDefault (no action={fn}): asi el formulario no se
@@ -31,6 +45,7 @@ export function TeamManagement({
     const form = event.currentTarget;
     const formData = new FormData(form);
     setError(null);
+    setPendingAction({ kind: "add" });
 
     startTransition(async () => {
       const result = await addAdmin(formData);
@@ -46,6 +61,7 @@ export function TeamManagement({
   function handleRemove(adminId: string, email: string) {
     if (!window.confirm(`¿Sacar a ${email} del panel?`)) return;
     setError(null);
+    setPendingAction({ kind: "remove", id: adminId });
     startTransition(async () => {
       const result = await removeAdmin(adminId);
       if (!result.success) {
@@ -95,7 +111,7 @@ export function TeamManagement({
           disabled={isPending}
           className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-dark disabled:opacity-60"
         >
-          Agregar
+          {addPending ? "Agregando..." : "Agregar"}
         </button>
       </form>
 
@@ -144,7 +160,7 @@ export function TeamManagement({
                     onClick={() => handleRemove(admin.id, admin.email)}
                     className="text-xs font-medium text-foreground/50 transition-colors hover:text-primary-dark disabled:opacity-60"
                   >
-                    Sacar
+                    {removingId === admin.id ? "Sacando..." : "Sacar"}
                   </button>
                 </td>
               </tr>

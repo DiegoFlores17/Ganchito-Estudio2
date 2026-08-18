@@ -3,6 +3,7 @@ import { QuoteStatus } from "@prisma/client";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getQuotes } from "@/lib/admin-quotes";
 import { StatusBadge } from "@/components/admin/status-badge";
+import { QuoteFilters } from "@/components/admin/quote-filters";
 
 const STATUS_OPTIONS: { value: QuoteStatus; label: string }[] = [
   { value: QuoteStatus.SUBMITTED, label: "Recibidas" },
@@ -30,51 +31,11 @@ export default async function CotizacionesPage({
     <div>
       <h1 className="text-2xl font-medium text-foreground">Cotizaciones</h1>
 
-      <form className="mt-6 flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-foreground/60">
-            Buscar por email del cliente
-          </label>
-          <input
-            type="text"
-            name="email"
-            defaultValue={email}
-            placeholder="cliente@empresa.com"
-            className="w-64 rounded-lg border border-foreground/15 px-3 py-2 text-sm outline-none focus:border-primary"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-foreground/60">Estado</label>
-          <select
-            name="status"
-            defaultValue={status ?? ""}
-            className="rounded-lg border border-foreground/15 px-3 py-2 text-sm outline-none focus:border-primary"
-          >
-            <option value="">Todos</option>
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          type="submit"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
-        >
-          Filtrar
-        </button>
-        {(email || status) && (
-          <Link
-            href="/admin/cotizaciones"
-            className="text-sm text-foreground/50 transition-colors hover:text-primary"
-          >
-            Limpiar
-          </Link>
-        )}
-      </form>
+      <QuoteFilters
+        initialEmail={email}
+        initialStatus={status}
+        statusOptions={STATUS_OPTIONS}
+      />
 
       <div className="mt-8 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
         <table className="w-full min-w-[720px] text-sm">

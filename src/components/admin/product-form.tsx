@@ -66,6 +66,10 @@ export function ProductForm({
     initialProduct?.images ?? []
   );
   const [deleteImageIds, setDeleteImageIds] = useState<string[]>([]);
+  // Guardar con imagenes tarda bastante mas: sharp las optimiza antes de
+  // subirlas a Blob. Si el boton dice solo "Guardando...", el admin cree que
+  // se colgo. Se avisa que hay imagenes en juego.
+  const [processingImages, setProcessingImages] = useState(false);
 
   function addVariantRow() {
     setVariants((rows) => [...rows, { colorName: "", sizeName: "", stock: "0" }]);
@@ -130,10 +134,18 @@ export function ProductForm({
     );
     formData.set("deleteImageIds", JSON.stringify(deleteImageIds));
 
+    // El input de archivos es no controlado: la unica forma de saber si hay
+    // imagenes nuevas es mirar el FormData ya armado.
+    const hasNewImages = formData
+      .getAll("newImages")
+      .some((entry) => entry instanceof File && entry.size > 0);
+    setProcessingImages(hasNewImages);
+
     startTransition(async () => {
       const result = await saveProduct(formData);
       if (!result.success) {
         setError(result.error ?? "No se pudo guardar.");
+        setProcessingImages(false);
         return;
       }
       router.push("/admin/productos");
@@ -348,7 +360,11 @@ export function ProductForm({
         disabled={isPending}
         className="self-start rounded-full bg-primary px-8 py-3 text-sm font-medium text-white transition-colors hover:bg-primary-dark disabled:opacity-60"
       >
-        {isPending ? "Guardando..." : "Guardar"}
+        {isPending
+          ? processingImages
+            ? "Procesando imagenes..."
+            : "Guardando..."
+          : "Guardar"}
       </button>
     </form>
   );

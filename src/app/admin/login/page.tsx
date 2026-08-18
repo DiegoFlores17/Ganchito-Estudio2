@@ -1,4 +1,5 @@
 import { signIn } from "@/auth";
+import { GoogleSignInButton } from "@/components/admin/google-signin-button";
 
 export default function AdminLoginPage() {
   return (
@@ -19,12 +20,7 @@ export default function AdminLoginPage() {
           }}
           className="mt-8"
         >
-          <button
-            type="submit"
-            className="w-full rounded-full bg-primary px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
-          >
-            Continuar con Google
-          </button>
+          <GoogleSignInButton />
         </form>
       </div>
     </div>

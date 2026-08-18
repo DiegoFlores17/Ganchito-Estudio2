@@ -159,6 +159,20 @@ model Product {
   /// Para productos MANUAL, "pausar" desde el panel es poner esto en false.
   active            Boolean       @default(true)
 
+  /// Baja lógica de productos manuales. Null = vigente.
+  ///
+  /// No se reusa `active` para esto: `active` significa "pausado", un estado
+  /// reversible que el admin ve y puede volver a prender. Si eliminar fuera
+  /// `active = false`, "Pausar" y "Eliminar" serían el mismo botón con dos
+  /// nombres, y un producto eliminado reaparecería en la grilla como si solo
+  /// estuviera en pausa.
+  ///
+  /// Es baja lógica y no borrado real porque `QuoteItem` referencia al
+  /// producto por FK con ON DELETE RESTRICT, y el detalle de cotización lee
+  /// `item.product.name` (el nombre NO se copia al cotizar, solo el precio se
+  /// congela). Borrarlo de verdad rompería las cotizaciones históricas.
+  deletedAt         DateTime?
+
   /// Proveedor en texto libre, SOLO para productos origin=MANUAL cargados a
   /// mano desde el panel. No tiene relación con el modelo Supplier (esa es
   /// la reserva para el sistema multi-proveedor automatizado futuro).

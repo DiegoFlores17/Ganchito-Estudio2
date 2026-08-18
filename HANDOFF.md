@@ -3,9 +3,11 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-14 — tanda 1 de estados de carga
-**Branch:** `main`, pusheado. La tanda 1 son tres commits sobre `3dc2f4a`:
-`f6871d9` (fix de paginación), `b0dbcdd` (estados de carga), `c23b047` (docs).
+**Última actualización:** 2026-08-18 — tanda 2 de estados de carga
+**Branch:** `main`. La tanda 1 (`f6871d9`, `b0dbcdd`, `c23b047`) está pusheada y
+deployada. La tanda 2 está **commiteada pero SIN pushear**: `1278e4c` (fix de
+autorización del panel), `69432a1` (loading.tsx del resto de rutas), `7fcb106`
+(shimmer del catálogo), `d05b88e` (feedback de acciones del admin).
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
@@ -70,98 +72,87 @@ Construido, commiteado y visible funcionando en producción:
   > Hubo que crearla a mano como `BLOB_READ_WRITE_TOKEN`. Si se cambia de store de
   > Blob, revisar esto primero: el síntoma es que las subidas fallan por falta de
   > token aunque el store figure conectado en el dashboard.
+- **Fix de la paginación del catálogo** (`f6871d9`). Verificado en producción el
+  2026-08-18: entrar a `/catalogo?page=3` ya no devuelve a la página 1.
 
 ---
 
 ## En curso
 
-### Estados de carga — tanda 1 implementada, resto pendiente
+### Estados de carga — las dos tandas escritas, la 2 sin deployar
 
-El relevamiento completo está hecho y la **tanda 1 (prioridad alta) ya está
-escrita**. Pasa `tsc --noEmit` y `eslint` sin errores. **Falta probarla en
-producción** (ver "Pendiente de verificar").
+El relevamiento está cerrado y **las dos tandas están implementadas**. Todo pasa
+`tsc --noEmit`, `eslint` y `npm run build`.
 
-Archivos de la tanda 1:
+**Tanda 1** (pusheada y deployada). Del deploy solo está confirmado el fix de
+paginación; **los skeletons todavía no se miraron en producción**.
 
-- `src/components/skeleton.tsx` — primitiva `<Skeleton />` compartida. Tinte
-  violeta de marca a opacidad muy baja (`bg-primary/[0.07]`) + `animate-pulse`.
-  Sobria a propósito: sin shimmer ni barridos.
-- `src/app/(store)/catalogo/loading.tsx` — skeleton que replica el layout del
-  catálogo. El título y la bajada se renderizan de verdad (son texto fijo, no
-  dependen de la base); solo va en gris lo que espera datos.
-- `src/app/(store)/producto/[id]/loading.tsx` — skeleton de 2 columnas
-  (galería + miniaturas / nombre, descripción, panel de compra, personalización).
-- `src/components/search-input.tsx` — `useTransition` alrededor del
-  `router.replace` + spinner en el input mientras `isPending`, con `role="status"`
-  para lectores de pantalla. Cubre `/catalogo` y `/admin/productos` de una.
+- `src/components/skeleton.tsx` — primitiva `<Skeleton />`. Tinte violeta de marca
+  a opacidad muy baja (`bg-primary/[0.07]`) + `animate-pulse`. Sobria a propósito.
+- `catalogo/loading.tsx` y `producto/[id]/loading.tsx`.
+- `src/components/search-input.tsx` — `useTransition` + spinner en el input.
+  Cubre `/catalogo` y `/admin/productos` de una.
 
-**Bug encontrado y corregido en el camino** (ver sección aparte más abajo).
+**Tanda 2** (commiteada, **sin pushear**).
 
-Situación de partida, verificada con `rg` sobre todo `src/` antes de empezar:
+- `admin-skeletons.tsx` (tabla + formulario compartidos) y `quote-skeleton.tsx`.
+- `loading.tsx` en `/cotizar` y en las siete pantallas del panel.
+- Home: en vez de `loading.tsx`, `Suspense` por sección — ver la nota de abajo.
+- `product-card-image.tsx` — shimmer del catálogo (opción A, decidida).
+- Feedback de acciones: login del admin, filtro de cotizaciones, team-management,
+  toggle-active, product-form.
 
 | | Antes | Ahora |
 |---|---|---|
-| `loading.tsx` | 0 | 2 |
-| `error.tsx` | 0 | 0 |
-| Skeletons / `animate-pulse` | 0 | sí (primitiva compartida) |
-| `placeholder="blur"` | 0 | 0 (decisión abierta) |
+| `loading.tsx` | 0 | 9 |
+| `error.tsx` | 0 | 0 (sigue sin cubrirse) |
+| Skeletons / `animate-pulse` | 0 | primitiva + piezas compartidas |
+| `placeholder="blur"` | 0 | n/a — resuelto con shimmer (opción A) |
 
-El único indicador que existía era una línea de texto en
-`src/app/(store)/cotizar/page.tsx:124` ("Cargando tu cotizacion...").
+El único indicador que existía antes de todo esto era una línea de texto en
+`/cotizar` ("Cargando tu cotizacion...").
 
-**Dato de la doc de Next 16.3** (`node_modules/next/dist/docs/.../loading.md:88`):
-si un `layout.tsx` accede a datos sin cachear, el `loading.tsx` de ese segmento
-**no** muestra fallback y la navegación bloquea igual. Se verificó que
-`src/app/(store)/layout.tsx` es puro (solo Header/Footer), así que los dos
-`loading.tsx` nuevos funcionan. **Ojo con el panel admin**: su layout llama a
-`requireAdmin()`, que pega a la base — antes de agregarle `loading.tsx` hay que
-resolver eso o los fallbacks no van a aparecer.
+**Decisiones tomadas durante la implementación** (las cuatro importan si se
+retoma esto de cero):
 
-**Los cuatro frentes relevados:**
+**1. Imágenes: opción A, shimmer.** `placeholder="blur"` con imágenes remotas
+exige un `blurDataURL` generado a mano (Next solo lo genera automático con
+imports estáticos). Las de Zecat se borran y recrean en cada sync, así que
+implicaría descargar 552 imágenes por corrida para un efecto visual. Se
+descartó. Si más adelante se quiere blur real, se suma **solo para productos
+manuales**, donde sharp ya corre al subir.
 
-1. **Navegación entre páginas.** Ninguna ruta tiene `loading.tsx`. Todas las
-   páginas son server components que consultan Neon antes de renderizar: hasta que
-   vuelve la query, el usuario se queda en la pantalla anterior sin señal.
-   Prioridad alta: `/catalogo` (3 queries en paralelo) y `/producto/[id]`.
+**2. El gate del panel se queda bloqueando.** La doc de Next 16.3
+(`docs/.../loading.md:88` y `layout.md:316`) dice que si un layout accede a datos
+sin cachear, el `loading.tsx` de ese segmento no muestra fallback, y recomienda
+sacar el acceso del layout o envolverlo en `Suspense`. **Aplicado a
+`requireAdmin()` eso habría sido un agujero de autorización**: el contenido del
+panel empezaría a transmitirse antes de resolver el chequeo. Ver la sección del
+fix más abajo. La solución fue al revés: la barrera se queda bloqueando en el
+layout, y cada page se autoriza a sí misma — esa llamada sí cae dentro del
+`Suspense` que abre `loading.tsx`.
 
-2. **Acciones que envían datos.** Casi todo ya está cubierto con `useTransition` +
-   `disabled` (product-form, pricing-config-form, quote-status-select, submit de
-   cotización). Gaps encontrados:
-   - `src/app/admin/login/page.tsx:22` — "Continuar con Google" es una server
-     action pura, **sin protección contra doble click**. Es el único submit
-     totalmente desprotegido.
-   - `src/app/admin/(panel)/cotizaciones/page.tsx:28` — el filtro es un `<form>`
-     GET nativo: recarga completa sin ninguna señal.
-   - `team-management` y `toggle-active-button` — tienen `disabled`, pero el único
-     feedback visual es `opacity-60`. El texto del botón no cambia.
-   - `product-form` con imagen — es la acción más lenta (sharp procesa antes de
-     subir) y solo dice "Guardando...".
+**3. La home usa `Suspense` por sección, no `loading.tsx` de ruta.** Tres de sus
+cinco secciones son texto fijo; un fallback de ruta las taparía con gris sin
+motivo.
 
-3. **Búsqueda y filtros del catálogo.** Los tres controles navegan sin señal:
-   - `src/components/search-input.tsx:35` — debounce de 350ms y `router.replace`
-     **sin `useTransition`**. Los resultados viejos quedan en pantalla. Este
-     componente se usa en `/catalogo` **y** en `/admin/productos`: un solo arreglo
-     cubre ambos.
-   - `category-filter.tsx` y `pagination.tsx` — `<Link>` puros, sin estado pending.
+**4. Estética:** paleta de marca según `DISENO/DISENO.md`, sobrio, sin
+animaciones estridentes. El riesgo a evitar es una interfaz que parpadee por
+todos lados.
 
-4. **Carga de imágenes.** `next/image` se usa en todos lados, pero sin ningún
-   `placeholder`. Los cuadrados grises del catálogo son el
-   `bg-foreground/[0.03]` del contenedor en `product-card.tsx:33`.
+### Hallazgo: la home se sirve estática (preexistente, NO es una regresión)
 
-**Decisión abierta (bloquea el punto 4):** `placeholder="blur"` con imágenes
-remotas exige un `blurDataURL` generado a mano — Next solo lo genera automático con
-imports estáticos. Las imágenes de Zecat son URLs remotas que se borran y recrean
-en cada sync, así que generar el blur de 552 productos implicaría descargar cada
-imagen en cada corrida. Dos caminos:
+`npm run build` marca `/` como `○ (Static)`. Se verificó que **ya era así antes**
+de la refactorización (build del commit anterior con `git stash`), así que no lo
+introdujo este trabajo. Pero tiene dos consecuencias que conviene decidir:
 
-- **A)** Shimmer en el contenedor + fade-in con `onLoad`. Cero costo, cero cambio
-  de schema, aplica igual a Zecat y a manuales. **Recomendado.**
-- **B)** Columna `blurDataUrl` en `ProductImage` generada con sharp. Barato para
-  productos manuales (sharp ya corre al subir), caro para Zecat.
+- Las categorías y los destacados de la home quedan **congelados al momento del
+  build**: no se actualizan cuando corre el sync, solo cuando hay un redeploy.
+- Por lo mismo, los `Suspense` de la home **no se van a ver en producción** hasta
+  que la ruta se sirva dinámica. La estructura queda lista para ese cambio.
 
-**Estética:** los skeletons y spinners van en la paleta de marca según `DISENO/DISENO.md`,
-sobrios, sin animaciones estridentes. El riesgo a evitar es una interfaz que
-parpadea por todos lados: por eso el mapa va antes que el código.
+Es una decisión de negocio (datos frescos vs. home estática instantánea), por eso
+se deja planteada y no resuelta.
 
 ### Bug corregido: la paginación del catálogo se reseteaba sola
 
@@ -184,6 +175,26 @@ URL queda en `/catalogo?categoria=drinkware`. `categoria` sobrevive (está en
 cuando el valor tipeado cambia de verdad. Sin esto, además, el spinner nuevo se
 encendía solo en cada carga de página.
 
+**Verificado en producción el 2026-08-18:** `/catalogo?page=3` conserva el `page`.
+
+### Fix de autorización: el panel dependía solo del layout
+
+`/admin/cotizaciones` y `/admin/productos` **no llamaban a `requireAdmin()`**: su
+única barrera era la del layout. El middleware no sirve de respaldo porque corre
+en Edge y solo puede ver si existe una sesión de Google válida — no puede
+consultar `AdminUser` ni el rol.
+
+Apareció al planificar los `loading.tsx` del panel: seguir la recomendación
+genérica de la doc (sacar el acceso a datos del layout o envolverlo en
+`Suspense`) habría dejado que esas dos pantallas empiecen a transmitir su
+contenido antes de resolver el chequeo, filtrando cotizaciones y productos a
+cualquiera con una cuenta de Google.
+
+**Fix** (`1278e4c`): cada page del panel se autoriza a sí misma, y el layout
+mantiene su barrera bloqueante. `requireAdmin()` / `requireSuperAdmin()` quedan
+envueltas en `cache()` de React para que layout y page no disparen dos consultas
+idénticas por navegación (el cache es por request, no debilita el chequeo).
+
 ---
 
 ## Pendiente de verificar
@@ -198,11 +209,20 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   prueba del otro uso: un cliente subiendo su logo en `/cotizar` en producción.
 - **Token de Zecat: preprod o producción.** Sigue sin confirmarse a cuál apunta
   `ZECAT_API_URL`.
-- **La tanda 1 de estados de carga, en producción.** Pasa typecheck y lint, pero
-  los skeletons solo se ven con latencia real: hay que deployar y mirar
-  `/catalogo` y `/producto/[id]` en Vercel. Confirmar de paso que el fix de la
-  paginación quedó bien (entrar a `/catalogo?page=3` y verificar que la URL
-  **no** pierde el `page`).
+- **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
+  confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
+  con latencia real.
+- **Toda la tanda 2.** Pasa typecheck, lint y build, pero **no está pusheada** y
+  nada se probó en producción. Al deployarla hay que mirar, como mínimo:
+  - Que el panel siga entrando bien (se tocó la autorización).
+  - Que los skeletons del admin aparezcan al navegar **entre** pantallas del
+    panel. Al entrar por primera vez el layout bloquea por el chequeo de
+    autorización — eso es correcto y esperado, no un bug.
+  - El shimmer del catálogo, con especial atención a las fotos ya cacheadas
+    (recargar dos veces): si alguna queda invisible, falló el chequeo de
+    `.complete` de `product-card-image.tsx`.
+  - El filtro de `/admin/cotizaciones`, que pasó de recarga completa a navegación
+    del router.
 
 > Nota: `next dev` reescribe solo el bloque `nextjs-agent-rules` de `CLAUDE.md`.
 > Si vuelve a aparecer como cambio sin commitear, es eso — se commitea junto con
@@ -212,9 +232,23 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Deployar la tanda 1 y verla en producción.** Es lo único que valida el trabajo:
-en local no hay latencia y los skeletons no aparecen nunca. Mirar `/catalogo` y
-`/producto/[id]`, y confirmar que `/catalogo?page=3` ya no pierde el `page`.
+**Pushear la tanda 2 y verificarla en producción**, con la lista de "Pendiente de
+verificar" en la mano. En local no hay latencia: los estados de carga no se ven
+nunca, así que el deploy es lo único que valida el trabajo.
+
+Con eso confirmado, lo que queda del tema estados de carga:
+
+1. **`error.tsx`** — sigue sin haber ninguno en todo el proyecto. Si Neon falla,
+   el usuario ve la pantalla de error genérica de Next. Es el último hueco del
+   relevamiento sin cubrir.
+2. **Estado pending en `category-filter.tsx` y `pagination.tsx`** — son `<Link>`
+   puros. Ahora que `/catalogo` tiene `loading.tsx`, puede que ya alcance; hay que
+   mirarlo en producción antes de agregar nada (`useLinkStatus` existe para esto,
+   pero la doc advierte que si la ruta ya tiene fallback, no hace falta).
+3. **Decidir si la home pasa a dinámica** (ver el hallazgo más arriba).
+
+Después de los estados de carga, la Home vuelve a la cola: quedó pendiente sumarle
+un bloque de logos de marcas clientes (falta conseguir los logos).
 
 Con eso confirmado, la **tanda 2 de estados de carga**:
 

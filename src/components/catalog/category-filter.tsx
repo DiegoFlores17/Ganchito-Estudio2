@@ -45,6 +45,18 @@ export function CategoryFilter({
     setOpen(false);
   }
 
+  // QUE categoria se muestra como activa. Mientras hay una navegacion en
+  // curso manda la tocada, no la vigente: si mandara activeSlug, el violeta
+  // se quedaria en la categoria que el usuario ACABA DE ABANDONAR, o sea que
+  // la señal mas fuerte de la pantalla apuntaria al lugar equivocado.
+  //
+  // El cambio de color no parpadea aunque la navegacion sea rapida, porque no
+  // es un indicador temporal: es el estado final adelantado. Cuando llega la
+  // pagina, la fila ya esta donde tiene que estar. Lo unico que se anima con
+  // retardo es la opacidad (clase "navegando"), que es la parte que sI
+  // reverteria si la navegacion fallara.
+  const slugMostrado = pendingSlug ?? activeSlug;
+
   // Salida de emergencia: si la navegacion nunca termina, el panel se cierra
   // igual. El setState va adentro del timeout (no sincronico en el efecto), y
   // el cleanup cancela el timer si la navegacion llega antes.
@@ -68,15 +80,17 @@ export function CategoryFilter({
       <nav className="hidden flex-wrap gap-2 md:flex">
         <CategoryLink
           href={buildHref(undefined, search)}
-          active={!activeSlug}
+          active={!slugMostrado}
           label="Todas"
+          onNavigate={() => setPendingSlug("")}
         />
         {categories.map((category) => (
           <CategoryLink
             key={category.id}
             href={buildHref(category.slug, search)}
-            active={category.slug === activeSlug}
+            active={category.slug === slugMostrado}
             label={category.name}
+            onNavigate={() => setPendingSlug(category.slug)}
           />
         ))}
       </nav>
@@ -115,7 +129,7 @@ export function CategoryFilter({
             <div className="flex-1 overflow-y-auto px-6 py-4">
               <PanelLink
                 href={buildHref(undefined, search)}
-                active={!activeSlug}
+                active={!slugMostrado}
                 label="Todas"
                 onNavigate={() => setPendingSlug("")}
               />
@@ -123,7 +137,7 @@ export function CategoryFilter({
                 <PanelLink
                   key={category.id}
                   href={buildHref(category.slug, search)}
-                  active={category.slug === activeSlug}
+                  active={category.slug === slugMostrado}
                   label={category.name}
                   onNavigate={() => setPendingSlug(category.slug)}
                 />
@@ -140,14 +154,16 @@ function CategoryLink({
   href,
   active,
   label,
+  onNavigate,
 }: {
   href: string;
   active: boolean;
   label: string;
+  onNavigate: () => void;
 }) {
   return (
     // El Link se queda solo con lo estructural: el aspecto vive en el hijo.
-    <Link href={href} className="shrink-0 rounded-full">
+    <Link href={href} onClick={onNavigate} className="shrink-0 rounded-full">
       <CategoryChip active={active} label={label} />
     </Link>
   );

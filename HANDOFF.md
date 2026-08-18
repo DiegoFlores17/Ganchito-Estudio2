@@ -3,11 +3,13 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-18 — tandas 4 y 5
-**Branch:** `main`. Tandas 1-3 pusheadas y deployadas. Tandas 4 y 5 commiteadas.
+**Última actualización:** 2026-08-18 — tanda 6
+**Branch:** `main`, todo pusheado. Tanda 6: `03800c2` (refactor Link + hijo),
+`7adbdc5` (indicador de navegación y cierre del panel mobile).
 
-> Deployado **no es** verificado. Nada de las tandas 2 a 5 se miró todavía en
-> producción — ver "Pendiente de verificar".
+> Deployado **no es** verificado. Nada de las tandas 2 a 6 se miró todavía en
+> producción — ver "Pendiente de verificar". Lo de la tanda 6 sí se probó en
+> el navegador con el dev server, que es distinto de haberlo visto en Vercel.
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
@@ -161,6 +163,64 @@ Con esto **el relevamiento queda cerrado**: los cuatro frentes cubiertos.
   No se tocaron URLs, slugs, nombres de parámetros, identificadores ni
   comentarios: el searchParam sigue siendo `categoria` sin tilde.
 
+**Tanda 6** — el hueco anterior al skeleton.
+
+Confirmado en producción que el `loading.tsx` de `/catalogo` funciona: el
+esqueleto aparece al cambiar de categoría y de página. Lo que quedaba
+descubierto era el **instante anterior**: entre el toque y el esqueleto la
+pantalla vieja se queda quieta, y en mobile eso puede durar segundos.
+
+- `03800c2` — refactor puro, sin cambio visual. El aspecto de los controles
+  (fondo del chip, círculo del número de página) vivía sobre el propio
+  `<Link>`; se muda a un `<span>` hijo en `link-content.tsx`. Era condición
+  necesaria: `useLinkStatus` solo puede llamarse desde un **descendiente** del
+  `Link`, y un hijo no puede estilar a su padre.
+- `7adbdc5` — el control tocado se atenúa mientras navega, vía `useLinkStatus`.
+  Solo opacidad: sin cambio de tamaño ni posición, así que no hay layout shift.
+
+**El retardo de 120ms no es un detalle.** Sin él, *cada* navegación rápida
+tiraba un parpadeo del control. El keyframe `navegando` de `globals.css`
+arranca invisible y solo aparece si la cosa de verdad tarda. Medido:
+50ms → 1.00, 110ms → 1.00, 200ms → 0.69, 400ms → 0.45. Respeta
+`prefers-reduced-motion`.
+
+**No se usa `prefetch={false}`**, aunque la doc diga que el hook "es más útil"
+así. Apagar el prefetch haría lento *siempre* lo que hoy es rápido, y el hueco
+que se tapa es justamente cuando el prefetch **no** llegó a completarse — que
+es por qué el síntoma aparece en mobile y no en desktop.
+
+### El panel de categorías de mobile ya no se cierra en el toque
+
+Era el peor caso y era el de mobile: al tocar una categoría el panel se cerraba
+al instante, o sea que **el único control capaz de devolver una señal
+desaparecía de la pantalla en el mismo momento del toque**, y el usuario
+quedaba mirando el catálogo viejo sin ningún cambio.
+
+Ahora se cierra cuando la navegación **llega**. Cómo se detecta, que es lo no
+obvio: `activeSlug` es una prop que manda el server con los searchParams
+nuevos, así que alcanza con comparar `pendingSlug` contra ella y ajustar el
+estado **durante el render**. Nada de efectos ni de callbacks del hijo hacia
+arriba — eso último habría requerido un `setState` dentro de un `useEffect`,
+que es el anti-patrón que el linter ya marcó en `team-management.tsx`.
+
+**Salida de emergencia (`PANEL_SALIDA_MS`, 2s):** si la navegación nunca
+termina, el panel se cierra igual. El `setState` va dentro del callback del
+timeout, no sincrónico en el efecto, por eso pasa el lint. El botón de cerrar
+**nunca** se deshabilita.
+
+> Ojo: el panel es `fixed inset-0` con fondo opaco, ocupa la pantalla entera.
+> **No hay backdrop clickeable**, la salida es el botón de cerrar. Si se quiere
+> Escape o un backdrop real, es trabajo aparte.
+
+Verificado en el navegador con el dev server:
+
+| Prueba | Resultado |
+|---|---|
+| Chip tocado en desktop | Se marca **uno solo**, el cliqueado |
+| Panel mobile al tocar | 1ms: abierto · 106ms: fila marcada · 196ms: cerrado con URL nueva |
+| Red colgada (`window.fetch` anulado) | Abierto y marcado a 279/992/1787ms · **cerrado a 2037ms** |
+| Cerrar durante pending colgado | Botón habilitado, se pudo salir |
+
 El único indicador que existía antes de todo esto era una línea de texto en
 `/cotizar` ("Cargando tu cotizacion...").
 
@@ -299,6 +359,11 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   - El ancla "Cómo funciona" del header, desde una ruta que no sea la home.
     Verificada en local; en producción la home se sirve cacheada, así que
     conviene confirmar que el destino existe en el HTML servido.
+  - **El indicador de navegación en un mobile real, con red real.** Es lo único
+    que valida la tanda 6: se probó con el dev server, donde la latencia es
+    artificial. Mirar que el chip/número se atenúe cuando la navegación tarda,
+    que NO parpadee cuando es rápida, y que el panel de categorías se quede
+    abierto con la fila marcada hasta que llega la página.
   - Que no haya quedado ningún texto sin tilde ni, peor, alguna URL rota por la
     pasada de ortografía. El commit no tocó URLs ni slugs, pero se revisa.
 
@@ -310,21 +375,20 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Verificar en producción todo lo acumulado** (tandas 2 y 3), con la lista de
+**Verificar en producción todo lo acumulado** (tandas 2 a 6), con la lista de
 "Pendiente de verificar" en la mano. Ya está todo deployado. En local no hay
-latencia: los estados de carga no se ven nunca, así que mirarlo en Vercel es lo
-único que valida el trabajo.
+latencia: los estados de carga no se ven nunca, así que mirarlo en Vercel —y en
+un teléfono real, no en el navegador angostado— es lo único que valida el
+trabajo.
+
+Con el relevamiento cerrado, **no queda nada pendiente de construir en el tema
+estados de carga**. Lo que sigue es verificar y decidir.
 
 Para probar las pantallas de error hace falta forzar un fallo — lo más simple es
 apuntar `DATABASE_URL` a una base inexistente en un preview de Vercel.
 
 Lo que queda abierto:
 
-- **Estado pending en `category-filter.tsx` y `pagination.tsx`** — son `<Link>`
-  puros. Ahora que `/catalogo` tiene `loading.tsx`, puede que ya alcance: hay que
-  mirarlo en producción **antes** de agregar nada. `useLinkStatus` existe para
-  esto, pero su propia doc advierte que si la ruta ya tiene fallback no hace
-  falta, y meter indicadores de más es justamente lo que se quería evitar.
 - **`notFound()` que hoy no se llama** (relevado, no cambiado — es decisión de
   producto):
   - `/catalogo?categoria=basura` devuelve **200** con la grilla vacía y "No hay
@@ -338,25 +402,6 @@ Lo que queda abierto:
 
 Después, la Home vuelve a la cola: quedó pendiente sumarle un bloque de logos de
 marcas clientes (falta conseguir los logos).
-
-Con eso confirmado, la **tanda 2 de estados de carga**:
-
-1. `loading.tsx` para el resto de las rutas (`/`, `/cotizar` y las del panel).
-   **Antes de las del panel**, resolver que `src/app/admin/(panel)/layout.tsx`
-   llama a `requireAdmin()` (dato sin cachear en el layout ⇒ el fallback no se
-   muestra).
-2. Proteger el submit desprotegido de `src/app/admin/login/page.tsx:22`
-   ("Continuar con Google") contra el doble click.
-3. Pulir el feedback de las acciones del admin: hoy `team-management` y
-   `toggle-active-button` solo cambian la opacidad. Sumar texto de estado.
-   En `product-form`, avisar explícitamente cuando está procesando la imagen.
-4. Indicador de pending en el filtro de `/admin/cotizaciones` (hoy es un `<form>`
-   GET nativo, recarga sin señal).
-5. Resolver la **decisión abierta** del punto 4 del relevamiento (shimmer vs.
-   `blurDataURL`) y aplicarla al catálogo.
-
-Después de los estados de carga, la Home vuelve a la cola: quedó pendiente sumarle
-un bloque de logos de marcas clientes (falta conseguir los logos).
 
 ---
 

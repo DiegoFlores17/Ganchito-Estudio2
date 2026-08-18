@@ -10,6 +10,7 @@ async function searchManualProductIds(search: string): Promise<string[]> {
     FROM products p
     LEFT JOIN categories c ON c.id = p."categoryId"
     WHERE p.origin = 'MANUAL'
+      AND p."deletedAt" IS NULL
       AND (
         unaccent(p.name) ILIKE unaccent(${"%" + search + "%"}) OR
         unaccent(p."supplierName") ILIKE unaccent(${"%" + search + "%"}) OR
@@ -33,7 +34,9 @@ async function searchManualProductIds(search: string): Promise<string[]> {
 /// que mensaje darle al usuario.
 export async function findManualProductForWrite(id: string) {
   return prisma.product.findFirst({
-    where: { id, origin: ProductOrigin.MANUAL },
+    // Un producto ya eliminado tampoco se edita, ni se pausa, ni se vuelve a
+    // eliminar: para el panel dejo de existir.
+    where: { id, origin: ProductOrigin.MANUAL, deletedAt: null },
     select: { id: true },
   });
 }
@@ -48,6 +51,7 @@ export async function getManualProducts(search?: string) {
 
   const where: Prisma.ProductWhereInput = {
     origin: ProductOrigin.MANUAL,
+    deletedAt: null,
     ...(matchedIds ? { id: { in: matchedIds } } : {}),
   };
 
@@ -60,7 +64,7 @@ export async function getManualProducts(search?: string) {
 
 export async function getManualProductById(id: string) {
   return prisma.product.findFirst({
-    where: { id, origin: ProductOrigin.MANUAL },
+    where: { id, origin: ProductOrigin.MANUAL, deletedAt: null },
     include: {
       category: true,
       images: { orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }] },

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 
 export async function getProductById(id: string) {
   return prisma.product.findUnique({
-    where: { id, active: true },
+    where: { id, active: true, deletedAt: null },
     include: {
       category: true,
       // Solo fotos del producto en si (no una por cada variante/color: con

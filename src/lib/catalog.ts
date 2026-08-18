@@ -29,6 +29,7 @@ async function searchProductIds(search: string): Promise<string[]> {
     LEFT JOIN categories c ON c.id = p."categoryId"
     LEFT JOIN product_variants v ON v."productId" = p.id
     WHERE p.active = true
+      AND p."deletedAt" IS NULL
       AND (
         unaccent(p.name) ILIKE unaccent(${"%" + search + "%"}) OR
         unaccent(p.description) ILIKE unaccent(${"%" + search + "%"}) OR
@@ -56,8 +57,12 @@ export async function getProducts({
     return { products: [], totalPages: 1, total: 0 };
   }
 
+  // deletedAt va explicito aunque eliminar tambien apague `active`: depender
+  // de que las dos banderas se muevan siempre juntas es una suposicion
+  // implicita, y este proyecto ya se comio un bug por una de esas.
   const where: Prisma.ProductWhereInput = {
     active: true,
+    deletedAt: null,
     ...(categorySlug ? { category: { slug: categorySlug } } : {}),
     ...(matchedIds ? { id: { in: matchedIds } } : {}),
   };
@@ -88,7 +93,7 @@ export async function getProducts({
 /// foto principal, que es el criterio mas simple sin agregar campos nuevos.
 export async function getFeaturedProducts(take: number) {
   return prisma.product.findMany({
-    where: { active: true, images: { some: { isMain: true } } },
+    where: { active: true, deletedAt: null, images: { some: { isMain: true } } },
     orderBy: { lastSyncedAt: "desc" },
     take,
     include: {

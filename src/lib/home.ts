@@ -59,6 +59,11 @@ export async function getHomeCategoryShowcase(): Promise<HomeCategoryTile[]> {
   const products = await prisma.product.findMany({
     where: {
       zecatId: { in: HOME_CATEGORY_PICKS.map((p) => p.zecatId) },
+      // Defensivo: hoy es inalcanzable, porque solo se eliminan productos
+      // MANUAL y esos no tienen zecatId. Va igual para que la regla sea "toda
+      // consulta de productos filtra deletedAt", sin excepciones que alguien
+      // tenga que recordar.
+      deletedAt: null,
     },
     select: {
       zecatId: true,

@@ -17,6 +17,12 @@ export default function GlobalError({
 }) {
   return (
     <html lang="es">
+      {/* Los error boundaries son client components, y en ellos no funcionan
+          los exports de metadata ni generateMetadata. La doc de Next senala
+          el <title> de React como la alternativa: sin esto, la pestaña del
+          navegador se queda mostrando la URL cruda. */}
+      <title>Se rompió algo — Ganchito Estudio</title>
+
       <body
         style={{
           margin: 0,

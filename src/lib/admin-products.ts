@@ -65,6 +65,10 @@ export async function getManualProductById(id: string) {
       category: true,
       images: { orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }] },
       variants: { orderBy: { createdAt: "asc" } },
+      // Cuantas cotizaciones lo referencian. Lo usa el aviso de eliminar para
+      // decir la verdad de lo que va a pasar en vez de que el admin lo
+      // descubra despues: esas cotizaciones lo van a seguir mostrando.
+      _count: { select: { quoteItems: true } },
     },
   });
 }

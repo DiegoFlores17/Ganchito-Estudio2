@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/admin-auth";
 import { getCategories } from "@/lib/catalog";
 import { getManualProductById } from "@/lib/admin-products";
 import { ProductForm } from "@/components/admin/product-form";
+import { DeleteProductButton } from "@/components/admin/delete-product-button";
 
 export default async function EditarProductoPage({
   params,
@@ -43,6 +44,14 @@ export default async function EditarProductoPage({
               stock: v.stock,
             })),
           }}
+        />
+      </div>
+
+      <div className="max-w-2xl">
+        <DeleteProductButton
+          productId={product.id}
+          productName={product.name}
+          quoteCount={product._count.quoteItems}
         />
       </div>
     </div>

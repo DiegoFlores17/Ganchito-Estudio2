@@ -3,11 +3,11 @@ import Link from "next/link";
 import { CartIndicator } from "./cart-indicator";
 import { MobileNav } from "./mobile-nav";
 
-const NAV_LINKS = [
-  { label: "Catalogo", href: "/catalogo" },
-  { label: "Como funciona", href: "/como-funciona" },
-  { label: "Contacto", href: "/contacto" },
-];
+/// Solo rutas que existen. "Como funciona" y "Contacto" apuntaban a
+/// /como-funciona y /contacto, que nunca se crearon: eran dos links al 404 en
+/// el header de TODAS las paginas de la tienda, y encima en desktop y mobile,
+/// porque esta misma lista alimenta al MobileNav.
+const NAV_LINKS = [{ label: "Catalogo", href: "/catalogo" }];
 
 export function Header() {
   return (

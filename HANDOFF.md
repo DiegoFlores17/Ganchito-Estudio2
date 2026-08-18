@@ -4,9 +4,11 @@ Registro del estado real del proyecto para poder retomar sin reconstruir context
 Se actualiza al final de cada tanda de trabajo.
 
 **Última actualización:** 2026-08-18 — tanda 3
-**Branch:** `main`. Tandas 1 y 2 pusheadas y deployadas. La **tanda 3 está
-commiteada pero SIN pushear**: `46120d8` (revalidación de la home), `3c2a213`
-(pantallas de error).
+**Branch:** `main`, todo pusheado (`93728da`). Las tres tandas están deployadas.
+Tanda 3: `46120d8` (revalidación de la home), `3c2a213` (pantallas de error).
+
+> Deployado **no es** verificado. Nada de las tandas 2 y 3 se miró todavía en
+> producción — ver "Pendiente de verificar".
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
@@ -246,9 +248,8 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   forzar un fallo: apuntar `DATABASE_URL` a una base inexistente en un preview.
 - **La revalidación de la home** (tanda 3). Confirmar que al cambiar el margen
   desde el panel, la portada refleja el precio nuevo enseguida.
-- **Tandas 2 y 3.** Pasan typecheck, lint y build. La 2 ya está deployada pero
-  nada se miró en producción todavía; la 3 no está ni pusheada. Al verificar,
-  mirar como mínimo:
+- **Tandas 2 y 3.** Pasan typecheck, lint y build, y están deployadas, pero nadie
+  las miró en producción todavía. Al verificar, mirar como mínimo:
   - Que el panel siga entrando bien (se tocó la autorización).
   - Que los skeletons del admin aparezcan al navegar **entre** pantallas del
     panel. Al entrar por primera vez el layout bloquea por el chequeo de
@@ -267,9 +268,10 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Pushear la tanda 3 y verificar todo lo acumulado en producción**, con la lista
-de "Pendiente de verificar" en la mano. En local no hay latencia: los estados de
-carga no se ven nunca, así que el deploy es lo único que valida el trabajo.
+**Verificar en producción todo lo acumulado** (tandas 2 y 3), con la lista de
+"Pendiente de verificar" en la mano. Ya está todo deployado. En local no hay
+latencia: los estados de carga no se ven nunca, así que mirarlo en Vercel es lo
+único que valida el trabajo.
 
 Para probar las pantallas de error hace falta forzar un fallo — lo más simple es
 apuntar `DATABASE_URL` a una base inexistente en un preview de Vercel.

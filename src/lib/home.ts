@@ -44,6 +44,11 @@ const HOME_CATEGORY_PICKS = [
   },
 ] as const;
 
+/// Cuantas fichas devuelve getHomeCategoryShowcase(). Lo usa el skeleton de
+/// la home para dibujar exactamente esa cantidad de placeholders y que el
+/// layout no salte cuando entra el contenido real.
+export const HOME_CATEGORY_COUNT = HOME_CATEGORY_PICKS.length;
+
 export interface HomeCategoryTile {
   name: string;
   slug: string;

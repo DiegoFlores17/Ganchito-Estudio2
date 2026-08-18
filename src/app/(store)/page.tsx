@@ -1,9 +1,11 @@
+import { Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ProductCard } from "@/components/catalog/product-card";
+import { Skeleton } from "@/components/skeleton";
 import { getFeaturedProducts, hasAvailableStock } from "@/lib/catalog";
 import { WHATSAPP_URL } from "@/lib/contact";
-import { getHomeCategoryShowcase } from "@/lib/home";
+import { getHomeCategoryShowcase, HOME_CATEGORY_COUNT } from "@/lib/home";
 import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 
 const FEATURED_PRODUCTS_COUNT = 8;
@@ -34,13 +36,14 @@ const PROCESS_STEPS = [
   },
 ];
 
-export default async function HomePage() {
-  const [categories, featuredProducts, pricingConfig] = await Promise.all([
-    getHomeCategoryShowcase(),
-    getFeaturedProducts(FEATURED_PRODUCTS_COUNT),
-    getPricingConfig(),
-  ]);
-
+/// La home NO usa loading.tsx de ruta a proposito.
+///
+/// Tres de sus cinco secciones (hero, "Como funciona" y el CTA final) son
+/// texto fijo que no toca la base. Un loading.tsx las taparia con gris sin
+/// motivo, y el cliente veria la pantalla entera en skeleton cuando en
+/// realidad casi toda estaba lista. Con Suspense por seccion, el shell
+/// aparece instantaneo y solo esperan las dos partes que consultan datos.
+export default function HomePage() {
   return (
     <div>
       <section className="bg-primary-dark">
@@ -75,30 +78,9 @@ export default async function HomePage() {
         <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
           Explora por categoria
         </h2>
-        <div className="mt-10 grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
-          {categories.map((category) => (
-            <Link
-              key={category.slug}
-              href={`/catalogo?categoria=${category.slug}`}
-              className="group flex flex-col gap-4"
-            >
-              <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-foreground/[0.06] bg-foreground/[0.03]">
-                {category.imageUrl && (
-                  <Image
-                    src={category.imageUrl}
-                    alt={category.name}
-                    fill
-                    sizes="(min-width: 1024px) 30vw, (min-width: 640px) 45vw, 90vw"
-                    className="object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-                  />
-                )}
-              </div>
-              <p className="text-lg font-medium text-foreground transition-colors group-hover:text-primary-light">
-                {category.name}
-              </p>
-            </Link>
-          ))}
-        </div>
+        <Suspense fallback={<CategoryShowcaseSkeleton />}>
+          <CategoryShowcase />
+        </Suspense>
       </section>
 
       <section className="border-t border-foreground/[0.06] bg-foreground/[0.02]">
@@ -128,19 +110,9 @@ export default async function HomePage() {
         <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
           Productos destacados
         </h2>
-        <div className="mt-10 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4">
-          {featuredProducts.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              sellPrice={computeSellPrice(
-                product.costPrice,
-                pricingConfig.defaultMarginPercent
-              )}
-              inStock={hasAvailableStock(product.variants)}
-            />
-          ))}
-        </div>
+        <Suspense fallback={<FeaturedProductsSkeleton />}>
+          <FeaturedProducts />
+        </Suspense>
         <div className="mt-14 flex justify-center">
           <Link
             href="/catalogo"
@@ -168,6 +140,98 @@ export default async function HomePage() {
           </Link>
         </div>
       </section>
+    </div>
+  );
+}
+
+const CATEGORY_GRID_CLASSES =
+  "mt-10 grid grid-cols-1 gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3";
+const PRODUCT_GRID_CLASSES =
+  "mt-10 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4";
+
+async function CategoryShowcase() {
+  const categories = await getHomeCategoryShowcase();
+
+  return (
+    <div className={CATEGORY_GRID_CLASSES}>
+      {categories.map((category) => (
+        <Link
+          key={category.slug}
+          href={`/catalogo?categoria=${category.slug}`}
+          className="group flex flex-col gap-4"
+        >
+          <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-foreground/[0.06] bg-foreground/[0.03]">
+            {category.imageUrl && (
+              <Image
+                src={category.imageUrl}
+                alt={category.name}
+                fill
+                sizes="(min-width: 1024px) 30vw, (min-width: 640px) 45vw, 90vw"
+                className="object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+              />
+            )}
+          </div>
+          <p className="text-lg font-medium text-foreground transition-colors group-hover:text-primary-light">
+            {category.name}
+          </p>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+/// La cantidad de placeholders sale de las mismas constantes que usan las
+/// secciones reales, no de un numero a mano: asi el contenido entra en el
+/// mismo lugar y la pagina no salta, aunque cambien.
+function CategoryShowcaseSkeleton() {
+  return (
+    <div className={CATEGORY_GRID_CLASSES}>
+      {Array.from({ length: HOME_CATEGORY_COUNT }).map((_, index) => (
+        <div key={index} className="flex flex-col gap-4">
+          <Skeleton className="aspect-[4/3] w-full rounded-xl" />
+          <Skeleton className="h-6 w-40" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+async function FeaturedProducts() {
+  const [featuredProducts, pricingConfig] = await Promise.all([
+    getFeaturedProducts(FEATURED_PRODUCTS_COUNT),
+    getPricingConfig(),
+  ]);
+
+  return (
+    <div className={PRODUCT_GRID_CLASSES}>
+      {featuredProducts.map((product) => (
+        <ProductCard
+          key={product.id}
+          product={product}
+          sellPrice={computeSellPrice(
+            product.costPrice,
+            pricingConfig.defaultMarginPercent
+          )}
+          inStock={hasAvailableStock(product.variants)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FeaturedProductsSkeleton() {
+  return (
+    <div className={PRODUCT_GRID_CLASSES}>
+      {Array.from({ length: FEATURED_PRODUCTS_COUNT }).map((_, index) => (
+        <div key={index} className="flex flex-col gap-4">
+          <Skeleton className="aspect-square w-full rounded-xl" />
+          <div>
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="mt-2 h-4 w-2/3" />
+            <Skeleton className="mt-3 h-5 w-28" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

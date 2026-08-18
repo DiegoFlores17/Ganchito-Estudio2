@@ -9,6 +9,7 @@ import {
 } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { QuoteSkeleton } from "@/components/quote-skeleton";
 import { formatPriceArs } from "@/lib/format";
 import {
   clearQuoteCart,
@@ -119,11 +120,7 @@ export default function CotizarPage() {
   }
 
   if (loadingItems) {
-    return (
-      <div className="mx-auto max-w-2xl px-6 py-24 text-center text-foreground/60">
-        Cargando tu cotizacion...
-      </div>
-    );
+    return <QuoteSkeleton />;
   }
 
   if (items.length === 0) {

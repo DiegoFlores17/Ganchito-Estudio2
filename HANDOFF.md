@@ -3,11 +3,10 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-18 — tanda 3
-**Branch:** `main`, todo pusheado (`93728da`). Las tres tandas están deployadas.
-Tanda 3: `46120d8` (revalidación de la home), `3c2a213` (pantallas de error).
+**Última actualización:** 2026-08-18 — tandas 4 y 5
+**Branch:** `main`. Tandas 1-3 pusheadas y deployadas. Tandas 4 y 5 commiteadas.
 
-> Deployado **no es** verificado. Nada de las tandas 2 y 3 se miró todavía en
+> Deployado **no es** verificado. Nada de las tandas 2 a 5 se miró todavía en
 > producción — ver "Pendiente de verificar".
 
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
@@ -123,6 +122,44 @@ paginación; **los skeletons todavía no se miraron en producción**.
 | `placeholder="blur"` | 0 | n/a — resuelto con shimmer (opción A) |
 
 Con esto **el relevamiento queda cerrado**: los cuatro frentes cubiertos.
+
+**Tanda 4** — pantallas faltantes y arreglos de las de error.
+
+- `6b79b00` — los tres error boundaries pasaban `onClick={retry}` a secas, con
+  lo cual React le entregaba el evento de click a una función `() => void`.
+  TypeScript no lo marca (una función sin parámetros es asignable a una que
+  recibe uno), así que pasaba silencioso. Corregido a `onClick={() => retry()}`
+  en los tres, más tildes en el texto visible.
+- `663104f` — `(store)/not-found.tsx`. Cubre las llamadas a `notFound()` dentro
+  de la tienda (hoy `/producto/[id]`), con header y footer.
+- `ab19df2` — `app/not-found.tsx` raíz, para las URLs que no matchean ninguna
+  ruta. **Sin** header ni footer, a propósito: este archivo atiende también las
+  URLs sueltas de `/admin`, y el `Header` arrastra `CartIndicator` y
+  `MobileNav` (JS del carrito en una pantalla de error). A diferencia de
+  `global-error.tsx`, este **sí** se renderiza dentro del layout raíz, así que
+  usa Tailwind y los tokens con normalidad.
+- `50cc2c0` — `<title>` en `global-error.tsx`. Los error boundaries son client
+  components y ahí no funcionan los exports de `metadata`; la doc señala el
+  `<title>` de React como alternativa.
+- `7a2056b` — sacar del nav `/como-funciona` y `/contacto`: **nunca existieron
+  como rutas**. Eran dos links al 404 en el header de todas las páginas, y en
+  las dos versiones del nav, porque `NAV_LINKS` alimenta también al `MobileNav`.
+
+**Tanda 5** — ancla del nav y ortografía.
+
+- `f208d63` — "Cómo funciona" vuelve al nav como ancla `/#como-funciona`. El
+  contenido ya existía como sección de la home; se le agregó el `id` y un
+  `scroll-mt-8`. **Verificado en el navegador** desde `/catalogo` y desde
+  `/producto/[id]`: la URL pasa a `/#como-funciona` y el scroll salta a 1575
+  con la sección a 32px del borde. Navega **y** scrollea, no solo cambia el
+  hash. "Contacto" no vuelve: ya está en el footer y competiría con el CTA.
+- `76efe7f` y `c459c18` — tildes en toda la UI, primero la tienda y después el
+  panel. No era una decisión de estilo: `printing-info.tsx` ya usaba
+  "Personalización" y "Áreas de impresión", así que era deuda. Se agregaron
+  también los signos de apertura (`¿Listo para vestir tu marca?`) y las formas
+  de voseo ("Explorá", "Recorré", "Elegí", "Podés", "Llevás", "Escribí").
+  No se tocaron URLs, slugs, nombres de parámetros, identificadores ni
+  comentarios: el searchParam sigue siendo `categoria` sin tilde.
 
 El único indicador que existía antes de todo esto era una línea de texto en
 `/cotizar` ("Cargando tu cotizacion...").
@@ -248,8 +285,8 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   forzar un fallo: apuntar `DATABASE_URL` a una base inexistente en un preview.
 - **La revalidación de la home** (tanda 3). Confirmar que al cambiar el margen
   desde el panel, la portada refleja el precio nuevo enseguida.
-- **Tandas 2 y 3.** Pasan typecheck, lint y build, y están deployadas, pero nadie
-  las miró en producción todavía. Al verificar, mirar como mínimo:
+- **Tandas 2 a 5.** Pasan typecheck, lint y build. Las 2 y 3 están deployadas;
+  nadie miró nada en producción todavía. Al verificar, mirar como mínimo:
   - Que el panel siga entrando bien (se tocó la autorización).
   - Que los skeletons del admin aparezcan al navegar **entre** pantallas del
     panel. Al entrar por primera vez el layout bloquea por el chequeo de
@@ -259,6 +296,11 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
     `.complete` de `product-card-image.tsx`.
   - El filtro de `/admin/cotizaciones`, que pasó de recarga completa a navegación
     del router.
+  - El ancla "Cómo funciona" del header, desde una ruta que no sea la home.
+    Verificada en local; en producción la home se sirve cacheada, así que
+    conviene confirmar que el destino existe en el HTML servido.
+  - Que no haya quedado ningún texto sin tilde ni, peor, alguna URL rota por la
+    pasada de ortografía. El commit no tocó URLs ni slugs, pero se revisa.
 
 > Nota: `next dev` reescribe solo el bloque `nextjs-agent-rules` de `CLAUDE.md`.
 > Si vuelve a aparecer como cambio sin commitear, es eso — se commitea junto con
@@ -276,13 +318,23 @@ latencia: los estados de carga no se ven nunca, así que mirarlo en Vercel es lo
 Para probar las pantallas de error hace falta forzar un fallo — lo más simple es
 apuntar `DATABASE_URL` a una base inexistente en un preview de Vercel.
 
-Lo único que queda abierto del tema estados de carga:
+Lo que queda abierto:
 
 - **Estado pending en `category-filter.tsx` y `pagination.tsx`** — son `<Link>`
   puros. Ahora que `/catalogo` tiene `loading.tsx`, puede que ya alcance: hay que
   mirarlo en producción **antes** de agregar nada. `useLinkStatus` existe para
   esto, pero su propia doc advierte que si la ruta ya tiene fallback no hace
   falta, y meter indicadores de más es justamente lo que se quería evitar.
+- **`notFound()` que hoy no se llama** (relevado, no cambiado — es decisión de
+  producto):
+  - `/catalogo?categoria=basura` devuelve **200** con la grilla vacía y "No hay
+    productos en esta categoría". Como es searchParam y no segmento de ruta, el
+    empty state es defendible en UX; para SEO, un 200 con contenido vacío no es
+    ideal.
+  - `/catalogo?page=9999` — mismo caso.
+  - Los tres `notFound()` que sí existen (`producto/[id]`, `admin/productos/[id]`,
+    `admin/cotizaciones/[id]`) están bien puestos. No hay lookup por slug en
+    ningún lado: el producto se busca por id.
 
 Después, la Home vuelve a la cola: quedó pendiente sumarle un bloque de logos de
 marcas clientes (falta conseguir los logos).

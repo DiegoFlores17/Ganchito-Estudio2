@@ -3,11 +3,22 @@ import Link from "next/link";
 import { CartIndicator } from "./cart-indicator";
 import { MobileNav } from "./mobile-nav";
 
-/// Solo rutas que existen. "Como funciona" y "Contacto" apuntaban a
-/// /como-funciona y /contacto, que nunca se crearon: eran dos links al 404 en
-/// el header de TODAS las paginas de la tienda, y encima en desktop y mobile,
-/// porque esta misma lista alimenta al MobileNav.
-const NAV_LINKS = [{ label: "Catálogo", href: "/catalogo" }];
+/// Solo destinos que existen. Antes habia links a /como-funciona y /contacto,
+/// dos paginas que nunca se crearon: eran links al 404 en TODAS las paginas de
+/// la tienda, y en las dos versiones del nav, porque esta misma lista alimenta
+/// al MobileNav.
+///
+/// "Como funciona" se recupera como ancla: el contenido ya existe como seccion
+/// de la home (ver el id "como-funciona" en (store)/page.tsx), asi que no hace
+/// falta una pagina aparte. Al ser un href absoluto con hash, funciona igual
+/// desde cualquier ruta: navega a la home y scrollea a la seccion.
+///
+/// "Contacto" queda afuera a proposito: ya esta en el footer y competiria con
+/// el CTA de cotizacion.
+const NAV_LINKS = [
+  { label: "Catálogo", href: "/catalogo" },
+  { label: "Cómo funciona", href: "/#como-funciona" },
+];
 
 export function Header() {
   return (

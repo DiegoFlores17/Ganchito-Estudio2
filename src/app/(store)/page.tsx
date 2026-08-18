@@ -103,7 +103,13 @@ export default function HomePage() {
         </Suspense>
       </section>
 
-      <section className="border-t border-foreground/[0.06] bg-foreground/[0.02]">
+      {/* El id es el destino del link "Cómo funciona" del header: no existe
+          una pagina /como-funciona, el nav apunta a /#como-funciona. Si se
+          renombra, hay que actualizar NAV_LINKS en components/layout/header. */}
+      <section
+        id="como-funciona"
+        className="scroll-mt-8 border-t border-foreground/[0.06] bg-foreground/[0.02]"
+      >
         <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
           <h2 className="text-3xl font-black tracking-tight text-foreground sm:text-4xl">
             Cómo funciona

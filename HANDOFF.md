@@ -3,13 +3,12 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-18 — tanda 7 (editar/eliminar productos)
-**Branch:** `main`. Tandas 1-6 pusheadas. **La tanda 7 está commiteada y SIN
-pushear** — 8 commits, de `f0e2801` a `1df9720`.
+**Última actualización:** 2026-08-19 — tanda 7 verificada en local y pusheada
+**Branch:** `main`, todo pusheado (`89f51c2`). Las 7 tandas están deployadas.
 
-> ⚠️ **Antes de pushear la tanda 7, leer "Regla de entornos" más abajo.** La
-> migración de `deletedAt` YA está aplicada en Neon, así que el orden seguro
-> está cumplido — pero el motivo por el que está aplicada no fue el planeado.
+> La migración de `deletedAt` ya está aplicada en las dos bases, así que el
+> orden seguro (migrar antes que el código) está cumplido. Antes de tocar
+> cualquier base, leer "Regla de entornos" acá abajo.
 
 > **La tanda 6 está verificada en un teléfono real** y pasó a "Terminado y
 > verificado". Las tandas 2 a 5 siguen deployadas pero sin mirar: deployado
@@ -281,10 +280,45 @@ Verificado en el navegador con el dev server:
 | Red colgada (`window.fetch` anulado) | Abierto y marcado a 279/992/1787ms · **cerrado a 2037ms** |
 | Cerrar durante pending colgado | Botón habilitado, se pudo salir |
 
-### Tanda 7 — editar y eliminar productos manuales (sin pushear)
+### Tanda 7 — editar y eliminar productos manuales
 
-Ocho commits, `f0e2801` → `1df9720`. Todo pasa `tsc`, `eslint` y `build`.
-**Nada probado todavía, ni en local ni en producción.**
+Nueve commits, `f0e2801` → `89f51c2`. Pusheada y deployada.
+**Verificada en local, pendiente de verificar en producción.**
+
+#### Verificación en local: 20/20
+
+Se armó el escenario que la base no tenía —un producto manual **dentro de una
+cotización**, hoy hay cero— y se corrió contra las funciones reales del
+proyecto, no contra una réplica:
+
+| Prueba | Resultado |
+|---|---|
+| Editar | nombre, costo y `minOrderQuantity` persisten y se releen |
+| Antes de eliminar | visible en búsqueda pública, ficha, grilla admin y guard |
+| Guard de origin | un producto de Zecat **es rechazado** |
+| Después de eliminar | filtrado de las cuatro, incluida la búsqueda por SQL crudo |
+| Soft delete | la fila **no se borró**, `deletedAt` seteado, `active` en false |
+| Cotización histórica | conserva el ítem, **lee el nombre del producto**, precio congelado intacto |
+| FK | el `delete` real **sigue bloqueado**: Prisma devolvió `P2003` |
+
+> Lo del `P2003` importa más de lo que parece: el bloqueo de la FK era la
+> premisa que justificaba toda la baja lógica, y hasta acá era una lectura del
+> SQL de la migración inicial. Ahora está comprobado ejecutándolo.
+
+**El flujo por la interfaz también quedó probado**, y no por la suite: en la
+base local hay un `"Buzo Canguro Premium TEST"` (manual, creado el 2026-08-18,
+`deletedAt` el 2026-08-19) que se eliminó desde el panel. Quedó con
+`active: false`, fuera de la grilla del admin, con 0 resultados en la búsqueda
+pública y la ficha devolviendo null. **No borrar esa fila**: es el registro de
+esa prueba.
+
+> **Trampa del entorno, para no perder tiempo la próxima:** el dev server de
+> `localhost:3000` dejó de hidratar después de ~15 commits y una regeneración
+> del cliente de Prisma — los botones no responden, y **no es culpa del código**
+> (se comprobó con `+ Agregar variante`, que es preexistente y tampoco anda).
+> Se arregla reiniciando el dev server. Levantar el build de producción en otro
+> puerto **no** sirve como alternativa para el panel: la cookie de sesión no
+> cruza de puerto y hay que loguearse de nuevo.
 
 **Por qué la eliminación es baja lógica y no borrado real** (esto es lo que
 decide el diseño, conviene no reabrirlo sin releerlo): `QuoteItem` referencia
@@ -514,12 +548,16 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Próximo paso concreto
 
-**Probar la tanda 7 en local** (editar un producto, eliminarlo, verificar que
-desaparece del catálogo y del panel y que la cotización que lo incluya lo
-sigue mostrando), y recién ahí pushear. Está commiteada pero sin probar.
+**Verificar en producción**, con la lista de "Pendiente de verificar" en la
+mano. Está todo deployado; no queda nada por construir ni por pushear.
 
-Después, **verificar en producción las tandas 2 a 5**, con la lista de
-"Pendiente de verificar" en la mano. Ya está todo deployado. En local no hay latencia: los
+De la **tanda 7**: editar un producto manual, eliminarlo, y confirmar que
+desaparece del catálogo público y del admin pero la cotización que lo tenía se
+sigue viendo bien. Ojo que **producción no tiene cotizaciones**, así que para
+probar ese último punto hay que crear una primero desde `/cotizar`.
+
+De las **tandas 2 a 5**: skeletons del panel, shimmer del catálogo, filtro de
+cotizaciones, pantallas de error y la revalidación de la home. Ya está todo deployado. En local no hay latencia: los
 estados de carga no se ven nunca, así que mirarlo en Vercel —y en un teléfono
 real, no en el navegador angostado— es lo único que valida el trabajo.
 

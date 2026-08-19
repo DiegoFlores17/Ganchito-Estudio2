@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { QuoteStatus } from "@prisma/client";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getQuotes } from "@/lib/admin-quotes";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { QuoteFilters } from "@/components/admin/quote-filters";
+import { QuoteRow } from "@/components/admin/quote-row";
 
 const STATUS_OPTIONS: { value: QuoteStatus; label: string }[] = [
   { value: QuoteStatus.SUBMITTED, label: "Recibidas" },
@@ -47,29 +47,23 @@ export default async function CotizacionesPage({
               <th className="px-4 py-3 font-medium">Email</th>
               <th className="px-4 py-3 font-medium">Items</th>
               <th className="px-4 py-3 font-medium">Estado</th>
+              <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
             {quotes.map((quote) => (
-              <tr
+              // Los links que estaban escondidos en la fecha y en el nombre se
+              // sacan: ahora la fila entera es el camino, y el "Ver" que
+              // agrega QuoteRow es la señal visible de que se puede entrar.
+              <QuoteRow
                 key={quote.id}
-                className="border-b border-foreground/5 last:border-0 hover:bg-foreground/[0.02]"
+                href={`/admin/cotizaciones/${quote.id}`}
               >
                 <td className="px-4 py-3 text-foreground/70">
-                  <Link
-                    href={`/admin/cotizaciones/${quote.id}`}
-                    className="block"
-                  >
-                    {quote.createdAt.toLocaleDateString("es-AR")}
-                  </Link>
+                  {quote.createdAt.toLocaleDateString("es-AR")}
                 </td>
-                <td className="px-4 py-3">
-                  <Link
-                    href={`/admin/cotizaciones/${quote.id}`}
-                    className="font-medium text-foreground hover:text-primary"
-                  >
-                    {quote.customerName}
-                  </Link>
+                <td className="px-4 py-3 font-medium text-foreground">
+                  {quote.customerName}
                 </td>
                 <td className="px-4 py-3 text-foreground/70">
                   {quote.companyName ?? "—"}
@@ -83,7 +77,7 @@ export default async function CotizacionesPage({
                 <td className="px-4 py-3">
                   <StatusBadge status={quote.status} />
                 </td>
-              </tr>
+              </QuoteRow>
             ))}
           </tbody>
         </table>

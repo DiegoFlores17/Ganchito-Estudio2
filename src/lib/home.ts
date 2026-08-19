@@ -25,7 +25,15 @@ const HOME_CATEGORY_PICKS = [
   {
     name: "Indumentaria",
     slug: "Abrigos",
-    zecatId: "5704", // Campera Stream Men
+    // Campera Montana Mujer. Se cambio desde la Campera Stream Men (5704):
+    // esa foto tiene al modelo con la cabeza cortada por el recorte 4/3 del
+    // tile, y los sellos de abajo quedaban partidos al medio.
+    //
+    // Criterio para elegir reemplazo en esta categoria: casi todas las fotos
+    // de Abrigos son con modelo (no hay producto solo), asi que lo que manda
+    // es que la CARA entre completa en el recorte. En esta el modelo tiene
+    // aire arriba y las miniaturas del producto entran enteras a la derecha.
+    zecatId: "5492",
   },
   {
     name: "Tecnología",

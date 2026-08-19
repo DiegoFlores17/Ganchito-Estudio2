@@ -3,8 +3,8 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-19 — tanda 7 verificada en local y pusheada
-**Branch:** `main`, todo pusheado (`89f51c2`). Las 7 tandas están deployadas.
+**Última actualización:** 2026-08-19 — tanda 8 (descubribilidad del panel)
+**Branch:** `main`, todo pusheado (`de7fe3c`). Las 8 tandas están deployadas.
 
 > La migración de `deletedAt` ya está aplicada en las dos bases, así que el
 > orden seguro (migrar antes que el código) está cumplido. Antes de tocar
@@ -279,6 +279,42 @@ Verificado en el navegador con el dev server:
 | Panel mobile al tocar | 1ms: abierto · 106ms: fila marcada · 196ms: cerrado con URL nueva |
 | Red colgada (`window.fetch` anulado) | Abierto y marcado a 279/992/1787ms · **cerrado a 2037ms** |
 | Cerrar durante pending colgado | Botón habilitado, se pudo salir |
+
+### Tanda 8 — que se note dónde se puede clickear (`de7fe3c`)
+
+Mismo problema que había en productos, ahora en `/admin/cotizaciones`: el
+detalle existía y se llegaba clickeando el nombre, pero no había cómo notarlo.
+Los links estaban escondidos en la fecha y el nombre del cliente, que se
+renderizan igual que texto común, y **solo 2 de las 6 celdas eran
+clickeables** — la fila parecía clickeable y no lo era según dónde le pegaras.
+
+Ahora la fila entera navega (cursor de link + hover) y hay una columna con un
+**"Ver"** visible que hace de señal. Verificado en producción: el click anda.
+
+**La decisión no obvia, para no deshacerla sin querer:** el click en la fila
+**no navega por su cuenta, dispara el `<Link>` del "Ver"**. `useLinkStatus`
+solo funciona dentro del `Link`, así que si la fila llamara a `router.push`
+por separado habría dos caminos de navegación y el botón no se enteraría
+cuando entrás clickeando la fila — el estado de carga aparecería solo a veces.
+
+- El botón muestra "Abriendo..." con `min-width` fijo (que no ensanche la
+  celda) y `pointer-events-none`, que es lo que de verdad evita el segundo
+  click: un `<a>` no se puede deshabilitar.
+- Se sacaron los links de fecha y nombre: con la fila clickeable eran
+  elementos interactivos anidados sin aporte. Queda **un control real por
+  fila**, que además es el que se puede tabular y abrir en pestaña nueva. El
+  click en la fila es comodidad para mouse, no el mecanismo.
+
+**Auditoría de las otras tablas del panel:**
+
+- **Equipo** — no tiene el problema. No existe pantalla de detalle de un
+  admin, así que no hay nada oculto. Su única acción ("Sacar") ya es visible.
+- **Productos** — resuelto en la tanda 7 con el botón "Editar". **La fila NO se
+  hizo clickeable, a propósito:** esa tabla tiene *dos* acciones por fila
+  (Editar y Pausar), así que un click a nivel de fila se dispararía cada vez
+  que alguien apunte a "Pausar" y le erre por unos píxeles. Cotizaciones no
+  tiene ese conflicto porque no tiene acciones en la fila. Si algún día se
+  quiere igual, el `closest("a, button")` del handler ya lo contempla.
 
 ### Tanda 7 — editar y eliminar productos manuales
 
@@ -557,7 +593,11 @@ sigue viendo bien. Ojo que **producción no tiene cotizaciones**, así que para
 probar ese último punto hay que crear una primero desde `/cotizar`.
 
 De las **tandas 2 a 5**: skeletons del panel, shimmer del catálogo, filtro de
-cotizaciones, pantallas de error y la revalidación de la home. Ya está todo deployado. En local no hay latencia: los
+cotizaciones, pantallas de error y la revalidación de la home.
+
+De la **tanda 8**: que el "Ver" muestre **"Abriendo..."** al clickear (solo se
+nota si la navegación tarda algo; el detalle es dinámico, así que debería), y
+que el segundo click no haga nada mientras tanto. Ya está todo deployado. En local no hay latencia: los
 estados de carga no se ven nunca, así que mirarlo en Vercel —y en un teléfono
 real, no en el navegador angostado— es lo único que valida el trabajo.
 

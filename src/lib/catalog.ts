@@ -18,7 +18,10 @@ interface GetProductsParams {
 /// de la home no se rompen si alguien oculta una de esas categorias.
 export async function getVisibleCategories() {
   return prisma.category.findMany({
-    where: { visible: true },
+    // canonicalId: null saca del selector a las que son ALIAS de otra. Sus
+    // productos no desaparecen: se muestran bajo la canonica (ver el filtro
+    // de getProducts).
+    where: { visible: true, canonicalId: null },
     orderBy: { name: "asc" },
   });
 }
@@ -84,7 +87,16 @@ export async function getProducts({
   const where: Prisma.ProductWhereInput = {
     active: true,
     deletedAt: null,
-    ...(categorySlug ? { category: { slug: categorySlug } } : {}),
+    // Filtrar por una categoria trae tambien los productos de sus ALIAS: la
+    // canonica "Escritura" tiene que devolver los de Zecat Y los de CDO, que
+    // en la base siguen colgando de la categoria de su proveedor.
+    ...(categorySlug
+      ? {
+          category: {
+            OR: [{ slug: categorySlug }, { canonical: { slug: categorySlug } }],
+          },
+        }
+      : {}),
     ...(matchedIds ? { id: { in: matchedIds } } : {}),
   };
 

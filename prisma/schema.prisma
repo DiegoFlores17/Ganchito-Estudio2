@@ -148,12 +148,35 @@ model Category {
   /// alguien decida lo contrario. Al revés, un proveedor nuevo entraría
   /// entero invisible y nadie se enteraría.
   visible       Boolean   @default(true)
+  /// Si esta categoría es un ALIAS de otra: la de arriba es la que ve el
+  /// cliente, esta no aparece en el filtro y sus productos se muestran bajo
+  /// aquella.
+  ///
+  /// Resuelve el duplicado entre proveedores: Zecat y CDO traen los dos una
+  /// "Escritura", una "Tecnología", etc. Sin esto el cliente ve dos filtros
+  /// con el mismo nombre y ninguna forma de distinguirlos.
+  ///
+  /// Por qué acá y no en el conector: los conectores escriben `categoryId`
+  /// en CADA upsert de CADA corrida. Cualquier arreglo hecho reasignando
+  /// productos o borrando la categoría duplicada dura hasta el próximo sync.
+  /// Esta columna no la toca ningún conector, así que sobrevive.
+  ///
+  /// La canónica se espera que sea una categoría PROPIA (sin
+  /// zecatFamilyId ni cdoCategoryId): el nombre que ve el cliente es una
+  /// decisión nuestra —podemos querer "Lapiceras y escritura" porque así lo
+  /// buscan— y si fuera de un proveedor, un sync nos lo renombraría. No está
+  /// forzado en la base porque no hay forma de expresarlo como constraint;
+  /// se valida en la acción del panel.
+  canonicalId   String?
+  canonical     Category?  @relation("CategoryAlias", fields: [canonicalId], references: [id], onDelete: SetNull)
+  aliases       Category[] @relation("CategoryAlias")
 
   products      Product[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  @@index([canonicalId])
   @@map("categories")
 }
 

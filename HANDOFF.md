@@ -13,9 +13,9 @@ deployados y **verificados en producción**.
 migrations have been successfully applied") y se confirmó que el catálogo de
 producción funciona.
 
-> **Lo único sin pushear es la visibilidad de categorías** (`c681557`), con su
-> migración `20260821200000_add_category_visible` aplicada **solo en local**.
-> Vale el orden de siempre: migrar Neon, verificar, después el push.
+> **Lo único sin pushear es el trabajo de categorías** (visibilidad +
+> unificación), con sus **dos migraciones aplicadas solo en local**. Vale el
+> orden de siempre: migrar Neon, verificar, después el push.
 
 El conector de CDO corre contra el entorno de **pruebas** de CDO y la base
 **local**, que es donde se pidió construirlo.
@@ -572,8 +572,8 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   DATABASE_URL='<url-de-neon>' npx prisma migrate status
   ```
 
-  Es solo lectura. Tiene que decir que falta **una**:
-  `20260821200000_add_category_visible`.
+  Es solo lectura. Tiene que decir que faltan **dos**:
+  `20260821200000_add_category_visible` y `20260821210000_add_category_canonical`.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
@@ -607,10 +607,13 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ---
 
-## Neon: una migración pendiente (la de categorías)
+## Neon: dos migraciones pendientes (las de categorías)
 
-Neon está migrada **hasta el conector de CDO inclusive**. Le falta una sola:
-`20260821200000_add_category_visible`, que hoy está aplicada solo en local.
+Neon está migrada **hasta el conector de CDO inclusive**. Le faltan dos, las
+dos del trabajo de categorías y las dos aplicadas solo en local:
+
+1. `20260821200000_add_category_visible`
+2. `20260821210000_add_category_canonical`
 
 **El orden de siempre, y no es negociable:**
 
@@ -621,15 +624,23 @@ Neon está migrada **hasta el conector de CDO inclusive**. Le falta una sola:
 Vercel no aplica migraciones (ver "Regla de entornos"), así que si el código
 llega antes que la columna, rompe lo que la lea.
 
-### La pendiente: `20260821200000_add_category_visible`
+### Las pendientes
 
 ```sql
+-- 20260821200000_add_category_visible
 ALTER TABLE "categories" ADD COLUMN "visible" BOOLEAN NOT NULL DEFAULT true;
+
+-- 20260821210000_add_category_canonical
+ALTER TABLE "categories" ADD COLUMN "canonicalId" TEXT;
+CREATE INDEX "categories_canonicalId_idx" ON "categories"("canonicalId");
+ALTER TABLE "categories" ADD CONSTRAINT "categories_canonicalId_fkey"
+  FOREIGN KEY ("canonicalId") REFERENCES "categories"("id") ON DELETE SET NULL;
 ```
 
-Aditiva, sin backfill y **totalmente reversible** (`DROP COLUMN`). El default
-`true` hace que producción se comporte igual que antes de aplicarla: todas las
-categorías visibles hasta que alguien decida lo contrario.
+Aditivas, sin backfill y **totalmente reversibles**. Aplicarlas **no cambia
+nada de lo que se ve hoy**: `visible` arranca en `true` para todas y
+`canonicalId` en `NULL`, así que ninguna categoría es alias de otra hasta que
+alguien lo decida desde el panel.
 
 ```bash
 # Con la guarda de siempre: verificar el destino en el MISMO comando.
@@ -683,10 +694,18 @@ el precio de **esa** variante. El margen quedó de vuelta en 45.
 
 ---
 
-## Visibilidad de categorías — construido, verificado a medias
+## Categorías: visibilidad y unificación — construido, verificado a medias
 
-`Category.visible` (bool, default true) + pantalla `/admin/categorias` con el
-origen de cada categoría, cuántos productos tiene y un toggle.
+Dos campos y una pantalla, que resuelven **dos problemas distintos**:
+
+- **`Category.visible`** (bool, default true) → el ruido: campañas, ofertas y
+  cosas que no son categorías. Se ocultan del filtro.
+- **`Category.canonicalId`** (FK a sí misma) → las duplicadas entre
+  proveedores. Se unifican bajo una categoría propia.
+
+La pantalla `/admin/categorias` muestra el origen de cada una, cuántos
+productos tiene, qué categorías propias existen, qué alias les apuntan y
+cuántos productos suman en total.
 
 ### La premisa del pedido era incorrecta, y conviene saberlo
 
@@ -765,23 +784,98 @@ que nadie elija mal por descuido.
 - **Alcanza con `requireAdmin()`, no super admin.** No toca precios ni
   productos y es reversible de un click.
 
+### Unificación de homónimas (`canonicalId`)
+
+Ocultar resuelve el ruido (campañas, ofertas), pero **no** resuelve las
+duplicadas: sacar una del filtro deja a sus productos sin ninguna vía de
+filtro. Para eso está `Category.canonicalId`.
+
+- `canonicalId = null` → la categoría es ella misma.
+- `canonicalId = X` → es **alias** de X: no aparece en el filtro, y sus
+  productos se muestran bajo X.
+
+**La canónica es siempre una categoría PROPIA**, creada a mano desde el panel.
+Dos razones, y las dos importan:
+
+- **Técnica:** si la canónica fuera de un proveedor, un sync puede renombrarla
+  y cambia el filtro público solo. Zecat ya mostró que estructuran los datos
+  como quieren — el nombre de la familia viene en `description`, no en `name`.
+- **De negocio:** las categorías de la tienda son nuestras. Podemos querer
+  "Lapiceras y escritura" porque así lo buscan los clientes, aunque los dos
+  proveedores le digan "Escritura".
+
+**Por qué vive en la base y no en el conector:** los conectores escriben
+`categoryId` en **cada** upsert de **cada** corrida. Reasignar productos a
+mano, o borrar la categoría duplicada, dura hasta el próximo sync. Esta
+columna no la toca ningún conector.
+
+**El panel sugiere, nunca aplica.** Agrupa por nombre normalizado y ofrece
+unificar con un nombre editable. No se automatiza porque el matcheo por nombre
+falla callado en los dos sentidos, y los contraejemplos ya están en los datos:
+"Escritorio" (22) y "Escritura" (26) se parecen y son distintas; "Hogar" (CDO,
+24) y "Hogar y Tiempo Libre" (Zecat, 26) son lo mismo y no matchean.
+
+Los cuatro pares que detecta hoy:
+
+| Par | Zecat | CDO | Total unificado |
+|---|---|---|---|
+| Escritura | 26 | 34 | 60 |
+| Llaveros | 24 | 7 | 31 |
+| Paraguas | 7 | 4 | 11 |
+| Tecnología | 22 | 11 | 33 |
+
+### Decisiones que conviene no deshacer (unificación)
+
+- **El filtro resuelve UN solo nivel** (`category.canonical.slug`). Por eso la
+  acción rechaza cadenas: una categoría con alias no puede volverse alias, el
+  destino no puede ser alias de otro, y no puede apuntarse a sí misma. Sin
+  esas validaciones se armarían cadenas que dejan productos invisibles en el
+  filtro **sin que nada falle ruidosamente**.
+- **El destino tiene que ser propio**, validado en la acción. En la base no se
+  puede expresar como constraint.
+- **`ON DELETE SET NULL`** y no CASCADE: si se borra una canónica, sus alias
+  vuelven a ser categorías sueltas. Con CASCADE se borrarían categorías de
+  proveedor que el conector recrea en el siguiente sync, con productos
+  moviéndose solos.
+- **Los slugs viejos de proveedor siguen resolviendo** después de unificar
+  (verificado: 26 y 34). No se rompe ningún link que ande dando vueltas.
+- **Una categoría unificada no muestra estado de visibilidad propio** en el
+  panel, muestra "Bajo {canónica}": tener un toggle ahí haría pensar que se
+  puede ofrecer sola en el filtro, y no se puede.
+
 ### Verificado y sin verificar
 
-**Verificado** ejecutando las funciones reales (no solo compilando): ocultar
-"Próximos Arribos" la saca del selector público (39 → 38), la **mantiene** en
-el del panel (39), y sus 69 productos siguen llegando por URL directa, con el
-catálogo sin filtro en 728 y la búsqueda intacta. La base quedó restaurada.
+**Verificado ejecutando las funciones reales** (no solo compilando):
 
-**SIN verificar en el navegador**, que es donde viven los bugs de render: la
-pantalla tiró el error boundary por el cliente de Prisma viejo del dev server
-(se corrió `prisma generate` con el server levantado — es la trampa ya
-documentada en la tanda 7). **Se arregla reiniciando el dev server**, y hay
-que mirar: que la tabla dibuje las 39 filas, que el toggle diga
-"Ocultando..." y que el filtro del catálogo pierda la categoría.
+| Prueba | Resultado |
+|---|---|
+| Ocultar una categoría | sale del selector público (39 → 38) |
+| …y sigue en el del panel | sí (39) — la trampa de los formularios |
+| …y sus productos siguen llegando | 69 por URL directa, catálogo sin filtro en 728 |
+| Detección de homónimas | los 4 pares exactos, ninguno de más |
+| Unificar las dos "Escritura" | filtro 39 → 38, cero "Escritura" sueltas, canónica presente |
+| Filtrar por la canónica | **60 productos = 34 CDO + 26 Zecat** |
+| Slugs viejos de proveedor | siguen resolviendo (26 y 34) |
+| Panel después de unificar | 1 propia, 2 alias, 60 productos totales |
+| Sugerencias después | bajan de 4 a 3 — la resuelta deja de sugerirse |
 
-> La migración `20260821200000_add_category_visible` está aplicada **en local
-> solamente**. Es aditiva y reversible (`DROP COLUMN`). **Es la única que le
-> falta a Neon**, y hay que aplicarla antes de pushear `c681557`.
+La base quedó restaurada en los dos casos: 0 categorías ocultas, 0 alias.
+
+**Verificado en el navegador** (primera versión, antes de la unificación): la
+tabla dibuja las 39 filas con origen y conteo, el toggle muestra
+"Ocultando..." y pasa a "Oculta", el filtro del catálogo pierde la categoría y
+sus productos siguen apareciendo en la búsqueda.
+
+**SIN verificar en el navegador: todo lo de unificación** (bloque de
+sugerencias, alta de categoría propia, selector "Unificar con..."). El dev
+server volvió a quedar con el cliente de Prisma viejo.
+
+> **Trampa que ya pasó DOS veces en esta sesión:** correr `npx prisma generate`
+> con el dev server levantado lo deja con el cliente anterior, y todas las
+> pantallas que usan los campos nuevos tiran el error boundary aunque el
+> código esté bien. **Después de cada `prisma generate`, reiniciar el dev
+> server.** Se distingue de un bug real corriendo la consulta aislada con
+> `npx tsx`: si ahí anda, es esto.
 
 ---
 
@@ -1019,34 +1113,36 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Verificar en el navegador la pantalla de categorías**, que es lo único que
+**Verificar en el navegador el flujo de unificación**, que es lo único que
 quedó a medias. Requiere **reiniciar el dev server**: se corrió
 `prisma generate` con el server levantado y quedó con el cliente viejo, así
-que la pantalla tira el error boundary aunque el código esté bien (la consulta
-se probó aislada y devuelve las 39 filas). Es la trampa ya documentada en la
-tanda 7.
+que la pantalla tira el error boundary aunque el código esté bien (las
+consultas se probaron aisladas y dan los números correctos).
 
 Qué mirar cuando esté arriba:
 
-1. Que la tabla dibuje las 39 filas con su origen y su conteo.
-2. Que el toggle diga "Ocultando..." y la fila pase a "Oculta".
-3. Que el filtro de `/catalogo` pierda esa categoría **y que sus productos
-   sigan estando** en la grilla y en la búsqueda.
+1. Que el bloque de sugerencias liste los 4 pares (Escritura, Llaveros,
+   Paraguas, Tecnología) con sus conteos.
+2. Crear una categoría propia y ver que aparece en "Categorías de la tienda"
+   con 0 productos y sin alias.
+3. Unificar desde una sugerencia: el nombre precargado tiene que ser editable,
+   y al confirmar los dos alias cuelgan de la nueva con el total sumado.
+4. Que el filtro de `/catalogo` muestre **una sola** entrada con el nombre
+   propio, y que filtrando por ahí aparezcan los productos de los dos
+   proveedores.
+5. Desunificar desde el selector "Unificar con..." y ver que vuelve todo atrás.
 
 Después, para llevarlo a producción:
 
-4. `DATABASE_URL='<neon>' npx prisma migrate deploy` con
-   `20260821200000_add_category_visible`, con la guarda que verifica el
-   destino en el mismo comando.
-5. Confirmar que producción sigue igual (el default `true` hace que no cambie
-   nada visible).
-6. Push de `c681557` + los commits de documentación.
+6. `DATABASE_URL='<neon>' npx prisma migrate deploy` con las **dos**
+   migraciones, con la guarda que verifica el destino en el mismo comando.
+7. Confirmar que producción sigue igual (los defaults hacen que no cambie nada
+   visible).
+8. Push.
 
-**Decisión tuya, no trabajo de código:** con la pantalla andando, elegir qué
-categorías ocultar. Los candidatos están en la tabla de la sección de
-visibilidad. El caso más urgente no son las campañas sino las **cuatro
-categorías homónimas entre Zecat y CDO** (Escritura, Llaveros, Paraguas,
-Tecnología): hoy el filtro muestra dos "Escritura" sin forma de distinguirlas.
+**Decisión tuya, no trabajo de código:** con la pantalla andando, armar el
+mapeo. Los 4 pares homónimos son el caso urgente —hoy el cliente ve dos
+"Escritura" en producción— y las campañas se resuelven ocultando.
 
 **Lo que queda del lado de CDO, aparte:**
 

@@ -37,6 +37,34 @@ API), CDO (vía la suya), carga manual, y futuros proveedores.
   del proyecto.
 - Todos los productos de Zecat se muestran (no hay lógica de ocultar productos puntuales).
 
+### Categorías: las de la tienda son NUESTRAS
+- **Un producto pertenece a UNA sola categoría.** `Product.categoryId` es una FK
+  simple; los conectores toman la primera que manda el proveedor (`families[0]` en
+  Zecat, `categories[0]` en CDO) y descartan el resto. Consecuencia a tener presente:
+  sacar una categoría del filtro deja a sus productos sin ninguna vía de filtro.
+- **`Category.visible`** decide si se ofrece como filtro. Sirve para el ruido que
+  traen los proveedores: campañas ("2026 Agro"), ofertas ("70%OFF...") y cosas que
+  no son categorías ("Próximos Arribos", "Logo 24hs"). Ocultar NO oculta productos.
+- **`Category.canonicalId`** unifica las homónimas. Zecat y CDO traen los dos una
+  "Escritura", una "Tecnología", etc., y el cliente veía dos filtros iguales sin
+  forma de distinguirlos. La categoría de proveedor pasa a ser alias de una **propia**
+  y sus productos se muestran bajo ella.
+- **La canónica es siempre una categoría PROPIA** (sin ids de proveedor), por dos
+  razones. Técnica: si fuera de un proveedor, el próximo sync puede renombrarla y
+  cambiaría el filtro público solo — Zecat ya nos enseñó que estructuran los datos
+  como quieren (el nombre de la familia viene en `description`, no en `name`).
+  De negocio: podemos querer llamarle "Lapiceras y escritura" porque así lo buscan
+  nuestros clientes, aunque los dos proveedores le digan "Escritura".
+- **El mapeo se hace a mano desde el panel, nunca por matcheo automático de nombres.**
+  El panel SUGIERE candidatos por nombre normalizado, pero no aplica nada solo. Mismo
+  criterio que los iconos de CDO: adivinar por el nombre acierta hoy y falla callado
+  mañana. Los contraejemplos ya están en los datos — "Escritorio" y "Escritura" se
+  parecen y son distintas; "Hogar" (CDO) y "Hogar y Tiempo Libre" (Zecat) son lo
+  mismo y no matchean.
+- **Por qué vive en la base y no en el conector:** los conectores escriben
+  `categoryId` en cada upsert de cada corrida. Cualquier arreglo hecho reasignando
+  productos o borrando la categoría duplicada dura hasta el próximo sync.
+
 ### Precios (MODELO DEFINITIVO — validado contra datos reales)
 
 - **El costo vive en `ProductVariant.costPrice`, NO en `Product`.** La columna de

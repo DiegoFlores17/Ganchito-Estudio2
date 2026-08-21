@@ -204,9 +204,23 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
 
 - [x] **Construida la visibilidad editable de categorías.** Campo `Category.visible`
       (default true) + pantalla `/admin/categorías` con origen, cantidad de productos
-      y toggle. Falta la parte que es decisión tuya: **elegir cuáles ocultar**. Los
-      candidatos claros están en la tabla del HANDOFF (campañas "2026 *", "70%OFF *",
-      "Próximos Arribos", "Logo 24hs", y las 4 duplicadas entre Zecat y CDO).
+      y toggle. Resuelve el RUIDO: campañas ("2026 *"), ofertas ("70%OFF *") y cosas
+      que no son categorías ("Próximos Arribos", "Logo 24hs").
+- [x] **Construida la unificación de categorías homónimas.** Campo
+      `Category.canonicalId` + alta de categorías propias y sugerencias en el mismo
+      panel. Resuelve las DUPLICADAS entre proveedores, que ocultar no resolvía:
+      sacar una del filtro dejaba a sus productos sin ninguna vía de filtro, porque
+      cada producto tiene una sola categoría.
+- [ ] **Armar el mapeo de categorías** (decisión, no código). Los 4 pares homónimos
+      son lo urgente —hoy producción muestra dos "Escritura" al cliente—: Escritura
+      (Zecat 26 + CDO 34), Llaveros (24 + 7), Paraguas (7 + 4), Tecnología (22 + 11).
+      Después, ocultar las campañas y ofertas.
+- [ ] **Revisar los pares que el matcheo por nombre NO detecta.** El panel sugiere por
+      nombre normalizado, así que estos hay que verlos a ojo: "Hogar" (CDO, 24) vs
+      "Hogar y Tiempo Libre" (Zecat, 26) son lo mismo y no matchean; "Carpetas, Bolsos
+      y Mochilas" (CDO, 22) vs "Bolsos y Mochilas" (Zecat, 55); "Oficina y Negocios"
+      (CDO, 30) vs "Escritorio" (Zecat, 22). Y al revés: "Escritorio" y "Escritura" se
+      parecen y **no** hay que unificarlas.
 - [ ] **Limpiar las categorías del catálogo (Opción A: visibilidad editable).**
       **Ahora es más urgente: con CDO el problema se duplica.** El conector de
       CDO importa TODAS sus categorías, incluidas las de campaña ("Día de la

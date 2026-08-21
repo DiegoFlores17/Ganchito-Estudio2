@@ -7,15 +7,31 @@ Se actualiza al final de cada tanda de trabajo.
 **Branch:** `main`. Las tandas 1-8 y el precio por variante están pusheados,
 deployados y **verificados en producción**.
 
-> ## ⚠️ NO PUSHEAR TODAVÍA
+> ## 🔴 EL CONECTOR DE CDO YA ESTÁ PUSHEADO, Y NEON NO ESTÁ MIGRADA
 >
-> Hay trabajo commiteado en `main` local y **sin pushear**, a propósito:
-> el **conector de CDO** (`aff3ed9` → `02079c8`) y la **visibilidad de
-> categorías**. Entre los dos traen **dos migraciones que Neon no tiene**.
+> **Hoy 2026-08-21 16:19 se pushearon 7 commits** (`aff3ed9` → `ba9f7d7`),
+> incluido el conector de CDO entero. El reflog lo registra como
+> `origin/main@{2026-08-21 16:19:36}: update by push`. **No fue un push
+> planificado**: el plan era migrar Neon primero.
 >
-> Si el código llega a Vercel antes que las migraciones, producción rompe.
-> **Primero migrar Neon, verificar, y después el push** — ver la sección
-> dedicada más abajo.
+> **Neon sigue sin la migración `20260821174829_add_cdo_provider`.**
+>
+> **El mecanismo de rotura, concreto:** `getCategories()` en la versión
+> pusheada hace `prisma.category.findMany({ orderBy })` **sin `select`**.
+> Prisma pide entonces TODAS las columnas escalares del schema, incluida
+> `cdoCategoryId`, que en Neon no existe. Y `/catalogo` llama a esa función.
+>
+> **Estado verificado el 2026-08-21 ~16:5x:** `/catalogo` en producción
+> **funciona** (553 productos, precios correctos). Es decir que Vercel
+> todavía no está sirviendo un build hecho con el schema nuevo — o el build
+> falló y sigue sirviendo el anterior. **Revisar el dashboard de Vercel: un
+> deploy exitoso rompe el catálogo.**
+>
+> **Acción inmediata: migrar Neon.** No hay que revertir nada — la migración
+> es aditiva y deja el código pusheado funcionando.
+>
+> La visibilidad de categorías (`c681557`) **sí** quedó sin pushear, con su
+> propia migración también pendiente en Neon.
 
 El conector de CDO corre contra el entorno de **pruebas** de CDO y la base
 **local**, que es donde se pidió construirlo.

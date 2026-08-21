@@ -37,7 +37,6 @@ export interface ProductFormInitialData {
   description: string | null;
   supplierName: string | null;
   categoryId: string | null;
-  costPrice: number;
   minOrderQuantity: number | null;
   images: ExistingImage[];
   variants: {
@@ -61,8 +60,13 @@ export function ProductForm({
 
   // Controlado (antes era defaultValue) porque ahora tambien alimenta el
   // precio inicial de cada fila de variante nueva.
+  //
+  // Sale de la PRIMERA variante y ya no del producto, que dejo de tener
+  // costo. Para un producto sin variantes cargadas es exactamente el precio de
+  // su variante default (la invisible); para uno con variantes, es el valor
+  // con el que arrancan las filas nuevas.
   const [precioBase, setPrecioBase] = useState(
-    initialProduct ? String(initialProduct.costPrice) : ""
+    initialProduct?.variants[0] ? String(initialProduct.variants[0].costPrice) : ""
   );
 
   const [variants, setVariants] = useState<VariantRow[]>(

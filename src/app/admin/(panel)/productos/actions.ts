@@ -171,7 +171,9 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     description,
     supplierName,
     categoryId,
-    costPrice: costPriceRaw,
+    // El costo NO va mas en el producto: vive en cada variante. costPriceRaw
+    // se sigue usando abajo, para la variante default de los productos sin
+    // variantes cargadas.
     minOrderQuantity,
   };
 

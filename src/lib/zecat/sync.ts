@@ -69,7 +69,7 @@ export async function syncProduct(
       externalId: detail.external_id ?? null,
       name: detail.name,
       description: detail.description,
-      costPrice,
+      // El costo NO va mas en el producto: vive en cada variante (abajo).
       // El campo currency de Zecat no es confiable (ver SyncSummary.usdWarnings):
       // por ahora asumimos ARS siempre y no convertimos nada.
       currency: Currency.ARS,

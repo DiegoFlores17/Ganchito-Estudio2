@@ -155,9 +155,9 @@ model Product {
   name              String
   description       String?       @db.Text
 
-  /// COSTO base tal cual lo devuelve el proveedor (campo `price` de la API).
-  /// El precio de venta = costPrice * (1 + margin) y el IVA se suma aparte.
-  costPrice         Decimal       @db.Decimal(12, 2)
+  /// El COSTO vive en ProductVariant, no acá: hay proveedores con precios
+  /// distintos por variante (ver el comentario de ProductVariant.costPrice).
+  /// La moneda sí es del producto: todas sus variantes comparten una.
   currency          Currency      @default(ARS)
 
   /// Cantidad mínima para personalizar sin costo extra (minimum_order_quantity).

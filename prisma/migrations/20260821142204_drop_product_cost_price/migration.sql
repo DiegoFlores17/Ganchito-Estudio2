@@ -1,0 +1,23 @@
+-- Paso 3 y último de mover el costo a la variante: se borra el respaldo.
+--
+-- Esta migración SÍ destruye datos, y a propósito: products."costPrice" venía
+-- duplicado en product_variants."costPrice" desde la migración
+-- 20260821140603, justamente como red por si algo salía mal mientras el
+-- código migraba.
+--
+-- Antes de aplicarla se verificó contra la base, no de memoria:
+--   1694 variantes · 0 con costo nulo · 0 en cero o negativo
+--   0 variantes con costo distinto al de su producto
+--   suma idéntica en las dos columnas (36835795.02)
+--   0 productos sin variantes  <-- ninguno se queda sin precio
+--
+-- Y que ningún lugar del código lo lee: se auditaron las 4 referencias que
+-- quedaban (2 lecturas en el form del admin y 2 escrituras, en el sync de
+-- Zecat y en la Server Action) y se eliminaron en el mismo commit.
+--
+-- Para revertir NO alcanza con recrear la columna: hay que repoblarla desde
+-- las variantes (por ejemplo con el mínimo, o el de la primera variante), y
+-- eso pierde información si las variantes tienen precios distintos — que es
+-- exactamente el caso que motivó todo el cambio.
+
+ALTER TABLE "products" DROP COLUMN "costPrice";

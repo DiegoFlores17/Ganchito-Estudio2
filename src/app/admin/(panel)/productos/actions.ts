@@ -182,6 +182,10 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
           colorName: v.colorName?.trim() || null,
           sizeName: v.sizeName?.trim() || null,
           stock: v.stock,
+          // Por ahora el formulario tiene un solo precio para todo el
+          // producto, asi que se replica en cada variante. En la tanda que
+          // viene el precio pasa a ser por fila de variante.
+          costPrice: costPriceRaw,
         })),
       });
     } else {
@@ -194,6 +198,7 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
           productId: saved.id,
           sku: `manual-${randomUUID()}`,
           stock: simpleStockRaw,
+          costPrice: costPriceRaw,
         },
       });
     }

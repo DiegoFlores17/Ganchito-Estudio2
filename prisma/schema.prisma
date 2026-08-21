@@ -88,6 +88,22 @@ model PricingConfig {
   defaultMarginPercent Decimal @default(45) @db.Decimal(5, 2)
   /// Alícuota de IVA a mostrar/calcular aparte, como fracción. Ej: 0.21 = 21%.
   vatRate             Decimal  @default(0.21) @db.Decimal(6, 4)
+
+  /// Cotización del dólar para pasar a pesos los costos que vienen en USD
+  /// (hoy: CDO Promocionales). Editable desde el panel, igual que el margen.
+  ///
+  /// Es MANUAL y no sale de una API de dólar a propósito: el valor que usa CDO
+  /// (su web muestra "Cotización Dólar: $1510") es una decisión comercial de
+  /// ellos, no el dólar de mercado. Una API externa daría el oficial o el blue
+  /// y desalinearía los precios contra lo que CDO factura.
+  ///
+  /// La conversión se hace AL LEER, no al sincronizar: así mover este número
+  /// actualiza todo el catálogo al instante, sin re-sincronizar ~950 productos.
+  /// Mismo criterio que defaultMarginPercent.
+  ///
+  /// Pendiente: se le preguntó a CDO si tienen endpoint de cotización sin
+  /// documentar. Si aparece, esto pasa a alimentarse solo.
+  usdRate             Decimal  @default(1510) @db.Decimal(12, 2)
   updatedAt           DateTime @updatedAt
 
   // Garantiza que exista una sola fila de config (id siempre = 1).
@@ -217,8 +233,27 @@ model ProductVariant {
 
   /// Stock BRUTO y RESERVADO tal cual la API. El stock real que mostrás en la
   /// tienda es (stock - reservedStock). No muestres el bruto.
+  ///
+  /// OJO con CDO: su `stock_available` YA viene neto, no es el par de Zecat.
+  /// El mapeo correcto es stock = stock_existent y
+  /// reservedStock = stock_existent - stock_available, para que el neto dé
+  /// `stock_available`. Mapear available a reservedStock daría lo RESERVADO.
   stock          Int      @default(0)
   reservedStock  Int      @default(0)
+
+  /// COSTO de ESTA variante, en la moneda del producto (ver Product.currency).
+  ///
+  /// Vive acá y no en Product porque hay proveedores con precios distintos por
+  /// variante: en CDO, el producto OCEAN tiene variantes a 194.97 y a 205.23.
+  /// Un solo precio a nivel producto obligaría a elegir uno y mostrar un
+  /// número que no le corresponde a la variante que el cliente elige.
+  ///
+  /// Zecat repite el mismo valor en todas las variantes de un producto, que es
+  /// correcto: ahí el costo efectivamente es único.
+  ///
+  /// El precio de VENTA no se guarda: se calcula al leer, con el margen y la
+  /// cotización de PricingConfig. Ver la nota de usdRate.
+  costPrice      Decimal  @db.Decimal(12, 2)
 
   active         Boolean  @default(true)
 

@@ -109,6 +109,11 @@ export async function syncProduct(
           stock: parseStock(variant.stock),
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,
+          // Zecat tiene un unico costo por producto, asi que se repite en
+          // todas sus variantes. No es redundancia: el costo vive en la
+          // variante porque otros proveedores SI difieren entre variantes
+          // (ver el comentario de ProductVariant.costPrice en el schema).
+          costPrice,
         },
         create: {
           productId: product.id,
@@ -119,6 +124,7 @@ export async function syncProduct(
           stock: parseStock(variant.stock),
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,
+          costPrice,
         },
       });
     }

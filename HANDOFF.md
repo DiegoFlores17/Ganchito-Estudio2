@@ -7,31 +7,15 @@ Se actualiza al final de cada tanda de trabajo.
 **Branch:** `main`. Las tandas 1-8 y el precio por variante están pusheados,
 deployados y **verificados en producción**.
 
-> ## 🔴 EL CONECTOR DE CDO YA ESTÁ PUSHEADO, Y NEON NO ESTÁ MIGRADA
->
-> **Hoy 2026-08-21 16:19 se pushearon 7 commits** (`aff3ed9` → `ba9f7d7`),
-> incluido el conector de CDO entero. El reflog lo registra como
-> `origin/main@{2026-08-21 16:19:36}: update by push`. **No fue un push
-> planificado**: el plan era migrar Neon primero.
->
-> **Neon sigue sin la migración `20260821174829_add_cdo_provider`.**
->
-> **El mecanismo de rotura, concreto:** `getCategories()` en la versión
-> pusheada hace `prisma.category.findMany({ orderBy })` **sin `select`**.
-> Prisma pide entonces TODAS las columnas escalares del schema, incluida
-> `cdoCategoryId`, que en Neon no existe. Y `/catalogo` llama a esa función.
->
-> **Estado verificado el 2026-08-21 ~16:5x:** `/catalogo` en producción
-> **funciona** (553 productos, precios correctos). Es decir que Vercel
-> todavía no está sirviendo un build hecho con el schema nuevo — o el build
-> falló y sigue sirviendo el anterior. **Revisar el dashboard de Vercel: un
-> deploy exitoso rompe el catálogo.**
->
-> **Acción inmediata: migrar Neon.** No hay que revertir nada — la migración
-> es aditiva y deja el código pusheado funcionando.
->
-> La visibilidad de categorías (`c681557`) **sí** quedó sin pushear, con su
-> propia migración también pendiente en Neon.
+**El conector de CDO está pusheado, migrado y verificado en producción.** El
+2026-08-21 se pushearon los 7 commits (`aff3ed9` → `ba9f7d7`), se aplicó
+`20260821174829_add_cdo_provider` en Neon con `migrate deploy` ("All
+migrations have been successfully applied") y se confirmó que el catálogo de
+producción funciona.
+
+> **Lo único sin pushear es la visibilidad de categorías** (`c681557`), con su
+> migración `20260821200000_add_category_visible` aplicada **solo en local**.
+> Vale el orden de siempre: migrar Neon, verificar, después el push.
 
 El conector de CDO corre contra el entorno de **pruebas** de CDO y la base
 **local**, que es donde se pidió construirlo.
@@ -580,18 +564,16 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 - **`ProductAttribute` no se muestra en ningún lado.** El sync de CDO lo
   escribe, pero no hay UI que lo lea. Decidir si va en la ficha (junto a las
   técnicas de impresión) o si se descarta.
-- **El estado real de migraciones de Neon.** Se dedujo (el repo tiene 9
-  migraciones, los commits de CDO agregan 1, y el precio por variante quedó
-  verificado en producción), pero **no se confirmó contra la base**: la URL de
-  Neon no está en el `.env` —a propósito— así que hay que pasarla a mano.
-  Antes de migrar, correr:
+- **El estado real de migraciones de Neon.** La de CDO se confirmó aplicada; la
+  de categorías todavía no se aplicó. Para verlo con certeza en vez de deducir
+  —la URL de Neon no está en el `.env`, a propósito, así que va a mano—:
 
   ```bash
   DATABASE_URL='<url-de-neon>' npx prisma migrate status
   ```
 
-  Es solo lectura. Tiene que decir que faltan **dos**:
-  `20260821174829_add_cdo_provider` y `20260821200000_add_category_visible`.
+  Es solo lectura. Tiene que decir que falta **una**:
+  `20260821200000_add_category_visible`.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
@@ -625,30 +607,39 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ---
 
-## ⚠️ Neon tiene DOS migraciones pendientes — no pushear
+## Neon: una migración pendiente (la de categorías)
 
-Al día de hoy Neon está migrada **hasta el precio por variante inclusive**.
-Le faltan dos, y van en este orden:
+Neon está migrada **hasta el conector de CDO inclusive**. Le falta una sola:
+`20260821200000_add_category_visible`, que hoy está aplicada solo en local.
 
-1. `20260821174829_add_cdo_provider` — el segundo proveedor.
-2. `20260821200000_add_category_visible` — la visibilidad de categorías.
-
-Las dos están aplicadas en local y **ninguna** en Neon.
-
-**Los commits de CDO que están en `main` local incluyen código que lee
-columnas que en Neon todavía no existen.** Si ese código llega a Vercel antes
-que la migración, producción rompe.
-
-El orden no es negociable:
+**El orden de siempre, y no es negociable:**
 
 ```
 1. migrar Neon   →   2. verificar   →   3. recién ahí, push
 ```
 
-### La primera: `20260821174829_add_cdo_provider`
+Vercel no aplica migraciones (ver "Regla de entornos"), así que si el código
+llega antes que la columna, rompe lo que la lea.
 
-Es **enteramente aditiva**: no transforma
-ningún dato existente. Toca:
+### La pendiente: `20260821200000_add_category_visible`
+
+```sql
+ALTER TABLE "categories" ADD COLUMN "visible" BOOLEAN NOT NULL DEFAULT true;
+```
+
+Aditiva, sin backfill y **totalmente reversible** (`DROP COLUMN`). El default
+`true` hace que producción se comporte igual que antes de aplicarla: todas las
+categorías visibles hasta que alguien decida lo contrario.
+
+```bash
+# Con la guarda de siempre: verificar el destino en el MISMO comando.
+DATABASE_URL='<url-de-neon>' npx prisma migrate deploy
+```
+
+### Ya aplicada: `20260821174829_add_cdo_provider`
+
+Aplicada en Neon el 2026-08-21 con `migrate deploy`, y verificado después que
+el catálogo de producción funciona. Fue **enteramente aditiva**:
 
 | Qué | Cómo |
 |---|---|
@@ -658,36 +649,25 @@ ningún dato existente. Toca:
 | `product_variants` | `+ colorHex TEXT` (nullable) |
 | `product_attributes` | tabla nueva, FK a `products` con `ON DELETE CASCADE` |
 
-A diferencia de la del costo por variante, acá el SQL generado por Prisma
-sirve tal cual: no hace falta escribirlo a mano porque no hay backfill.
+> **Reversibilidad: parcial**, si alguna vez hiciera falta. Las columnas y la
+> tabla se dropean. El valor del enum **no**: PostgreSQL no tiene
+> `ALTER TYPE ... DROP VALUE`, habría que recrear el tipo entero.
 
-> **Reversibilidad: parcial.** Las columnas y la tabla se pueden dropear. El
-> valor del enum **no**: PostgreSQL no tiene `ALTER TYPE ... DROP VALUE`.
-> Para sacar `'CDO'` habría que recrear el tipo entero. En la práctica no
-> molesta —es un valor de enum sin usar— pero conviene saberlo antes de
-> aplicarla y no después.
+### Por qué el orden importa, con el caso concreto
 
-```bash
-# Con la guarda de siempre: verificar el destino en el MISMO comando.
-DATABASE_URL='<url-de-neon>' npx prisma migrate deploy
-```
+Vale la pena dejarlo escrito porque es contraintuitivo: **una consulta de
+Prisma sin `select` pide TODAS las columnas escalares del modelo.**
 
-### Después de migrar, antes de pushear
+`getCategories()` era `prisma.category.findMany({ orderBy })`, sin `select`.
+Con el schema nuevo eso incluye `cdoCategoryId`. Si el código hubiera llegado
+a Vercel antes que la migración, `/catalogo` habría roto —no por leer
+explícitamente una columna nueva, que nadie hacía, sino por no acotar el
+select. **No alcanza con revisar qué campos usa el código a mano.**
 
-Verificar que producción sigue entera **con los datos que ya tiene** — la
-migración no importa ningún producto de CDO, así que el catálogo tiene que
-verse exactamente igual que antes:
-
-- El catálogo y la ficha siguen mostrando precios (se tocó `product_variants`).
-- El panel entra y lista productos.
-- Una cotización nueva se puede enviar.
-
-Recién ahí el push.
-
-> **Lo que el push NO trae:** productos de CDO. Vercel no tiene
-> `CDO_API_TOKEN` ni `CDO_API_URL`, y el sync se corre a mano. Subir el código
-> es inocuo por sí solo; importar el catálogo de CDO a producción es un paso
-> aparte y posterior.
+> **Importar el catálogo de CDO a producción es un paso APARTE.** El código
+> pusheado no trae productos: Vercel no tiene `CDO_API_TOKEN` ni
+> `CDO_API_URL`, y el sync se corre a mano. Producción sigue con los 553 de
+> Zecat.
 
 ---
 
@@ -800,17 +780,20 @@ que mirar: que la tabla dibuje las 39 filas, que el toggle diga
 "Ocultando..." y que el filtro del catálogo pierda la categoría.
 
 > La migración `20260821200000_add_category_visible` está aplicada **en local
-> solamente**. Es aditiva y reversible (`DROP COLUMN`). Neon no la tiene: se
-> suma a la de CDO en el paso de migración pendiente.
+> solamente**. Es aditiva y reversible (`DROP COLUMN`). **Es la única que le
+> falta a Neon**, y hay que aplicarla antes de pushear `c681557`.
 
 ---
 
-## Conector de CDO Promocionales / Stocksur — construido, sin pushear
+## Conector de CDO Promocionales / Stocksur — pusheado y en producción
 
-Segundo proveedor. **Corre contra el entorno de pruebas de CDO y la base
-local**, como se pidió. 207 productos, 5 commits: `30e10b5` (conector),
-`8605797` (hosts de imágenes), `e6c54f6` (fix de Decimal en la ficha),
-`02079c8` (calidad de imágenes).
+Segundo proveedor. **Pusheado, con Neon migrada y producción verificada.**
+5 commits: `30e10b5` (conector), `8605797` (hosts de imágenes), `e6c54f6`
+(fix de Decimal en la ficha), `02079c8` (calidad de imágenes).
+
+**El sync sigue corriendo contra el entorno de pruebas de CDO y la base
+local.** Producción tiene el código pero no los productos: sigue con los 553
+de Zecat. 207 productos importados en local.
 
 Se corre a mano: `npm run sync:cdo`. Última corrida: 207 procesados, 0
 fallidos, 16,5s.
@@ -1036,27 +1019,42 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Migrar Neon con las dos migraciones pendientes, verificar, y recién ahí
-pushear.** Es el único trabajo abierto, y el orden es el de
-siempre: primero la base, después el código. El detalle está en la sección
-"⚠️ Neon NO tiene la migración de CDO".
+**Verificar en el navegador la pantalla de categorías**, que es lo único que
+quedó a medias. Requiere **reiniciar el dev server**: se corrió
+`prisma generate` con el server levantado y quedó con el cliente viejo, así
+que la pantalla tira el error boundary aunque el código esté bien (la consulta
+se probó aislada y devuelve las 39 filas). Es la trampa ya documentada en la
+tanda 7.
 
-Concretamente:
+Qué mirar cuando esté arriba:
 
-1. `DATABASE_URL='<neon>' npx prisma migrate deploy`, con la guarda que
-   verifica el destino en el mismo comando.
-2. Confirmar que producción sigue entera con los datos que ya tiene:
-   catálogo, ficha, panel y una cotización nueva. No debería cambiar nada
-   visible — la migración es aditiva y no importa ningún producto de CDO.
-3. Push.
+1. Que la tabla dibuje las 39 filas con su origen y su conteo.
+2. Que el toggle diga "Ocultando..." y la fila pase a "Oculta".
+3. Que el filtro de `/catalogo` pierda esa categoría **y que sus productos
+   sigan estando** en la grilla y en la búsqueda.
 
-**Lo que queda del lado de CDO, después y por separado** (nada de esto
-bloquea el push):
+Después, para llevarlo a producción:
+
+4. `DATABASE_URL='<neon>' npx prisma migrate deploy` con
+   `20260821200000_add_category_visible`, con la guarda que verifica el
+   destino en el mismo comando.
+5. Confirmar que producción sigue igual (el default `true` hace que no cambie
+   nada visible).
+6. Push de `c681557` + los commits de documentación.
+
+**Decisión tuya, no trabajo de código:** con la pantalla andando, elegir qué
+categorías ocultar. Los candidatos están en la tabla de la sección de
+visibilidad. El caso más urgente no son las campañas sino las **cuatro
+categorías homónimas entre Zecat y CDO** (Escritura, Llaveros, Paraguas,
+Tecnología): hoy el filtro muestra dos "Escritura" sin forma de distinguirlas.
+
+**Lo que queda del lado de CDO, aparte:**
 
 - Decidir si se apunta a **producción de CDO** (hoy es el entorno de pruebas).
-  Antes, la checklist de 5 puntos de la sección del conector.
-- Cargar `CDO_API_TOKEN` y `CDO_API_URL` en Vercel, si se quiere poder
-  sincronizar contra Neon. Hoy el sync se corre a mano desde local.
+  Antes, la checklist de la sección del conector.
+- Cargar `CDO_API_TOKEN` y `CDO_API_URL` en Vercel, si se quiere sincronizar
+  contra Neon. Hoy el sync se corre a mano desde local, y **producción todavía
+  no tiene ningún producto de CDO**.
 - **Conversación con CDO, no trabajo de código:** ~15% de las portadas de
   pruebas son inservibles y 33 de 207 productos no tienen ninguna foto usable.
   Si el número se repite en producción, es un problema de ellos.

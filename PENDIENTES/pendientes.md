@@ -176,10 +176,10 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       de pruebas, con listas explícitas de ids en `src/lib/cdo/normalize.ts`.
       Producción puede traer otros: el sync loguea los "sin clasificar", hay que
       mirar ese log y agregarlos a mano.
-- [ ] **Sacar `NEON_DATABASE_URL` del `.env`.** Se agregó para correr la migración
-      del precio por variante contra producción y ya no hace falta. Tener la URL de
-      producción a mano en el archivo que apunta a local es justo lo que la regla de
-      entornos busca evitar.
+- [x] **`NEON_DATABASE_URL` fuera del `.env`.** Verificado el 2026-08-21: el `.env`
+      tiene 12 claves y ninguna es de Neon. `DATABASE_URL` apunta a local, como manda
+      la regla de entornos. La URL de producción se pasa inline cuando hace falta y no
+      queda guardada en ningún archivo del repo.
 
       - [ ] **Sincronizar dos listas de acceso al panel al sumar/sacar admins:** los
       "Test users" en Google Cloud Console Y la tabla `AdminUser`. Alguien tiene

@@ -565,10 +565,18 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 - **`ProductAttribute` no se muestra en ningún lado.** El sync de CDO lo
   escribe, pero no hay UI que lo lea. Decidir si va en la ficha (junto a las
   técnicas de impresión) o si se descarta.
-- **`NEON_DATABASE_URL` quedó en el `.env`.** Se agregó para correr la
-  migración contra producción y ya no hace falta. Sacarla: tener la URL de
-  producción a mano en el archivo que apunta a local es justo lo que la regla
-  de entornos busca evitar.
+- **El estado real de migraciones de Neon.** Se dedujo (el repo tiene 9
+  migraciones, los commits de CDO agregan 1, y el precio por variante quedó
+  verificado en producción), pero **no se confirmó contra la base**: la URL de
+  Neon no está en el `.env` —a propósito— así que hay que pasarla a mano.
+  Antes de migrar, correr:
+
+  ```bash
+  DATABASE_URL='<url-de-neon>' npx prisma migrate status
+  ```
+
+  Es solo lectura. Tiene que decir que falta **una sola**:
+  `20260821174829_add_cdo_provider`.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.

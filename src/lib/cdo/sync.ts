@@ -3,12 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { iterateAllProducts } from "./client";
 import {
   buildSku,
+  candidateImageUrls,
   extractCostPrice,
   hasNoUsableImages,
   mapStock,
+  probeImage,
   slugifyCategory,
   splitIcons,
   variantImageUrls,
+  type ImageProbe,
 } from "./normalize";
 import type { CdoCategory, CdoProduct } from "./types";
 
@@ -26,6 +29,10 @@ export interface CdoSyncSummary {
   /// Iconos que no estan en ninguna de las dos listas de clasificacion.
   /// NO se descartan en silencio: hay que mirarlos y clasificarlos a mano.
   iconosDesconocidos: Array<{ id: number; label: string | null }>;
+  /// Calidad de las PORTADAS, para poder comparar el numero contra produccion
+  /// de CDO. Si la proporcion se mantiene, ~250 productos sobre 950 tendrian
+  /// foto inservible y eso es material para hablar con el proveedor.
+  portadas: { ok: number; deformes: number; chicas: number; rotas: number };
   errors: Array<{ cdoId: number; message: string }>;
 }
 
@@ -79,7 +86,8 @@ async function resolveCategoryId(
 /// queda a medio escribir.
 export async function syncCdoProduct(
   product: CdoProduct,
-  summary: CdoSyncSummary
+  summary: CdoSyncSummary,
+  probes: Map<string, ImageProbe>
 ): Promise<"created" | "updated"> {
   const variants = product.variants ?? [];
   const icons = splitIcons(product.icons);
@@ -90,7 +98,7 @@ export async function syncCdoProduct(
     }
   }
 
-  const sinImagen = hasNoUsableImages(product);
+  const sinImagen = hasNoUsableImages(product, probes);
   if (sinImagen) {
     summary.sinImagen.push({ cdoId: product.id, name: product.name });
   }
@@ -182,7 +190,7 @@ export async function syncCdoProduct(
 
     for (const variant of variants) {
       const variantId = variantIdBySku.get(buildSku(product.id, variant)) ?? null;
-      const urls = variantImageUrls(variant);
+      const urls = variantImageUrls(variant, probes);
 
       urls.forEach((url, index) => {
         const esPrincipal = !yaMarcoPrincipal;
@@ -247,14 +255,48 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
     sinImagen: [],
     skuSintetico: 0,
     iconosDesconocidos: [],
+    portadas: { ok: 0, deformes: 0, chicas: 0, rotas: 0 },
     errors: [],
   };
 
-  for await (const product of iterateAllProducts()) {
+  // 1. Bajar el catalogo entero. Son 3 requests: el listado ya trae todo.
+  const products: CdoProduct[] = [];
+  for await (const product of iterateAllProducts()) products.push(product);
+
+  // 2. Medir las imagenes ANTES de escribir nada.
+  //
+  // Va aca y no dentro del sync de cada producto por una razon dura: cada
+  // producto se escribe en una transaccion, y hacer llamadas de red adentro
+  // de una transaccion la mantiene abierta esperando a la red. Eso agarra
+  // conexiones del pool y, con 627 imagenes, es pedir problemas.
+  const urls = [...new Set(products.flatMap((p) => candidateImageUrls(p)))];
+  const probes = new Map<string, ImageProbe>();
+  const LOTE = 12;
+  for (let i = 0; i < urls.length; i += LOTE) {
+    await Promise.all(
+      urls.slice(i, i + LOTE).map(async (url) => {
+        probes.set(url, await probeImage(url));
+      })
+    );
+  }
+
+  // 3. Recien ahora, escribir.
+  for (const product of products) {
     summary.total++;
 
+    // Calidad de la PORTADA: la primera imagen usable de cualquier variante,
+    // que es la que termina en la card del catalogo.
+    const portada = candidateImageUrls(product)[0];
+    const probe = portada ? probes.get(portada) : undefined;
+    if (probe) {
+      if (probe.verdict === "ok") summary.portadas.ok++;
+      else if (probe.verdict === "deforme") summary.portadas.deformes++;
+      else if (probe.verdict === "chica") summary.portadas.chicas++;
+      else summary.portadas.rotas++;
+    }
+
     try {
-      const result = await syncCdoProduct(product, summary);
+      const result = await syncCdoProduct(product, summary, probes);
       if (result === "created") summary.created++;
       else summary.updated++;
     } catch (error) {
@@ -277,6 +319,12 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
         summary.iconosDesconocidos.map((i) => `${i.id} (${i.label})`).join(", ")
     );
   }
+
+  const { ok, deformes, chicas, rotas } = summary.portadas;
+  const malas = deformes + chicas + rotas;
+  console.log(
+    `[cdo-sync] Calidad de portadas: ${ok} ok, ${deformes} deformes (se muestran con object-contain), ${chicas} muy chicas y ${rotas} rotas (descartadas). ${malas} de ${ok + malas} con algun problema.`
+  );
 
   return summary;
 }

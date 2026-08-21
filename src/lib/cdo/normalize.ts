@@ -156,7 +156,13 @@ export function slugifyCategory(name: string, id: number): string {
 
 /// Todas las imagenes usables de una variante, en orden de prioridad:
 /// la principal, la de detalle y despues el resto.
-export function variantImageUrls(variant: CdoVariant): string[] {
+///
+/// Si se pasa el mapa de mediciones, ademas se descartan las rotas y las
+/// demasiado chicas. Sin el mapa solo se filtra por nombre (missing.png).
+export function variantImageUrls(
+  variant: CdoVariant,
+  probes?: Map<string, ImageProbe>
+): string[] {
   const urls: string[] = [];
 
   if (isUsableImage(variant.picture?.original)) urls.push(variant.picture!.original!);
@@ -167,7 +173,90 @@ export function variantImageUrls(variant: CdoVariant): string[] {
     if (isUsableImage(other.original)) urls.push(other.original!);
   }
 
-  return [...new Set(urls)];
+  const unicas = [...new Set(urls)];
+  return probes ? unicas.filter((u) => probeAceptada(probes.get(u))) : unicas;
+}
+
+/// Todas las URLs candidatas de un producto, ANTES de medirlas. Se usa para
+/// juntar la lista a medir de una sola pasada.
+export function candidateImageUrls(product: CdoProduct): string[] {
+  return [...new Set((product.variants ?? []).flatMap((v) => variantImageUrls(v)))];
+}
+
+/// Ancho/alto minimo para aceptar una foto de producto.
+///
+/// CDO tiene imagenes que son claramente basura y NO son missing.png: la
+/// portada de "BOTELLA DAKOTA Y TAPA OCEAN KIT" es un Selection_080.png de
+/// 483x72 — el nombre que le pone GNOME a una captura de pantalla recortada.
+/// Alguien subio un recorte de screenshot como foto de producto.
+const MIN_IMAGE_SIDE = 200;
+
+/// A partir de esta proporcion (lado mayor / lado menor) la foto se considera
+/// deforme para un contenedor cuadrado.
+///
+/// NO se filtra por esto: se cambia el encuadre a object-contain en la card
+/// (ver ProductCardImage). Filtrar una foto real por ser angosta es tirar
+/// producto vendible — "Destornillador" es 209x1514 y es una foto legitima de
+/// un objeto largo.
+export const EXTREME_ASPECT_RATIO = 2.5;
+
+export type ImageVerdict = "ok" | "deforme" | "chica" | "rota";
+
+export interface ImageProbe {
+  verdict: ImageVerdict;
+  width: number;
+  height: number;
+}
+
+/// Mide una imagen para decidir si sirve como foto de producto.
+///
+/// Hace falta bajarla: el problema no se ve en la URL. Hay tres modos de
+/// fallo distintos y ninguno se detecta mirando el string —
+///   - missing.png, que si se filtra por nombre (ver isUsableImage)
+///   - imagenes que devuelven algo que no es una imagen (4 de 178 portadas)
+///   - screenshots y recortes con proporciones absurdas (22 de 178)
+///
+/// Se pide solo el primer tramo del archivo: el header con las dimensiones
+/// esta al principio. Si con eso no alcanza, se baja entero.
+export async function probeImage(url: string): Promise<ImageProbe> {
+  const sharp = (await import("sharp")).default;
+
+  async function medir(headersExtra?: Record<string, string>) {
+    const res = await fetch(url, { headers: headersExtra });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const meta = await sharp(buf).metadata();
+    return { width: meta.width ?? 0, height: meta.height ?? 0 };
+  }
+
+  let dims: { width: number; height: number };
+  try {
+    dims = await medir({ Range: "bytes=0-65535" });
+    if (!dims.width || !dims.height) dims = await medir();
+  } catch {
+    try {
+      dims = await medir();
+    } catch {
+      return { verdict: "rota", width: 0, height: 0 };
+    }
+  }
+
+  const { width, height } = dims;
+  if (!width || !height) return { verdict: "rota", width, height };
+  if (width < MIN_IMAGE_SIDE || height < MIN_IMAGE_SIDE) {
+    return { verdict: "chica", width, height };
+  }
+  if (Math.max(width / height, height / width) > EXTREME_ASPECT_RATIO) {
+    return { verdict: "deforme", width, height };
+  }
+  return { verdict: "ok", width, height };
+}
+
+/// Una imagen entra al catalogo salvo que sea rota o demasiado chica. Las
+/// deformes SI entran: se les cambia el encuadre, no se descartan.
+export function probeAceptada(probe: ImageProbe | undefined): boolean {
+  if (!probe) return true; // sin medicion, no se descarta nada
+  return probe.verdict === "ok" || probe.verdict === "deforme";
 }
 
 /// true si el producto no tiene NI UNA imagen usable en ninguna variante.
@@ -176,8 +265,11 @@ export function variantImageUrls(variant: CdoVariant): string[] {
 /// tienda de merch no sirve — nadie cotiza lo que no puede ver, y en el
 /// catalogo se veria como un cuadrado gris. Como el sync los vuelve a evaluar
 /// en cada corrida, si CDO les carga la foto se reactivan solos.
-export function hasNoUsableImages(product: CdoProduct): boolean {
+export function hasNoUsableImages(
+  product: CdoProduct,
+  probes?: Map<string, ImageProbe>
+): boolean {
   return (product.variants ?? []).every(
-    (variant) => variantImageUrls(variant).length === 0
+    (variant) => variantImageUrls(variant, probes).length === 0
   );
 }

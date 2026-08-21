@@ -27,14 +27,6 @@ const nextConfig: NextConfig = {
       // los conectores y por Blob, nunca por input de usuario. Si algun dia se
       // quiere ajustar, se reemplaza por los hosts concretos.
       { protocol: "https", hostname: "*.cloudfront.net" },
-      // CDO Promocionales sirve TODO desde este CloudFront: fotos de producto,
-      // de color y los iconos de atributos (627 + 70 en el entorno de pruebas).
-      //
-      // OJO: este host es el del entorno de PRUEBAS. Al apuntar a produccion
-      // hay que confirmar si es el mismo — el host de assets de pruebas
-      // (assets.cdo.dev.yellowspot.com.ar, el de los missing.png que filtramos)
-      // claramente no lo es, asi que no se puede dar por hecho.
-      { protocol: "https", hostname: "d1ok1ldurjeiif.cloudfront.net" },
     ],
   },
 };

@@ -1,10 +1,10 @@
 import { requireAdmin } from "@/lib/admin-auth";
-import { getCategories } from "@/lib/catalog";
+import { getAllCategories } from "@/lib/catalog";
 import { ProductForm } from "@/components/admin/product-form";
 
 export default async function NuevoProductoPage() {
   await requireAdmin();
-  const categories = await getCategories();
+  const categories = await getAllCategories();
 
   return (
     <div>

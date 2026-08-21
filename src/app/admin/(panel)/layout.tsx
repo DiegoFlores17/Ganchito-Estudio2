@@ -33,6 +33,15 @@ export default async function AdminPanelLayout({
               >
                 Productos
               </Link>
+              {/* Visible para cualquier admin, no solo super admin: ocultar
+                  una categoria del filtro no toca precios ni productos, y es
+                  reversible de un click. */}
+              <Link
+                href="/admin/categorias"
+                className="text-sm text-foreground/70 transition-colors hover:text-primary"
+              >
+                Categorías
+              </Link>
               {isSuperAdmin && (
                 <>
                   <Link

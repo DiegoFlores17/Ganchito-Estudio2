@@ -131,6 +131,23 @@ model Category {
   /// Para ordenar/destacar en tu tienda, independiente de Zecat.
   featured      Boolean   @default(false)
   sortOrder     Int       @default(0)
+  /// Si la categoría se ofrece como filtro en el catálogo público.
+  ///
+  /// Los conectores importan TODAS las categorías del proveedor, incluidas
+  /// campañas temporales ("2026 Agro", "Día de la Madre") y duplicados de
+  /// oferta ("70%OFF Bolsos y Mochilas"). Filtrarlas desde el conector por
+  /// nombre sería adivinar, así que la decisión vive acá y se toma desde el
+  /// panel.
+  ///
+  /// OJO — apagar esto NO oculta ningún producto: los productos de una
+  /// categoría oculta siguen apareciendo en el catálogo y en la búsqueda.
+  /// Lo único que se saca es la categoría como opción de filtro. Un link
+  /// directo a /catalogo?categoria={slug} sigue funcionando.
+  ///
+  /// Default true: una categoría nueva del proveedor aparece hasta que
+  /// alguien decida lo contrario. Al revés, un proveedor nuevo entraría
+  /// entero invisible y nadie se enteraría.
+  visible       Boolean   @default(true)
 
   products      Product[]
 

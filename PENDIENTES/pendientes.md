@@ -202,6 +202,11 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
 
 ## Categorías (después del diseño)
 
+- [x] **Construida la visibilidad editable de categorías.** Campo `Category.visible`
+      (default true) + pantalla `/admin/categorías` con origen, cantidad de productos
+      y toggle. Falta la parte que es decisión tuya: **elegir cuáles ocultar**. Los
+      candidatos claros están en la tabla del HANDOFF (campañas "2026 *", "70%OFF *",
+      "Próximos Arribos", "Logo 24hs", y las 4 duplicadas entre Zecat y CDO).
 - [ ] **Limpiar las categorías del catálogo (Opción A: visibilidad editable).**
       **Ahora es más urgente: con CDO el problema se duplica.** El conector de
       CDO importa TODAS sus categorías, incluidas las de campaña ("Día de la

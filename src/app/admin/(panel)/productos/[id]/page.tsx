@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/admin-auth";
-import { getCategories } from "@/lib/catalog";
+import { getAllCategories } from "@/lib/catalog";
 import { getManualProductById } from "@/lib/admin-products";
 import { ProductForm } from "@/components/admin/product-form";
 import { DeleteProductButton } from "@/components/admin/delete-product-button";
@@ -15,7 +15,7 @@ export default async function EditarProductoPage({
 
   const [product, categories] = await Promise.all([
     getManualProductById(id),
-    getCategories(),
+    getAllCategories(),
   ]);
   if (!product) notFound();
 

@@ -9,7 +9,28 @@ interface GetProductsParams {
   search?: string;
 }
 
-export async function getCategories() {
+/// Categorias que se ofrecen como filtro en el catalogo publico.
+///
+/// Filtrar por `visible` NO oculta ningun producto: los de una categoria
+/// oculta siguen saliendo en la grilla y en la busqueda. Lo unico que se saca
+/// es la categoria del selector. Un link directo a
+/// /catalogo?categoria={slug} sigue resolviendo, a proposito — asi los tiles
+/// de la home no se rompen si alguien oculta una de esas categorias.
+export async function getVisibleCategories() {
+  return prisma.category.findMany({
+    where: { visible: true },
+    orderBy: { name: "asc" },
+  });
+}
+
+/// TODAS las categorias, visibles y ocultas. Es la que va en los formularios
+/// del panel.
+///
+/// No es lo mismo que getVisibleCategories() y la diferencia importa: si el
+/// selector de categoria del formulario de producto filtrara por `visible`,
+/// un producto manual ya asignado a una categoria oculta perderia su
+/// seleccion al editarlo, en silencio.
+export async function getAllCategories() {
   return prisma.category.findMany({
     orderBy: { name: "asc" },
   });

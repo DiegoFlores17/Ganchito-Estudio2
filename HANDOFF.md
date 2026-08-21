@@ -3,23 +3,22 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-21 — conector de CDO Promocionales
+**Última actualización:** 2026-08-21 — visibilidad de categorías
 **Branch:** `main`. Las tandas 1-8 y el precio por variante están pusheados,
-deployados y **verificados en producción**. Neon ya tiene todas las
-migraciones.
+deployados y **verificados en producción**.
 
 > ## ⚠️ NO PUSHEAR TODAVÍA
 >
-> **El conector de CDO** (`aff3ed9` → `02079c8`) está commiteado en `main`
-> local y **sin pushear**, a propósito. Trae la migración
-> `20260821174829_add_cdo_provider`, **que Neon todavía no tiene**.
+> Hay trabajo commiteado en `main` local y **sin pushear**, a propósito:
+> el **conector de CDO** (`aff3ed9` → `02079c8`) y la **visibilidad de
+> categorías**. Entre los dos traen **dos migraciones que Neon no tiene**.
 >
-> Si el código llega a Vercel antes que la migración, producción rompe.
+> Si el código llega a Vercel antes que las migraciones, producción rompe.
 > **Primero migrar Neon, verificar, y después el push** — ver la sección
 > dedicada más abajo.
 
-Corre contra el entorno de **pruebas** de CDO y la base **local**, que es
-donde se pidió construirlo.
+El conector de CDO corre contra el entorno de **pruebas** de CDO y la base
+**local**, que es donde se pidió construirlo.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -575,8 +574,8 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   DATABASE_URL='<url-de-neon>' npx prisma migrate status
   ```
 
-  Es solo lectura. Tiene que decir que falta **una sola**:
-  `20260821174829_add_cdo_provider`.
+  Es solo lectura. Tiene que decir que faltan **dos**:
+  `20260821174829_add_cdo_provider` y `20260821200000_add_category_visible`.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
@@ -610,10 +609,15 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ---
 
-## ⚠️ Neon NO tiene la migración de CDO — no pushear
+## ⚠️ Neon tiene DOS migraciones pendientes — no pushear
 
 Al día de hoy Neon está migrada **hasta el precio por variante inclusive**.
-Le falta exactamente una: `20260821174829_add_cdo_provider`.
+Le faltan dos, y van en este orden:
+
+1. `20260821174829_add_cdo_provider` — el segundo proveedor.
+2. `20260821200000_add_category_visible` — la visibilidad de categorías.
+
+Las dos están aplicadas en local y **ninguna** en Neon.
 
 **Los commits de CDO que están en `main` local incluyen código que lee
 columnas que en Neon todavía no existen.** Si ese código llega a Vercel antes
@@ -625,9 +629,9 @@ El orden no es negociable:
 1. migrar Neon   →   2. verificar   →   3. recién ahí, push
 ```
 
-### La migración pendiente
+### La primera: `20260821174829_add_cdo_provider`
 
-`20260821174829_add_cdo_provider` es **enteramente aditiva**: no transforma
+Es **enteramente aditiva**: no transforma
 ningún dato existente. Toca:
 
 | Qué | Cómo |
@@ -680,6 +684,108 @@ aplicadas en Neon**, en ese orden y antes del push.
 Verificado en producción por el usuario: el campo de cotización carga, el
 precio cambia según la variante elegida en la ficha, y la cotización congela
 el precio de **esa** variante. El margen quedó de vuelta en 45.
+
+---
+
+## Visibilidad de categorías — construido, verificado a medias
+
+`Category.visible` (bool, default true) + pantalla `/admin/categorias` con el
+origen de cada categoría, cuántos productos tiene y un toggle.
+
+### La premisa del pedido era incorrecta, y conviene saberlo
+
+El pedido decía "los productos de una categoría oculta siguen apareciendo
+porque un producto está en varias categorías". **La primera mitad es cierta;
+la segunda no.**
+
+`Product.categoryId` es una FK **simple y nullable**: un producto pertenece a
+**una sola** categoría. Los dos conectores toman la primera que manda el
+proveedor —Zecat `families[0]`, CDO `categories[0]`— y descartan el resto. La
+API de Zecat sí devuelve varias familias por producto; nuestro schema no las
+guarda.
+
+**Consecuencia real, más fuerte que la que se esperaba:** ocultar una
+categoría deja a sus productos **sin ninguna vía de filtro**. Siguen en la
+grilla y en la búsqueda (que es lo que se pidió y funciona), pero no hay otra
+categoría que los recoja.
+
+Con números de la base local: ocultar "Próximos Arribos" (69) y "Logo 24hs"
+(76) dejaría **145 productos de 761 sin forma de llegar por filtro**. Es
+defendible —son productos que igual aparecen navegando y buscando— pero es
+una decisión distinta a la que sugería la premisa.
+
+> Si algún día se quiere que un producto esté en varias categorías, es un
+> cambio de schema (tabla intermedia) y de los dos conectores. No está hecho
+> ni planteado.
+
+### Lo que la pantalla muestra
+
+Las 39 categorías ordenadas **por nombre, no por origen**, a propósito: los
+dos proveedores traen categorías homónimas —**"Escritura" (Zecat 26 · CDO
+38), "Llaveros" (24 · 9), "Paraguas" (7 · 5), "Tecnología" (22 · 15)**— y
+ordenar por nombre las deja pegadas, que es justo lo que hay que ver para
+decidir.
+
+> **Ese es un problema que hoy ya está en producción de cara al cliente:** el
+> filtro del catálogo muestra dos "Escritura" y no hay forma de distinguirlas.
+> Es más grave que el ruido de las campañas, y esta pantalla es lo que permite
+> resolverlo (ocultando una de las dos).
+
+Candidatos a ocultar, de la base local:
+
+| Tipo | Categorías |
+|---|---|
+| Campañas | "2026 Agro" (16), "2026 Día de la Niñez" (1), "2026 Minería" (2), "2026 Novedades" (2), "2026 Reingresos" (3) |
+| Ofertas | "70%OFF Bolsos y Mochilas" (**0 productos**), "70%OFF Hogar y Tiempo Libre" (1), "Ofertas" CDO (1) |
+| No son categorías | "Próximos Arribos" (69), "Logo 24hs" (76) |
+| Duplicadas | Escritura, Llaveros, Paraguas, Tecnología (elegir una de cada par) |
+
+### La trampa que se evitó
+
+`getCategories()` la usaban **tres** pantallas: el filtro público y los **dos
+formularios de producto del panel**. Meterle `where: { visible: true }` habría
+hecho que un producto manual asignado a una categoría oculta **perdiera su
+categoría al editarlo, en silencio**. Por eso se partió en dos funciones con
+nombres explícitos:
+
+- `getVisibleCategories()` → filtro público.
+- `getAllCategories()` → formularios del panel.
+
+Ya no existe `getCategories()`: el nombre ambiguo se eliminó a propósito, para
+que nadie elija mal por descuido.
+
+### Decisiones que conviene no deshacer
+
+- **Un link directo `/catalogo?categoria={slug}` sigue funcionando aunque la
+  categoría esté oculta.** Solo desaparece del selector. Es deliberado: los
+  seis tiles de la home (`HOME_CATEGORY_PICKS`) apuntan a categorías por slug,
+  y si ocultar una rompiera el link, la portada quedaría con tiles muertos.
+- **`visible` default true.** Una categoría nueva del proveedor aparece hasta
+  que alguien decida lo contrario. Al revés, un proveedor nuevo entraría
+  entero invisible y nadie se enteraría.
+- **El conteo de productos excluye pausados y eliminados.** El número está
+  para decidir si vale la pena ofrecer la categoría como filtro; una con 0
+  productos vivos no le sirve a nadie (hoy: "70%OFF Bolsos y Mochilas").
+- **Alcanza con `requireAdmin()`, no super admin.** No toca precios ni
+  productos y es reversible de un click.
+
+### Verificado y sin verificar
+
+**Verificado** ejecutando las funciones reales (no solo compilando): ocultar
+"Próximos Arribos" la saca del selector público (39 → 38), la **mantiene** en
+el del panel (39), y sus 69 productos siguen llegando por URL directa, con el
+catálogo sin filtro en 728 y la búsqueda intacta. La base quedó restaurada.
+
+**SIN verificar en el navegador**, que es donde viven los bugs de render: la
+pantalla tiró el error boundary por el cliente de Prisma viejo del dev server
+(se corrió `prisma generate` con el server levantado — es la trampa ya
+documentada en la tanda 7). **Se arregla reiniciando el dev server**, y hay
+que mirar: que la tabla dibuje las 39 filas, que el toggle diga
+"Ocultando..." y que el filtro del catálogo pierda la categoría.
+
+> La migración `20260821200000_add_category_visible` está aplicada **en local
+> solamente**. Es aditiva y reversible (`DROP COLUMN`). Neon no la tiene: se
+> suma a la de CDO en el paso de migración pendiente.
 
 ---
 
@@ -914,8 +1020,8 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Migrar Neon con `20260821174829_add_cdo_provider`, verificar, y recién ahí
-pushear el conector de CDO.** Es el único trabajo abierto, y el orden es el de
+**Migrar Neon con las dos migraciones pendientes, verificar, y recién ahí
+pushear.** Es el único trabajo abierto, y el orden es el de
 siempre: primero la base, después el código. El detalle está en la sección
 "⚠️ Neon NO tiene la migración de CDO".
 

@@ -2,7 +2,7 @@ import { CategoryFilter } from "@/components/catalog/category-filter";
 import { Pagination } from "@/components/catalog/pagination";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SearchInput } from "@/components/search-input";
-import { getCategories, getProducts, hasAvailableStock } from "@/lib/catalog";
+import { getVisibleCategories, getProducts, hasAvailableStock } from "@/lib/catalog";
 import { computePriceRange, getPricingConfig } from "@/lib/pricing";
 
 export default async function CatalogoPage({
@@ -18,7 +18,7 @@ export default async function CatalogoPage({
   const [{ products, totalPages, total }, categories, pricingConfig] =
     await Promise.all([
       getProducts({ page, categorySlug, search }),
-      getCategories(),
+      getVisibleCategories(),
       getPricingConfig(),
     ]);
 

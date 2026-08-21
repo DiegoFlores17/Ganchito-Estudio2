@@ -3,8 +3,10 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-19 — tanda 8 (descubribilidad del panel)
-**Branch:** `main`, todo pusheado (`de7fe3c`). Las 8 tandas están deployadas.
+**Última actualización:** 2026-08-21 — precio por variante + cotización USD
+**Branch:** `main`. Las tandas 1-8 están pusheadas y deployadas. **El precio
+por variante está commiteado pero SIN pushear, y Neon SIN migrar** — leer la
+advertencia de acá abajo antes de tocar producción.
 
 > La migración de `deletedAt` ya está aplicada en las dos bases, así que el
 > orden seguro (migrar antes que el código) está cumplido. Antes de tocar
@@ -579,6 +581,104 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 > Nota: `next dev` reescribe solo el bloque `nextjs-agent-rules` de `CLAUDE.md`.
 > Si vuelve a aparecer como cambio sin commitear, es eso — se commitea junto con
 > el trabajo y listo, borrarlo del diff solo lo regenera.
+
+---
+
+## ⚠️ Neon tiene DOS migraciones pendientes
+
+Local está migrada, **producción no**. Y el código ya commiteado **lee
+`product_variants."costPrice"`**, una columna que en Neon todavía no existe.
+
+**El orden no es negociable: primero la base, después el push.** Si el código
+llega antes, se rompe el catálogo, la ficha, la cotización y el panel — todo
+lo que muestra un precio.
+
+```bash
+DATABASE_URL='<url-de-neon>' npx prisma migrate deploy
+```
+
+Las dos pendientes son `20260821140603_add_variant_cost_price_and_usd_rate`
+(aditiva, con backfill) y `20260821142204_drop_product_cost_price` (destruye
+`products."costPrice"`). Van juntas.
+
+---
+
+## Precio por variante (tres tandas, cerradas y verificadas en local)
+
+El costo pasó de `Product` a `ProductVariant`, y los costos en dólares se
+convierten **al leer**.
+
+**Por qué**: hay proveedores con precios distintos por variante — en CDO, el
+producto OCEAN tiene variantes a 194.97 y a 205.23. Un solo precio a nivel
+producto obligaba a elegir uno y mostrarle al cliente un número que no
+corresponde a lo que eligió.
+
+**Por qué se convierte al leer y no al sincronizar**: mover `usdRate` en el
+panel actualiza todo el catálogo al instante, sin re-sincronizar ~950
+productos. Mismo criterio que el margen.
+
+**Por qué `usdRate` es manual y no sale de una API de dólar**: el valor que usa
+CDO (su web muestra $1510) es una **decisión comercial de ellos**, no el dólar
+de mercado. Una API externa daría el oficial o el blue y desalinearía los
+precios contra lo que CDO factura.
+
+Los commits, en orden: `f33937e` (agregar + migración con backfill), `857b697`
+(leer/escribir desde la variante), `07a2fae` (borrar `Product.costPrice`).
+
+### La migración con backfill: la trampa
+
+Prisma genera `ADD COLUMN ... NOT NULL` sin default, que sobre 1693 variantes
+**falla** con `Null constraint failed` — verificado ejecutándolo. El peligro no
+es esa falla, que es ruidosa: **es el arreglo obvio**. Agregarle `DEFAULT 0`
+para que pase deja todas las variantes en costo cero, en silencio, sin que
+nada se rompa hasta que alguien mire un precio.
+
+Por eso está escrita a mano: nullable → backfill → NOT NULL, con el paso final
+haciendo de red.
+
+### Verificaciones hechas
+
+Antes del `DROP`: 1694 variantes, 0 nulos, 0 en cero, **0 con costo distinto
+al de su producto**, sumas idénticas, y **0 productos sin variantes** (ninguno
+se quedaba sin precio).
+
+Después, ejecutando las funciones reales de cada pantalla —no solo compilando—:
+catálogo 24/24 con el precio esperado, home 8/8, panel OK, ficha correcta por
+variante. Con un producto de dos variantes a 200 y 500: ficha 290 y 725, card
+"Desde 290", y la cotización congela **725**.
+
+### Decisiones que conviene no deshacer
+
+- **Cards**: "Desde $X" **solo** cuando las variantes difieren; precio exacto
+  cuando son iguales. Mostrar un piso es honesto; guardarlo como si fuera el
+  precio sería mentir. Por eso `computePriceRange` se calcula al leer y no se
+  persiste.
+- **`submitQuote`** busca por `(productId, variantSku)`. Si el sku ya no
+  existe, **omite la línea** en vez de cobrarla con el precio de otra variante,
+  y deja un warning en el log. Antes, con el precio a nivel producto, esa línea
+  se cobraba igual.
+- **`computeSellPrice`** recibe moneda y `PricingConfig`. El sync de Zecat
+  fuerza `Currency.ARS` al escribir, así que sus filas nunca entran por la rama
+  de conversión.
+
+---
+
+## En pausa: sync automático con Vercel Cron
+
+**Analizado a fondo el 2026-08-21, decidido, y explícitamente pospuesto.** No
+construir todavía. El detalle completo (números medidos y las tres cosas a
+contemplar) está en `PENDIENTES/pendientes.md`, en el ítem de automatizar el
+sync. Resumen:
+
+- Se va por **Vercel Cron sobre plan Pro** (el usuario lo va a contratar).
+  Hobby quedaba descartado por dos límites duros: **300s de duración máxima no
+  extensible** —el sync medido son 282s con base local, y solo los fetches a
+  Zecat ya son ~253s— y **cron una vez por día**, donde una expresión más
+  frecuente **rompe el deploy**.
+- Al construirlo: **`preferredRegion` en `gru1`** (las funciones corren en
+  `iad1` por defecto y Neon está en `sa-east-1`; son 12-15 round trips por
+  producto), **lock de concurrencia** (hoy no hay ninguno) y **tabla
+  `SyncRun`** para observabilidad, porque los logs de Vercel no alcanzan.
 
 ---
 

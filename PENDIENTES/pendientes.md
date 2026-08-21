@@ -84,6 +84,40 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       borrar la imagen.
 - [ ] **Automatizar el sync con cron** (Vercel Cron), cada 3-6 hs, para la
       actualización semi-en-vivo. Hoy se corre a mano con `npm run sync:zecat`.
+
+      **Analizado y decidido (2026-08-21), falta construir.** Se va por Vercel
+      Cron sobre plan **Pro**. Descartadas: GitHub Actions (se prefiere no
+      duplicar secrets) y el batching encadenado en Hobby.
+
+      Por qué Hobby no servía, medido y verificado contra la doc de Vercel:
+      - **Duración**: Hobby tiene 300s de máximo, que además es el default y
+        **no se puede extender**. El sync medido son **282s con base local**
+        (94% del techo), y **solo los fetches a Zecat ya son ~253s** — 550
+        productos × ~400-550ms cada uno, secuencial. El cuello es la API de
+        Zecat, no la base.
+      - **Frecuencia**: en Hobby el cron corre **una vez por día**, y una
+        expresión más frecuente **rompe el deploy**, no falla en runtime.
+        Precisión ±59 min.
+
+      Con Pro: 800s de duración y cron por minuto, así que cada 3-6 hs entra.
+
+      **Al construirlo, tres cosas que ya salieron del análisis:**
+      1. **Mover la función a `gru1` (São Paulo)** con `preferredRegion`. Por
+         defecto las funciones corren en `iad1` (Washington) y Neon está en
+         `sa-east-1`: `syncProduct` hace 12-15 idas y vueltas a la base **por
+         producto**, así que a ~120ms de cruce son 15+ minutos solo de base.
+      2. **Lock de concurrencia.** Vercel no impide invocaciones solapadas, y
+         hoy el sync **no tiene ningún lock** — dos corridas ya se pisarían.
+         El upsert es idempotente, pero imágenes y áreas de impresión se
+         borran y recrean, así que dos corridas concurrentes sobre el mismo
+         producto pueden dejar imágenes duplicadas.
+      3. **Tabla `SyncRun`** (última corrida, duración, creados/actualizados/
+         fallidos, errores). No es un lujo: en Hobby los logs duran **1 hora**
+         y hay un techo de **256 líneas por request** — el sync loguea un
+         warning por cada producto con `currency: USD` (236), así que
+         reventaría el límite igual. Con Pro los logs duran 1 día, que sigue
+         siendo poco para un cron. Hace falta el registro en base para poder
+         verlo desde el panel.
 - [ ] Confirmar si el token de Zecat es de preprod o producción y apuntar la
       `ZECAT_API_URL` correcta.
 
@@ -149,3 +183,14 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       Revisar la jerarquía y el espaciado de la navegación (sidebar/topbar) para
       que llegar al catálogo sea inmediato — es la acción más frecuente del
       cliente. Evaluar en contexto de la Home terminada.
+
+      - [ ] **Aviso cuando el stock de una variante es menor al minOrderQuantity.**
+      Hoy se puede cargar una variante con 2 de stock en un producto con mínimo 3,
+      sin ninguna advertencia. No siempre es un error (el mínimo se valida sobre el
+      TOTAL del producto, así que puede completarse con otras variantes; y además
+      permitimos cotizar sin stock con "Consultar disponibilidad"). Pero hay dos
+      casos problemáticos: producto con una sola variante donde stock < mínimo, y
+      producto donde la SUMA de stock de todas las variantes < mínimo. En esos
+      casos el cliente no puede completar el pedido nunca.
+      Propuesta: aviso en el panel al cargar (no bloqueo), y del lado público
+      mostrar "consultanos por disponibilidad" si el stock total no alcanza el mínimo.

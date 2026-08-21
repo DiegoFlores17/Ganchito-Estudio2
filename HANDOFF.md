@@ -8,10 +8,18 @@ Se actualiza al final de cada tanda de trabajo.
 deployados y **verificados en producción**. Neon ya tiene todas las
 migraciones.
 
-**Lo que NO está pusheado: el conector de CDO** (`30e10b5` → `02079c8`, cinco
-commits). Está corriendo contra el entorno de **pruebas** de CDO y la base
-**local**, que es donde se pidió construirlo. Leer la sección dedicada antes
-de pensar en subirlo.
+> ## ⚠️ NO PUSHEAR TODAVÍA
+>
+> **El conector de CDO** (`aff3ed9` → `02079c8`) está commiteado en `main`
+> local y **sin pushear**, a propósito. Trae la migración
+> `20260821174829_add_cdo_provider`, **que Neon todavía no tiene**.
+>
+> Si el código llega a Vercel antes que la migración, producción rompe.
+> **Primero migrar Neon, verificar, y después el push** — ver la sección
+> dedicada más abajo.
+
+Corre contra el entorno de **pruebas** de CDO y la base **local**, que es
+donde se pidió construirlo.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -594,19 +602,76 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ---
 
-## Neon: migrado y verificado
+## ⚠️ Neon NO tiene la migración de CDO — no pushear
+
+Al día de hoy Neon está migrada **hasta el precio por variante inclusive**.
+Le falta exactamente una: `20260821174829_add_cdo_provider`.
+
+**Los commits de CDO que están en `main` local incluyen código que lee
+columnas que en Neon todavía no existen.** Si ese código llega a Vercel antes
+que la migración, producción rompe.
+
+El orden no es negociable:
+
+```
+1. migrar Neon   →   2. verificar   →   3. recién ahí, push
+```
+
+### La migración pendiente
+
+`20260821174829_add_cdo_provider` es **enteramente aditiva**: no transforma
+ningún dato existente. Toca:
+
+| Qué | Cómo |
+|---|---|
+| `ProductOrigin` | `ADD VALUE 'CDO'` |
+| `products` | `+ cdoId TEXT` (nullable, único) |
+| `categories` | `+ cdoCategoryId TEXT` (nullable, único) |
+| `product_variants` | `+ colorHex TEXT` (nullable) |
+| `product_attributes` | tabla nueva, FK a `products` con `ON DELETE CASCADE` |
+
+A diferencia de la del costo por variante, acá el SQL generado por Prisma
+sirve tal cual: no hace falta escribirlo a mano porque no hay backfill.
+
+> **Reversibilidad: parcial.** Las columnas y la tabla se pueden dropear. El
+> valor del enum **no**: PostgreSQL no tiene `ALTER TYPE ... DROP VALUE`.
+> Para sacar `'CDO'` habría que recrear el tipo entero. En la práctica no
+> molesta —es un valor de enum sin usar— pero conviene saberlo antes de
+> aplicarla y no después.
+
+```bash
+# Con la guarda de siempre: verificar el destino en el MISMO comando.
+DATABASE_URL='<url-de-neon>' npx prisma migrate deploy
+```
+
+### Después de migrar, antes de pushear
+
+Verificar que producción sigue entera **con los datos que ya tiene** — la
+migración no importa ningún producto de CDO, así que el catálogo tiene que
+verse exactamente igual que antes:
+
+- El catálogo y la ficha siguen mostrando precios (se tocó `product_variants`).
+- El panel entra y lista productos.
+- Una cotización nueva se puede enviar.
+
+Recién ahí el push.
+
+> **Lo que el push NO trae:** productos de CDO. Vercel no tiene
+> `CDO_API_TOKEN` ni `CDO_API_URL`, y el sync se corre a mano. Subir el código
+> es inocuo por sí solo; importar el catálogo de CDO a producción es un paso
+> aparte y posterior.
+
+---
+
+## Neon: el precio por variante ya está migrado y verificado
 
 Las dos migraciones del precio por variante —`20260821140603_add_variant_cost_price_and_usd_rate`
 (aditiva, con backfill) y `20260821142204_drop_product_cost_price`— **ya están
-aplicadas en Neon**, en ese orden y antes del push, que era la condición dura:
-si el código llega antes que la columna, se rompe todo lo que muestra un precio.
+aplicadas en Neon**, en ese orden y antes del push.
 
 Verificado en producción por el usuario: el campo de cotización carga, el
 precio cambia según la variante elegida en la ficha, y la cotización congela
 el precio de **esa** variante. El margen quedó de vuelta en 45.
-
-**Para la próxima migración vale la misma regla: primero la base, después el
-push.** Vercel no aplica migraciones (ver "Regla de entornos").
 
 ---
 
@@ -752,8 +817,11 @@ consultando la base.
    clasificar" es el que avisa.
 3. **Comparar la tabla de calidad de portadas** con los números de arriba.
 4. Confirmar que el `usdRate` del panel sigue alineado con el que factura CDO.
-5. Migrar Neon **antes** de pushear (`ProductAttribute`, `cdoId`,
-   `cdoCategoryId`).
+
+> Apuntar a producción de CDO y pushear el código son **dos cosas
+> independientes**. El push necesita la migración de Neon (ver la sección de
+> arriba); apuntar a producción de CDO no necesita pushear nada, se puede
+> hacer contra la base local.
 
 ---
 
@@ -838,26 +906,33 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Decidir qué se hace con el conector de CDO**, que es lo único abierto. Está
-construido y verificado contra pruebas + local, y **no está pusheado**. Las
-tres salidas posibles, en orden de menor a mayor compromiso:
+**Migrar Neon con `20260821174829_add_cdo_provider`, verificar, y recién ahí
+pushear el conector de CDO.** Es el único trabajo abierto, y el orden es el de
+siempre: primero la base, después el código. El detalle está en la sección
+"⚠️ Neon NO tiene la migración de CDO".
 
-1. **Seguir en pruebas** y usarlo para revisar el catálogo importado (calidad
-   de las fotos, categorías, precios convertidos).
-2. **Apuntar a producción de CDO** sin pushear, para ver los 950 productos
-   reales en local. Antes, la checklist de 5 puntos de la sección del
-   conector.
-3. **Subirlo a Vercel.** Requiere migrar Neon primero (`ProductAttribute`,
-   `cdoId`, `cdoCategoryId`) y cargar `CDO_API_TOKEN` / `CDO_API_URL` en
-   Vercel.
+Concretamente:
 
-**Tema aparte para conversar con CDO:** ~15% de las portadas de pruebas son
-inservibles (deformes, chicas o rotas) y 33 de 207 productos no tienen ninguna
-foto usable. Si el número se repite en producción, es un problema de ellos,
-no algo a maquillar del lado nuestro.
+1. `DATABASE_URL='<neon>' npx prisma migrate deploy`, con la guarda que
+   verifica el destino en el mismo comando.
+2. Confirmar que producción sigue entera con los datos que ya tiene:
+   catálogo, ficha, panel y una cotización nueva. No debería cambiar nada
+   visible — la migración es aditiva y no importa ningún producto de CDO.
+3. Push.
 
-Después de eso, lo que sigue **verificar en producción**, con la lista de
-"Pendiente de verificar" en la mano.
+**Lo que queda del lado de CDO, después y por separado** (nada de esto
+bloquea el push):
+
+- Decidir si se apunta a **producción de CDO** (hoy es el entorno de pruebas).
+  Antes, la checklist de 5 puntos de la sección del conector.
+- Cargar `CDO_API_TOKEN` y `CDO_API_URL` en Vercel, si se quiere poder
+  sincronizar contra Neon. Hoy el sync se corre a mano desde local.
+- **Conversación con CDO, no trabajo de código:** ~15% de las portadas de
+  pruebas son inservibles y 33 de 207 productos no tienen ninguna foto usable.
+  Si el número se repite en producción, es un problema de ellos.
+
+Después de todo eso, lo que sigue es **verificar en producción**, con la lista
+de "Pendiente de verificar" en la mano.
 
 De la **tanda 7**: editar un producto manual, eliminarlo, y confirmar que
 desaparece del catálogo público y del admin pero la cotización que lo tenía se

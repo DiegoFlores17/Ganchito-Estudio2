@@ -134,15 +134,52 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       implementar).
 - [ ] Mercado Pago / pago online (por ahora solo cotización).
 
-## Multi-proveedor (cuando aparezca un segundo proveedor real)
+## Multi-proveedor — el segundo proveedor ya llegó (CDO Promocionales / Stocksur)
 
-- [ ] **Construir el sistema de conectores genérico + la gestión de proveedores
-      con API.** La tabla `Supplier` ya quedó plantada en el schema (vacía, sin
-      lógica) para reservar la estructura. El día que haya un segundo proveedor
-      real: escribir su conector siguiendo el patrón del de Zecat, refactorizar
-      el conector de Zecat para que ambos sigan el mismo contrato, y construir la
-      pantalla de admin para cargar proveedor + API key. NO se construye antes de
-      tener un caso concreto (diseñar en abstracto lleva a rehacer).
+- [x] **Escribir el conector de CDO siguiendo el patrón del de Zecat.** Hecho.
+      207 productos del entorno de pruebas, 0 fallidos. Se corre con
+      `npm run sync:cdo`. Las trampas de la API (sku repetido entre productos,
+      stock ya neto, precios en USD, iconos) están documentadas en `CLAUDE.md`.
+- [ ] **Migrar Neon y pushear el conector.** Es el próximo paso concreto del
+      proyecto — ver `HANDOFF.md`. **El código está commiteado y SIN pushear a
+      propósito**: trae la migración `20260821174829_add_cdo_provider` que Neon
+      todavía no tiene. Primero la base, después el push.
+- [ ] **Apuntar CDO a producción** (hoy `CDO_API_URL` es el entorno de pruebas).
+      Pasa de 207 a ~950 productos. Antes: revisar la checklist de la sección
+      del conector en `HANDOFF.md`.
+- [ ] **Refactorizar el conector de Zecat para que ambos sigan el mismo
+      contrato.** Ahora que hay dos conectores reales se puede diseñar sobre
+      casos concretos en vez de en abstracto. Hoy comparten la forma (upsert por
+      id externo, una transacción por producto, imágenes borradas y recreadas)
+      pero no comparten código.
+- [ ] **Gestión de proveedores desde el panel.** La tabla `Supplier` sigue
+      plantada, vacía y sin lógica. Falta la pantalla de admin para cargar
+      proveedor + API key, en vez de tener los tokens sueltos en el `.env`.
+
+### Pendientes que dejó el conector de CDO
+
+- [ ] **`ProductAttribute` se guarda pero no se muestra en ningún lado.** El sync
+      escribe los atributos de CDO (certificaciones, "apto lavavajillas", "BPA
+      free", materiales reciclados) y no hay UI que los lea. Decidir si van en la
+      ficha, al lado de las técnicas de impresión, o si se descartan. Hoy es dato
+      muerto en la base.
+- [ ] **Hablar con CDO sobre la calidad de las fotos.** En el entorno de pruebas,
+      **27 de 178 portadas** son inservibles (19 deformes, 4 menores a 200px, 4 que
+      no descargan) y **33 de 207 productos no tienen NINGUNA foto usable** — esos
+      entran inactivos. Si la proporción se mantiene en producción serían ~145 de
+      950 productos con la portada comprometida. **No es algo a resolver del lado
+      del código:** ya se descarta lo indefendible y se reencuadra lo alargado. El
+      sync loguea los cuatro números en cada corrida justamente para poder comparar
+      pruebas contra producción y llevarle el dato al proveedor.
+- [ ] **Revisar los ids de iconos de CDO al pasar a producción.** La clasificación
+      (técnica de impresión vs. atributo) se relevó sobre los 25 iconos del entorno
+      de pruebas, con listas explícitas de ids en `src/lib/cdo/normalize.ts`.
+      Producción puede traer otros: el sync loguea los "sin clasificar", hay que
+      mirar ese log y agregarlos a mano.
+- [ ] **Sacar `NEON_DATABASE_URL` del `.env`.** Se agregó para correr la migración
+      del precio por variante contra producción y ya no hace falta. Tener la URL de
+      producción a mano en el archivo que apunta a local es justo lo que la regla de
+      entornos busca evitar.
 
       - [ ] **Sincronizar dos listas de acceso al panel al sumar/sacar admins:** los
       "Test users" en Google Cloud Console Y la tabla `AdminUser`. Alguien tiene
@@ -166,6 +203,11 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
 ## Categorías (después del diseño)
 
 - [ ] **Limpiar las categorías del catálogo (Opción A: visibilidad editable).**
+      **Ahora es más urgente: con CDO el problema se duplica.** El conector de
+      CDO importa TODAS sus categorías, incluidas las de campaña ("Día de la
+      Madre", "Precios Wow") — filtrarlas por nombre desde el conector sería
+      adivinar, así que la visibilidad se resuelve acá, con un campo editable que
+      sirve igual para los dos proveedores.
       Hoy se muestran las 27 de Zecat crudas, mezcladas: campañas temporales
       ("2026 Agro", "2026 Minería", "Próximos Arribos"), duplicados de oferta
       ("70%OFF Bolsos y Mochilas") y categorías reales ("Drinkware", "Gorros").

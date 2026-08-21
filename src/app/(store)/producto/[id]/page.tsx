@@ -81,7 +81,21 @@ export default async function ProductoPage({
 
           <PurchasePanel
             productId={product.id}
-            variants={product.variants}
+            // Se enumeran los campos que cruzan a proposito, en vez de mandar
+            // la variante entera menos costPrice: los Decimal de Prisma no
+            // cruzan la frontera a un client component, y con "todo menos X"
+            // el dia que se agregue otro Decimal vuelve a romper en runtime.
+            // El precio ya viaja formateado en priceBySku.
+            variants={product.variants.map((v) => ({
+              id: v.id,
+              sku: v.sku,
+              colorName: v.colorName,
+              sizeName: v.sizeName,
+              materialName: v.materialName,
+              stock: v.stock,
+              reservedStock: v.reservedStock,
+              active: v.active,
+            }))}
             minOrderQuantity={product.minOrderQuantity}
             priceBySku={priceBySku}
             fallbackPriceLabel={

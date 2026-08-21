@@ -3,14 +3,17 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-21 — precio por variante + cotización USD
-**Branch:** `main`. Las tandas 1-8 están pusheadas y deployadas. **El precio
-por variante está commiteado pero SIN pushear, y Neon SIN migrar** — leer la
-advertencia de acá abajo antes de tocar producción.
+**Última actualización:** 2026-08-21 — conector de CDO Promocionales
+**Branch:** `main`. Las tandas 1-8 y el precio por variante están pusheados,
+deployados y **verificados en producción**. Neon ya tiene todas las
+migraciones.
 
-> La migración de `deletedAt` ya está aplicada en las dos bases, así que el
-> orden seguro (migrar antes que el código) está cumplido. Antes de tocar
-> cualquier base, leer "Regla de entornos" acá abajo.
+**Lo que NO está pusheado: el conector de CDO** (`30e10b5` → `02079c8`, cinco
+commits). Está corriendo contra el entorno de **pruebas** de CDO y la base
+**local**, que es donde se pidió construirlo. Leer la sección dedicada antes
+de pensar en subirlo.
+
+> Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
 > **La tanda 6 está verificada en un teléfono real** y pasó a "Terminado y
 > verificado". Las tandas 2 a 5 siguen deployadas pero sin mirar: deployado
@@ -156,7 +159,7 @@ paginación; **los skeletons todavía no se miraron en producción**.
 - `src/components/search-input.tsx` — `useTransition` + spinner en el input.
   Cubre `/catalogo` y `/admin/productos` de una.
 
-**Tanda 2** (commiteada, **sin pushear**).
+**Tanda 2** (pusheada y deployada).
 
 - `admin-skeletons.tsx` (tabla + formulario compartidos) y `quote-skeleton.tsx`.
 - `loading.tsx` en `/cotizar` y en las siete pantallas del panel.
@@ -165,7 +168,7 @@ paginación; **los skeletons todavía no se miraron en producción**.
 - Feedback de acciones: login del admin, filtro de cotizaciones, team-management,
   toggle-active, product-form.
 
-**Tanda 3** (commiteada, **sin pushear**).
+**Tanda 3** (pusheada y deployada).
 
 - Revalidación de la home — ver la sección dedicada más abajo.
 - `error.tsx` en tres niveles: `(store)/error.tsx` (cara al cliente, con marca),
@@ -551,6 +554,13 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
   prueba del otro uso: un cliente subiendo su logo en `/cotizar` en producción.
 - **Token de Zecat: preprod o producción.** Sigue sin confirmarse a cuál apunta
   `ZECAT_API_URL`.
+- **`ProductAttribute` no se muestra en ningún lado.** El sync de CDO lo
+  escribe, pero no hay UI que lo lea. Decidir si va en la ficha (junto a las
+  técnicas de impresión) o si se descarta.
+- **`NEON_DATABASE_URL` quedó en el `.env`.** Se agregó para correr la
+  migración contra producción y ya no hace falta. Sacarla: tener la URL de
+  producción a mano en el archivo que apunta a local es justo lo que la regla
+  de entornos busca evitar.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
@@ -584,26 +594,170 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ---
 
-## ⚠️ Neon tiene DOS migraciones pendientes
+## Neon: migrado y verificado
 
-Local está migrada, **producción no**. Y el código ya commiteado **lee
-`product_variants."costPrice"`**, una columna que en Neon todavía no existe.
+Las dos migraciones del precio por variante —`20260821140603_add_variant_cost_price_and_usd_rate`
+(aditiva, con backfill) y `20260821142204_drop_product_cost_price`— **ya están
+aplicadas en Neon**, en ese orden y antes del push, que era la condición dura:
+si el código llega antes que la columna, se rompe todo lo que muestra un precio.
 
-**El orden no es negociable: primero la base, después el push.** Si el código
-llega antes, se rompe el catálogo, la ficha, la cotización y el panel — todo
-lo que muestra un precio.
+Verificado en producción por el usuario: el campo de cotización carga, el
+precio cambia según la variante elegida en la ficha, y la cotización congela
+el precio de **esa** variante. El margen quedó de vuelta en 45.
 
-```bash
-DATABASE_URL='<url-de-neon>' npx prisma migrate deploy
-```
-
-Las dos pendientes son `20260821140603_add_variant_cost_price_and_usd_rate`
-(aditiva, con backfill) y `20260821142204_drop_product_cost_price` (destruye
-`products."costPrice"`). Van juntas.
+**Para la próxima migración vale la misma regla: primero la base, después el
+push.** Vercel no aplica migraciones (ver "Regla de entornos").
 
 ---
 
-## Precio por variante (tres tandas, cerradas y verificadas en local)
+## Conector de CDO Promocionales / Stocksur — construido, sin pushear
+
+Segundo proveedor. **Corre contra el entorno de pruebas de CDO y la base
+local**, como se pidió. 207 productos, 5 commits: `30e10b5` (conector),
+`8605797` (hosts de imágenes), `e6c54f6` (fix de Decimal en la ficha),
+`02079c8` (calidad de imágenes).
+
+Se corre a mano: `npm run sync:cdo`. Última corrida: 207 procesados, 0
+fallidos, 16,5s.
+
+### Lo que hay que saber para retomar
+
+**La API.** `X-Auth-Token` en el header, `page_size` (máximo 100) +
+`page_number`. El listado trae **exactamente lo mismo** que el detalle, así
+que el catálogo entero se baja en 3 requests y **no hace falta pedir producto
+por producto** — a diferencia de Zecat.
+
+**El SKU va SIEMPRE prefijado con el id del producto** (`cdo-{id}-{sku}`).
+No es cosmético: **CDO repite el mismo sku en productos distintos** (5798 y
+5799 comparten `T625-01+T521T-400MZ`). Con el sku pelado como clave única, el
+upsert hacía que un producto le **robara** la variante al otro, y cuál ganaba
+dependía del orden de procesamiento — resultado distinto en cada corrida. El
+prefijo va siempre y no solo al detectar choque, porque prefijar reactivamente
+haría que el sku dependiera de qué más vino en esa página. Además cubre las 13
+variantes que vienen con `sku` vacío.
+
+**El stock ya viene neto.** En Zecat el disponible es `stock - reservedStock`.
+En CDO `stock_available` **ya es el neto** — verificado sobre las 411
+variantes: `available > existent` no pasa nunca. Se guarda
+`stock = existent` y `reservedStock = existent - available`, así el cálculo de
+siempre devuelve exactamente `available` y además se conserva el total. Mapear
+`available` directo a `reservedStock` daría lo reservado en vez de lo
+disponible: el error justo al revés.
+
+**Los precios son en dólares** (`net_price`, no `list_price`: es el que
+coincide con el catálogo web de CDO). Se guardan tal cual con
+`currency: USD` y **se convierten al leer** con `PricingConfig.usdRate`.
+
+**Los iconos se clasifican por lista explícita de ids**, no por heurística
+sobre el texto. "Grabado láser gratis" y "Grabado en láser" se parecen
+muchísimo y son cosas distintas: una condición comercial y una técnica.
+Adivinar por el nombre acierta hoy y falla callado mañana. Los ids que no
+están en ninguna de las dos listas **se loguean** para clasificarlos a mano —
+no se descartan en silencio.
+
+**Sin foto usable → `active: false`.** CDO no tiene flag de publicado. Cada
+corrida los reevalúa, así que si les cargan la foto se reactivan solos. Hoy
+son **33 de 207**.
+
+### Calidad de las imágenes: el problema de fondo
+
+El filtro original solo miraba el nombre del archivo (`missing.png`, que son
+el 29% de las imágenes de pruebas). Dejaba pasar cualquier otra cosa. Apareció
+navegando el catálogo: "BOTELLA DAKOTA Y TAPA OCEAN KIT" entraba **activo**
+con un `Selection_080.png` de **483×72** —el nombre que le pone GNOME a una
+captura de pantalla recortada— y la card se veía vacía.
+
+**El problema no se ve en la URL: hay que bajar la imagen y medirla.** El sync
+mide todas las candidatas antes de escribir y clasifica:
+
+| Veredicto | Criterio | Qué se hace |
+|---|---|---|
+| rota | no descarga o no es imagen | se descarta |
+| chica | algún lado < 200px | se descarta |
+| deforme | proporción > 2,5 | **entra**, con `object-contain` |
+| ok | resto | entra normal |
+
+**Las alargadas no se filtran a propósito**: "Destornillador" es 209×1514 y es
+una foto legítima de un objeto largo. Con `object-cover` quedaba como una
+banda ilegible. Filtrarla sería tirar producto vendible.
+
+Dos detalles que conviene no deshacer:
+
+- **La medición va fuera de la transacción.** Cada producto se escribe en su
+  propia transacción, y hacer requests de red adentro la mantiene abierta
+  esperando a la red, reteniendo conexiones del pool. Con 627 imágenes es
+  pedir problemas. Por eso el sync es bajar → medir (de a 12) → escribir.
+- **El `object-fit` va como estilo inline, no como clase.** `object-cover`
+  viene en el `className` que manda la card, y entre dos utilidades de
+  Tailwind gana la que esté después **en el CSS generado**, no en el string.
+  Una clase no habría ganado de forma confiable.
+
+La proporción la mide el navegador al cargar (`naturalWidth`/`naturalHeight`),
+así que no hace falta guardar nada en el schema y vale para cualquier
+proveedor.
+
+**Números de la última corrida contra pruebas — anotarlos para comparar contra
+producción de CDO:**
+
+| | Portadas |
+|---|---|
+| ok | 151 |
+| deformes (se muestran contenidas) | 19 |
+| muy chicas (descartadas) | 4 |
+| rotas (descartadas) | 4 |
+| **total con portada** | **178** |
+
+> Si en producción de CDO la proporción se mantiene, serían ~145 de 950
+> productos con la portada comprometida. **Eso es material para hablar con el
+> proveedor**, no algo a resolver del lado nuestro.
+
+Cada corrida loguea estos cuatro números, justamente para poder comparar.
+
+### Cambios de schema que trajo
+
+- `ProductOrigin.CDO`.
+- `Product.cdoId` (único, nullable) — propio, no reusa `externalId`.
+- `Category.cdoCategoryId`.
+- `ProductAttribute` (`productId`, `externalId`, `name`, `iconUrl`) para los
+  iconos que no son técnicas de impresión.
+
+> **Los datos de `ProductAttribute` se guardan pero no se muestran en ningún
+> lado.** Está el modelo y lo escribe el sync; falta la UI.
+
+### Bugs que aparecieron y por qué
+
+Los dos son de la misma familia y valen como método: **`tsc` y `npm run build`
+no ven los errores de render**. Se encontraron abriendo páginas, no
+consultando la base.
+
+- `8605797` — `next/image` con un host no configurado **rompe la página
+  entera**, no muestra una imagen rota. CDO sirve todo desde CloudFront y el
+  id de la distribución cambia entre entornos (pruebas `d1ok1ldurjeiif`,
+  producción `d2jygl58194cng`), así que va con comodín `*.cloudfront.net`. El
+  costo asumido: nuestro optimizador acepta cualquier URL de CloudFront. Es
+  tolerable porque las URLs solo entran por los conectores y por Blob, nunca
+  por input de usuario.
+- `e6c54f6` — la ficha rompía en runtime: las variantes ahora cargan
+  `costPrice`, y los `Decimal` de Prisma no cruzan a un client component. Se
+  arregló **enumerando** los campos que cruzan, no con "todo menos costPrice":
+  con la segunda forma, el día que se agregue otro `Decimal` vuelve a romper
+  en runtime.
+
+### Antes de apuntar a producción de CDO
+
+1. Cambiar `CDO_API_URL` y `CDO_API_TOKEN`. Hoy apuntan a
+   `api.argentina.cdo.dev.yellowspot.com.ar/v2` (**pruebas**).
+2. **Confirmar los ids de los iconos**: la clasificación se relevó sobre los
+   25 iconos de pruebas. Producción puede traer otros — el log de "sin
+   clasificar" es el que avisa.
+3. **Comparar la tabla de calidad de portadas** con los números de arriba.
+4. Confirmar que el `usdRate` del panel sigue alineado con el que factura CDO.
+5. Migrar Neon **antes** de pushear (`ProductAttribute`, `cdoId`,
+   `cdoCategoryId`).
+
+---
+
+## Precio por variante (cerrado y verificado en produccion)
 
 El costo pasó de `Product` a `ProductVariant`, y los costos en dólares se
 convierten **al leer**.
@@ -684,8 +838,26 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Verificar en producción**, con la lista de "Pendiente de verificar" en la
-mano. Está todo deployado; no queda nada por construir ni por pushear.
+**Decidir qué se hace con el conector de CDO**, que es lo único abierto. Está
+construido y verificado contra pruebas + local, y **no está pusheado**. Las
+tres salidas posibles, en orden de menor a mayor compromiso:
+
+1. **Seguir en pruebas** y usarlo para revisar el catálogo importado (calidad
+   de las fotos, categorías, precios convertidos).
+2. **Apuntar a producción de CDO** sin pushear, para ver los 950 productos
+   reales en local. Antes, la checklist de 5 puntos de la sección del
+   conector.
+3. **Subirlo a Vercel.** Requiere migrar Neon primero (`ProductAttribute`,
+   `cdoId`, `cdoCategoryId`) y cargar `CDO_API_TOKEN` / `CDO_API_URL` en
+   Vercel.
+
+**Tema aparte para conversar con CDO:** ~15% de las portadas de pruebas son
+inservibles (deformes, chicas o rotas) y 33 de 207 productos no tienen ninguna
+foto usable. Si el número se repite en producción, es un problema de ellos,
+no algo a maquillar del lado nuestro.
+
+Después de eso, lo que sigue **verificar en producción**, con la lista de
+"Pendiente de verificar" en la mano.
 
 De la **tanda 7**: editar un producto manual, eliminarlo, y confirmar que
 desaparece del catálogo público y del admin pero la cotización que lo tenía se

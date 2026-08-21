@@ -6,9 +6,11 @@ import { updatePricingConfig } from "@/app/admin/(panel)/configuracion/actions";
 export function PricingConfigForm({
   defaultMarginPercent,
   vatPercent,
+  usdRate,
 }: {
   defaultMarginPercent: number;
   vatPercent: number;
+  usdRate: number;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -69,6 +71,26 @@ export function PricingConfigForm({
         />
         <p className="text-xs text-foreground/50">
           Se muestra siempre aparte del precio base (&quot;+ IVA&quot;), nunca embebido.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="text-sm font-medium text-foreground">
+          Cotización del dólar
+        </label>
+        <input
+          type="number"
+          name="usdRate"
+          step="0.01"
+          min="0.01"
+          defaultValue={usdRate}
+          required
+          className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
+        />
+        <p className="text-xs text-foreground/50">
+          Para los proveedores que cotizan en dólares. Usá la cotización del
+          proveedor, no la del mercado: es la que ellos facturan. Al cambiarla,
+          esos precios se actualizan solos — no hace falta re-sincronizar.
         </p>
       </div>
 

@@ -28,6 +28,9 @@ datasource db {
 /// permite que Zecat, la carga manual y otros proveedores convivan igual.
 enum ProductOrigin {
   ZECAT
+  /// CDO Promocionales / Stocksur. Sus precios vienen en USD y se convierten
+  /// al leer con PricingConfig.usdRate.
+  CDO
   MANUAL
   OTHER
 }
@@ -119,6 +122,8 @@ model Category {
   /// id de la familia en Zecat (para hacer upsert y no duplicar). Null si es
   /// una categoría propia creada a mano.
   zecatFamilyId String?   @unique
+  /// id de la categoría en CDO. Mismo rol que zecatFamilyId, para su conector.
+  cdoCategoryId String?   @unique
   name          String
   slug          String    @unique
   description   String?
@@ -151,6 +156,17 @@ model Product {
   zecatId           String?       @unique
   /// external_id de Zecat (los kits no lo tienen, por eso es opcional).
   externalId        String?
+
+  /// id del producto en CDO. Clave del upsert de ese conector.
+  ///
+  /// Columna propia en vez de reusar `externalId`: darle dos significados
+  /// segun el origen es como empiezan los bugs raros. Y NO se usa el `code`
+  /// de CDO, que trae basura — hay uno cuyo code es literalmente
+  /// "25% de descuento!!!!!".
+  ///
+  /// Con un tercer proveedor esto se generaliza a externalId + source; con
+  /// dos, una columna paralela sale mas barata que el refactor.
+  cdoId             String?       @unique
 
   name              String
   description       String?       @db.Text
@@ -201,6 +217,7 @@ model Product {
   images            ProductImage[]
   printingAreas     PrintingArea[]
   printingTypes     ProductPrintingType[]
+  attributes        ProductAttribute[]
   quoteItems        QuoteItem[]
 
   /// Marca de la última vez que el conector actualizó este producto.
@@ -228,6 +245,8 @@ model ProductVariant {
   /// SKU de la variante (campo `sku`). Único.
   sku            String   @unique
   colorName      String?  // elementDescription1 / attribute "Color"
+  /// Codigo hex del color, cuando el proveedor lo manda (CDO sí, Zecat no).
+  colorHex       String?
   sizeName       String?  // elementDescription2 / talle
   materialName   String?  // elementDescription3 / material
 
@@ -317,6 +336,31 @@ model ProductPrintingType {
 
   @@index([productId])
   @@map("product_printing_types")
+}
+
+/// Atributos del producto que NO son técnicas de impresión: certificaciones y
+/// características ("RECICLABLE", "BPA FREE", "Apto microondas", "Caja de
+/// regalo").
+///
+/// Existe por CDO: su campo `icons` mezcla las dos cosas en una sola lista —
+/// Serigrafía y Bordado conviven con RECICLABLE y REUTILIZABLE. Las técnicas
+/// van a ProductPrintingType; lo demás cae acá en vez de perderse.
+///
+/// La separación se hace con una lista explícita de ids en el conector, no
+/// adivinando por el texto: si CDO agrega un icono nuevo, cae en el default y
+/// queda logueado para revisarlo, nunca clasificado mal en silencio.
+model ProductAttribute {
+  id          String  @id @default(cuid())
+  productId   String
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// id del icono en el proveedor, para poder rastrear de dónde salió.
+  externalId  String?
+  name        String
+  iconUrl     String?
+
+  @@index([productId])
+  @@map("product_attributes")
 }
 
 // ----------------------------------------------------------------------------

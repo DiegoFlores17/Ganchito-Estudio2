@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getManualProducts } from "@/lib/admin-products";
-import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+import { computePriceRange, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
 import { ToggleActiveButton } from "@/components/admin/toggle-active-button";
 import { SearchInput } from "@/components/search-input";
@@ -63,9 +63,10 @@ export default async function ProductosPage({
           </thead>
           <tbody>
             {products.map((product) => {
-              const sellPrice = computeSellPrice(
-                product.costPrice,
-                pricingConfig.defaultMarginPercent
+              const rango = computePriceRange(
+                product.variants,
+                product.currency,
+                pricingConfig
               );
               return (
                 <tr
@@ -89,7 +90,11 @@ export default async function ProductosPage({
                     {product.supplierName ?? "—"}
                   </td>
                   <td className="px-4 py-3 text-foreground/70">
-                    {formatPriceArs(sellPrice)}
+                    {!rango
+                      ? "—"
+                      : rango.varies
+                        ? `${formatPriceArs(rango.min)} – ${formatPriceArs(rango.max)}`
+                        : formatPriceArs(rango.min)}
                   </td>
                   <td className="px-4 py-3">
                     <span

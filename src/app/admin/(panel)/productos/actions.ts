@@ -18,6 +18,7 @@ interface VariantInput {
   colorName?: string;
   sizeName?: string;
   stock: number;
+  costPrice: number;
 }
 
 // Numeros "limpios" solamente: nada de separadores de miles ni comas. Un
@@ -30,7 +31,10 @@ const INTEGER_PATTERN = /^\d+$/;
 
 /// Devuelve el numero si el string es un decimal positivo "limpio"
 /// (maximo 2 decimales, sin separadores de miles), o null si no.
-function parsePositiveDecimal(raw: FormDataEntryValue | null): number | null {
+///
+/// `unknown` y no FormDataEntryValue: ademas del formulario, ahora valida el
+/// costo de cada variante, que llega como number dentro del JSON de variantes.
+function parsePositiveDecimal(raw: unknown): number | null {
   const value = String(raw ?? "").trim();
   if (!DECIMAL_PATTERN.test(value)) return null;
   return Number(value);
@@ -48,6 +52,8 @@ const PRICE_FORMAT_ERROR =
   'El precio base no es válido. Escribí el número sin puntos de miles (ej: 37000, no 37.000).';
 const STOCK_FORMAT_ERROR =
   "El stock no es válido. Tiene que ser un número entero sin puntos ni comas.";
+const VARIANT_PRICE_FORMAT_ERROR =
+  "El costo de una variante no es válido. Escribí el número sin puntos de miles (ej: 37000).";
 const MIN_ORDER_FORMAT_ERROR =
   "La cantidad mínima no es válida. Dejala vacía si no hay mínimo, o escribí un número entero de 1 o más.";
 
@@ -118,7 +124,13 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     if (stock === null) {
       return { success: false, error: STOCK_FORMAT_ERROR };
     }
-    validatedVariants.push({ ...v, stock });
+    // El costo ahora es POR VARIANTE y se revalida server-side igual que el
+    // stock: el cliente ya lo valido, pero no se le cree.
+    const costPrice = parsePositiveDecimal(v.costPrice);
+    if (costPrice === null || costPrice <= 0) {
+      return { success: false, error: VARIANT_PRICE_FORMAT_ERROR };
+    }
+    validatedVariants.push({ ...v, stock, costPrice });
   }
   variants = validatedVariants;
 
@@ -182,10 +194,8 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
           colorName: v.colorName?.trim() || null,
           sizeName: v.sizeName?.trim() || null,
           stock: v.stock,
-          // Por ahora el formulario tiene un solo precio para todo el
-          // producto, asi que se replica en cada variante. En la tanda que
-          // viene el precio pasa a ser por fila de variante.
-          costPrice: costPriceRaw,
+          // Cada variante trae SU costo desde el formulario.
+          costPrice: v.costPrice,
         })),
       });
     } else {

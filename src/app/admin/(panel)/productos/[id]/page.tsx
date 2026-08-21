@@ -43,6 +43,7 @@ export default async function EditarProductoPage({
               colorName: v.colorName,
               sizeName: v.sizeName,
               stock: v.stock,
+              costPrice: Number(v.costPrice),
             })),
           }}
         />

@@ -41,12 +41,19 @@ export function PurchasePanel({
   productId,
   variants,
   minOrderQuantity,
-  priceLabel,
+  priceBySku,
+  fallbackPriceLabel,
 }: {
   productId: string;
   variants: VariantData[];
   minOrderQuantity: number | null;
-  priceLabel: string;
+  /// Precio de venta ya formateado, por SKU de variante. Viene calculado del
+  /// server: el costo ahora vive en la variante, asi que el precio cambia
+  /// segun lo que elija el cliente.
+  priceBySku: Record<string, string>;
+  /// Que mostrar mientras no hay variante resuelta (producto sin variantes
+  /// activas, o un SKU que no figura en el mapa). Es el minimo del producto.
+  fallbackPriceLabel: string;
 }) {
   const activeVariants = useMemo(
     () => variants.filter((v) => v.active),
@@ -86,6 +93,12 @@ export function PurchasePanel({
         (!colors.length || v.colorName === selectedColor) &&
         (!sizes.length || v.sizeName === selectedSize)
     ) ?? activeVariants[0];
+
+  // El precio sigue a la variante elegida. Si el SKU no esta en el mapa (no
+  // deberia pasar: viene del mismo producto), cae al minimo en vez de mostrar
+  // un hueco.
+  const precioMostrado =
+    (selectedVariant && priceBySku[selectedVariant.sku]) ?? fallbackPriceLabel;
 
   // minOrderQuantity es el minimo de PERSONALIZACION del proveedor a nivel
   // PRODUCTO (minimum_order_quantity de Zecat) — no es un piso por cada
@@ -216,7 +229,8 @@ export function PurchasePanel({
   return (
     <div className="flex flex-col gap-6">
       <p className="text-2xl text-foreground">
-        {priceLabel} <span className="text-base text-foreground/50">+ IVA</span>
+        {precioMostrado}{" "}
+        <span className="text-base text-foreground/50">+ IVA</span>
       </p>
 
       {hasVariantOptions && (

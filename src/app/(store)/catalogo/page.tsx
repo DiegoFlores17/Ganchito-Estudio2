@@ -3,7 +3,7 @@ import { Pagination } from "@/components/catalog/pagination";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SearchInput } from "@/components/search-input";
 import { getCategories, getProducts, hasAvailableStock } from "@/lib/catalog";
-import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+import { computePriceRange, getPricingConfig } from "@/lib/pricing";
 
 export default async function CatalogoPage({
   searchParams,
@@ -78,18 +78,24 @@ export default async function CatalogoPage({
         </p>
       ) : (
         <div className="mt-8 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4">
-          {products.map((product) => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              sellPrice={computeSellPrice(
-                product.costPrice,
-                pricingConfig.defaultMarginPercent
-              )}
-              inStock={hasAvailableStock(product.variants)}
-              catalogQuery={catalogQuery}
-            />
-          ))}
+          {products.map((product) => {
+            const rango = computePriceRange(
+              product.variants,
+              product.currency,
+              pricingConfig
+            );
+            if (!rango) return null;
+            return (
+              <ProductCard
+                key={product.id}
+                product={product}
+                sellPrice={rango.min}
+                priceVaries={rango.varies}
+                inStock={hasAvailableStock(product.variants)}
+                catalogQuery={catalogQuery}
+              />
+            );
+          })}
         </div>
       )}
 

@@ -58,7 +58,12 @@ export async function getManualProducts(search?: string) {
   return prisma.product.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: { category: true },
+    include: {
+      category: true,
+      // El costo vive en la variante: la grilla necesita todas para mostrar
+      // el precio, o el rango si difieren.
+      variants: { select: { costPrice: true } },
+    },
   });
 }
 

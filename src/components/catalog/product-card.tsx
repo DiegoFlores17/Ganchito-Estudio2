@@ -13,11 +13,17 @@ type ProductCardData = Prisma.ProductGetPayload<{
 export function ProductCard({
   product,
   sellPrice,
+  priceVaries = false,
   inStock,
   catalogQuery,
 }: {
   product: ProductCardData;
+  /// Precio a mostrar. Si priceVaries es true, es el MINIMO de las variantes.
   sellPrice: Prisma.Decimal;
+  /// true cuando las variantes no cuestan todas lo mismo. La card pasa a
+  /// mostrar "Desde $X": un piso honesto, en vez de un precio exacto que no
+  /// le corresponde a la mayoria de las variantes.
+  priceVaries?: boolean;
   inStock: boolean;
   /** Query string del catalogo actual (pagina/categoria/busqueda), para que
    * la ficha de producto pueda ofrecer un "volver" que preserve el filtro. */
@@ -52,6 +58,11 @@ export function ProductCard({
           {product.name}
         </p>
         <p className="mt-1.5 text-base font-semibold text-foreground">
+          {priceVaries && (
+            <span className="text-sm font-normal text-foreground/45">
+              Desde{" "}
+            </span>
+          )}
           {formatPriceArs(sellPrice)}{" "}
           <span className="text-sm font-normal text-foreground/45">+ IVA</span>
         </p>

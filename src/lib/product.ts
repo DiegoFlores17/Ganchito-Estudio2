@@ -22,6 +22,8 @@ export async function getProductById(id: string) {
           stock: true,
           reservedStock: true,
           active: true,
+          // El precio de la ficha cambia segun la variante elegida.
+          costPrice: true,
         },
       },
       printingAreas: true,

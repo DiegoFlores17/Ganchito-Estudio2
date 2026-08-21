@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/skeleton";
 import { getFeaturedProducts, hasAvailableStock } from "@/lib/catalog";
 import { WHATSAPP_URL } from "@/lib/contact";
 import { getHomeCategoryShowcase, HOME_CATEGORY_COUNT } from "@/lib/home";
-import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+import { computePriceRange, getPricingConfig } from "@/lib/pricing";
 
 /// La home se sirve cacheada, pero NO indefinidamente.
 ///
@@ -230,17 +230,23 @@ async function FeaturedProducts() {
 
   return (
     <div className={PRODUCT_GRID_CLASSES}>
-      {featuredProducts.map((product) => (
-        <ProductCard
-          key={product.id}
-          product={product}
-          sellPrice={computeSellPrice(
-            product.costPrice,
-            pricingConfig.defaultMarginPercent
-          )}
-          inStock={hasAvailableStock(product.variants)}
-        />
-      ))}
+      {featuredProducts.map((product) => {
+        const rango = computePriceRange(
+          product.variants,
+          product.currency,
+          pricingConfig
+        );
+        if (!rango) return null;
+        return (
+          <ProductCard
+            key={product.id}
+            product={product}
+            sellPrice={rango.min}
+            priceVaries={rango.varies}
+            inStock={hasAvailableStock(product.variants)}
+          />
+        );
+      })}
     </div>
   );
 }

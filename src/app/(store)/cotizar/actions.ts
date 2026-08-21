@@ -58,6 +58,7 @@ export async function getQuoteItemsSummary(
           sizeName: true,
           stock: true,
           reservedStock: true,
+          costPrice: true,
         },
       },
     },
@@ -70,9 +71,17 @@ export async function getQuoteItemsSummary(
     if (!product) continue; // producto ya no existe/inactivo: se omite
 
     const variant = product.variants.find((v) => v.sku === item.variantSku);
+
+    // El precio sale de la VARIANTE. Si el carrito trae un sku que ya no
+    // existe, se omite la linea en vez de cobrar el precio de otra variante:
+    // mostrarle al cliente un precio que no corresponde a lo que eligio es
+    // peor que no mostrarle la linea.
+    if (!variant) continue;
+
     const sellPrice = computeSellPrice(
-      product.costPrice,
-      pricingConfig.defaultMarginPercent
+      variant.costPrice,
+      product.currency,
+      pricingConfig
     );
     const unitPrice = Number(sellPrice);
     const subtotal = unitPrice * item.quantity;
@@ -156,27 +165,66 @@ export async function submitQuote(
     }
   }
 
-  // Precio CONGELADO al momento de cotizar: se recalcula server-side desde
-  // costPrice + margen actual, nunca se confia en un precio que venga del
-  // cliente (pudo haber sido manipulado antes de enviarse).
+  // Precio CONGELADO al momento de cotizar: se recalcula server-side desde el
+  // costo + margen + cotizacion actuales, nunca se confia en un precio que
+  // venga del cliente (pudo haber sido manipulado antes de enviarse).
+  //
+  // El costo ahora vive en la VARIANTE, asi que la busqueda es por
+  // (productId, variantSku) y no solo por producto: dos variantes del mismo
+  // producto pueden valer distinto, y cobrar la de al lado seria cobrarle al
+  // cliente un precio que nunca vio.
   const pricingConfig = await getPricingConfig();
   const productIds = [...new Set(items.map((i) => i.productId))];
   const products = await prisma.product.findMany({
     where: { id: { in: productIds } },
-    select: { id: true, costPrice: true },
+    select: {
+      id: true,
+      currency: true,
+      variants: { select: { sku: true, costPrice: true } },
+    },
   });
-  const costById = new Map(products.map((p) => [p.id, p.costPrice]));
+
+  const productoPorId = new Map(products.map((p) => [p.id, p]));
 
   const quoteItemsData = [];
+  const omitidos: string[] = [];
   for (const item of items) {
-    const costPrice = costById.get(item.productId);
-    if (!costPrice) continue; // producto ya no existe: se omite
+    const product = productoPorId.get(item.productId);
+    if (!product) {
+      omitidos.push(`producto ${item.productId} ya no existe`);
+      continue;
+    }
+
+    // Sin variantSku no hay forma de saber que precio corresponde. Antes esto
+    // funcionaba porque el precio era del producto; ahora no: se omite la
+    // linea en vez de adivinar.
+    const variant = item.variantSku
+      ? product.variants.find((v) => v.sku === item.variantSku)
+      : product.variants[0];
+
+    if (!variant) {
+      omitidos.push(`variante ${item.variantSku} del producto ${item.productId} ya no existe`);
+      continue;
+    }
+
     quoteItemsData.push({
       productId: item.productId,
       variantSku: item.variantSku ?? null,
       quantity: item.quantity,
-      unitPrice: computeSellPrice(costPrice, pricingConfig.defaultMarginPercent),
+      unitPrice: computeSellPrice(
+        variant.costPrice,
+        product.currency,
+        pricingConfig
+      ),
     });
+  }
+
+  // Si se cayo alguna linea, queda en el log del server: el cliente ve la
+  // cotizacion sin esa linea y desde el panel se puede entender por que.
+  if (omitidos.length > 0) {
+    console.warn(
+      `[cotizar] Se omitieron ${omitidos.length} linea(s) al congelar precios: ${omitidos.join("; ")}`
+    );
   }
 
   if (quoteItemsData.length === 0) {

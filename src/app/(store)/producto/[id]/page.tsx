@@ -4,7 +4,11 @@ import { Gallery } from "@/components/product/gallery";
 import { PrintingInfo } from "@/components/product/printing-info";
 import { PurchasePanel } from "@/components/product/purchase-panel";
 import { getProductById } from "@/lib/product";
-import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+import {
+  computePriceRange,
+  computeSellPrice,
+  getPricingConfig,
+} from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
 
 export default async function ProductoPage({
@@ -24,9 +28,19 @@ export default async function ProductoPage({
 
   if (!product) notFound();
 
-  const sellPrice = computeSellPrice(
-    product.costPrice,
-    pricingConfig.defaultMarginPercent
+  // El precio se calcula por variante y se manda ya formateado: PurchasePanel
+  // es client component y los Decimal de Prisma no cruzan esa frontera.
+  const priceBySku: Record<string, string> = {};
+  for (const v of product.variants) {
+    priceBySku[v.sku] = formatPriceArs(
+      computeSellPrice(v.costPrice, product.currency, pricingConfig)
+    );
+  }
+
+  const rango = computePriceRange(
+    product.variants,
+    product.currency,
+    pricingConfig
   );
 
   // "desde" trae la pagina/categoria/busqueda que tenia el catalogo cuando
@@ -69,7 +83,10 @@ export default async function ProductoPage({
             productId={product.id}
             variants={product.variants}
             minOrderQuantity={product.minOrderQuantity}
-            priceLabel={formatPriceArs(sellPrice)}
+            priceBySku={priceBySku}
+            fallbackPriceLabel={
+              rango ? formatPriceArs(rango.min) : formatPriceArs(0)
+            }
           />
 
           <PrintingInfo areas={product.printingAreas} types={product.printingTypes} />

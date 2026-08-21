@@ -12,9 +12,15 @@ interface VariantRow {
   /// "37.000" tipeado pensando en separador de miles se transforma en 37
   /// ANTES de poder validarlo. Se valida el string crudo recien al enviar.
   stock: string;
+  /// Costo de ESTA variante. Mismo criterio de string que el stock: se valida
+  /// el texto crudo al enviar, no en cada tecla.
+  costPrice: string;
 }
 
 const INTEGER_PATTERN = /^\d+$/;
+/// Mismo criterio que parsePositiveDecimal del server: sin separadores de
+/// miles, maximo dos decimales. La Server Action lo revalida igual.
+const DECIMAL_PATTERN = /^\d+(\.\d{1,2})?$/;
 
 function isValidStockInput(value: string): boolean {
   return INTEGER_PATTERN.test(value.trim());
@@ -34,7 +40,12 @@ export interface ProductFormInitialData {
   costPrice: number;
   minOrderQuantity: number | null;
   images: ExistingImage[];
-  variants: { colorName: string | null; sizeName: string | null; stock: number }[];
+  variants: {
+    colorName: string | null;
+    sizeName: string | null;
+    stock: number;
+    costPrice: number;
+  }[];
 }
 
 export function ProductForm({
@@ -48,11 +59,18 @@ export function ProductForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Controlado (antes era defaultValue) porque ahora tambien alimenta el
+  // precio inicial de cada fila de variante nueva.
+  const [precioBase, setPrecioBase] = useState(
+    initialProduct ? String(initialProduct.costPrice) : ""
+  );
+
   const [variants, setVariants] = useState<VariantRow[]>(
     initialProduct?.variants.map((v) => ({
       colorName: v.colorName ?? "",
       sizeName: v.sizeName ?? "",
       stock: String(v.stock),
+      costPrice: String(v.costPrice),
     })) ?? []
   );
   const [simpleStock, setSimpleStock] = useState(
@@ -73,7 +91,13 @@ export function ProductForm({
   const [processingImages, setProcessingImages] = useState(false);
 
   function addVariantRow() {
-    setVariants((rows) => [...rows, { colorName: "", sizeName: "", stock: "0" }]);
+    // La fila nueva arranca con el precio base del producto: lo mas comun es
+    // que todas las variantes valgan lo mismo, y quien tenga precios distintos
+    // solo edita las que difieren.
+    setVariants((rows) => [
+      ...rows,
+      { colorName: "", sizeName: "", stock: "0", costPrice: precioBase },
+    ]);
   }
 
   function updateVariantRow(index: number, patch: Partial<VariantRow>) {
@@ -121,6 +145,16 @@ export function ProductForm({
       return;
     }
 
+    const sinPrecio = relevantVariants.find(
+      (v) => !DECIMAL_PATTERN.test(v.costPrice.trim()) || Number(v.costPrice) <= 0
+    );
+    if (sinPrecio) {
+      setError(
+        `El costo de la variante "${sinPrecio.colorName || sinPrecio.sizeName}" no es válido. Escribí el número sin puntos de miles (ej: 37000).`
+      );
+      return;
+    }
+
     const formData = new FormData(event.currentTarget);
     if (initialProduct) formData.set("productId", initialProduct.id);
     formData.set(
@@ -130,6 +164,7 @@ export function ProductForm({
           colorName: v.colorName.trim() || undefined,
           sizeName: v.sizeName.trim() || undefined,
           stock: Number(v.stock),
+          costPrice: Number(v.costPrice),
         }))
       )
     );
@@ -191,12 +226,15 @@ export function ProductForm({
             min="0.01"
             placeholder="37000"
             required
-            defaultValue={initialProduct?.costPrice}
+            value={precioBase}
+            onChange={(e) => setPrecioBase(e.target.value)}
             className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
           />
           <p className="text-xs text-foreground/50">
-            Sin puntos de miles: escribi 37000, no 37.000. Se le aplica el
-            margen global del catalogo, igual que a los productos de Zecat.
+            Sin puntos de miles: escribí 37000, no 37.000. Se le aplica el
+            margen global del catálogo, igual que a los productos de Zecat.
+            Si cargás variantes, cada una puede tener su propio precio y este
+            queda como el valor por defecto de las nuevas.
           </p>
         </div>
 
@@ -356,6 +394,17 @@ export function ProductForm({
                     updateVariantRow(index, { stock: e.target.value })
                   }
                   className="w-24 rounded-lg border border-foreground/15 px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+                <input
+                  type="number"
+                  placeholder="Costo"
+                  min="0.01"
+                  step="0.01"
+                  value={variant.costPrice}
+                  onChange={(e) =>
+                    updateVariantRow(index, { costPrice: e.target.value })
+                  }
+                  className="w-28 rounded-lg border border-foreground/15 px-3 py-2 text-sm outline-none focus:border-primary"
                 />
                 <button
                   type="button"

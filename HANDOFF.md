@@ -694,7 +694,7 @@ el precio de **esa** variante. El margen quedó de vuelta en 45.
 
 ---
 
-## Categorías: visibilidad y unificación — construido, verificado a medias
+## Categorías: visibilidad y unificación — construido y verificado en local
 
 Dos campos y una pantalla, que resuelven **dos problemas distintos**:
 
@@ -866,16 +866,31 @@ tabla dibuja las 39 filas con origen y conteo, el toggle muestra
 "Ocultando..." y pasa a "Oculta", el filtro del catálogo pierde la categoría y
 sus productos siguen apareciendo en la búsqueda.
 
-**SIN verificar en el navegador: todo lo de unificación** (bloque de
-sugerencias, alta de categoría propia, selector "Unificar con..."). El dev
-server volvió a quedar con el cliente de Prisma viejo.
+**Verificado en el navegador el 2026-08-25, flujo completo de unificación:**
 
-> **Trampa que ya pasó DOS veces en esta sesión:** correr `npx prisma generate`
-> con el dev server levantado lo deja con el cliente anterior, y todas las
-> pantallas que usan los campos nuevos tiran el error boundary aunque el
-> código esté bien. **Después de cada `prisma generate`, reiniciar el dev
-> server.** Se distingue de un bug real corriendo la consulta aislada con
-> `npx tsx`: si ahí anda, es esto.
+| Paso | Resultado |
+|---|---|
+| Bloque de sugerencias | los 4 pares con sus conteos (Escritura 60, Llaveros 31, Paraguas 11, Tecnología 33) |
+| Nombre editable | se cambió "Escritura" por "Lapiceras y escritura" y se respetó |
+| Unificar | la sugerencia desaparece, quedan 3 |
+| Categorías de la tienda | "Lapiceras y escritura" con los 2 alias, su origen, **60 productos / 0 propios** |
+| Filtro público | 39 → 38, cero "Escritura" sueltas, una sola entrada con el nombre nuestro |
+| `/catalogo?categoria=lapiceras-y-escritura` | **"60 productos en Lapiceras y escritura"**, con bolígrafos de los dos proveedores |
+
+Base restaurada: 39 en el filtro, las 2 "Escritura" de vuelta, 0 propias.
+
+> **Trampa que costó DOS diagnósticos errados:** correr `npx prisma generate`
+> con el dev server levantado lo deja con el cliente anterior. Las pantallas
+> que usan campos nuevos tiran el error boundary aunque el código esté bien, y
+> **el digest del error se repite**, lo que hace parecer que es caché del
+> navegador. No lo es: una recarga dura da lo mismo.
+>
+> Cómo distinguirlo de un bug real, en dos pasos:
+> 1. Correr la consulta aislada con `npx tsx` — si ahí anda, es esto.
+> 2. Confirmarlo leyendo la consola del navegador: el error de Prisma lista
+>    los campos que SÍ conoce, y ahí se ve cuál falta.
+>
+> **Después de cada `prisma generate`, reiniciar el dev server.**
 
 ---
 

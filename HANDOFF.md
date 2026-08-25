@@ -852,6 +852,57 @@ Base restaurada: 39 en el filtro, las 2 "Escritura" de vuelta, 0 propias.
 
 ---
 
+## CDO producción, sincronizado en local (2026-08-25)
+
+Local ya tiene el catálogo **real** de CDO. Los 207 productos del entorno de
+pruebas se borraron antes (`scripts/delete-cdo-data.ts`), porque el sync hace
+upsert por `cdoId` y no borra lo que ya no viene.
+
+| | |
+|---|---|
+| Productos | **855** (553 Zecat + 2 manuales + 301 CDO) |
+| Variantes de CDO | 783 |
+| Categorías | **57** (28 previas + 29 de CDO) |
+| Técnicas de impresión | 1101 |
+| Atributos | 764 |
+
+Corrida: 301 creados, 0 fallidos, **0 iconos sin clasificar, 0 labels
+cambiados**, 0 productos inactivos por falta de foto. Portadas: 300 ok, 1
+chica, 0 deformes, 0 rotas.
+
+**Verificado en el navegador**, no solo por consulta: la ficha del Bolígrafo
+"BALU" muestra precio **$1.708** (0,78 USD × 1510 × 1,45 — la conversión y el
+margen cierran), sus 4 colores, la foto, y las tres técnicas correctamente
+clasificadas (Tampografía, Serigrafía, Grabado en láser).
+
+> **El sync de CDO producción tarda 597s (~10 min)**, contra 16,5s del entorno
+> de pruebas. Es casi todo medición de imágenes. **Importa para el pendiente
+> de Vercel Cron**: el techo de Pro son 800s, así que entra pero con poco
+> margen. Si CDO crece, hay que paginar el trabajo o mover la medición a otro
+> lado.
+
+### Comandos
+
+- `npm run sync:cdo` → entorno de **pruebas** (no cambió).
+- `npm run sync:cdo:prod` → **producción**, comando aparte a propósito: el
+  destino tiene que ser una decisión explícita, no un efecto secundario de qué
+  variable quedó en el `.env`. Los dos imprimen **en qué base van a escribir**
+  antes de tocar nada.
+- `npx tsx scripts/inspect-cdo-cleanup.ts` → solo lectura, releva qué se
+  borraría.
+- `npx tsx scripts/delete-cdo-data.ts [--confirmar]` → sin el flag, simula.
+
+### Lo que el borrado enseñó sobre las categorías
+
+Varios `cdoCategoryId` **coinciden entre entornos pero con otro nombre**: el
+221 era "Carpetas, Bolsos y Mochilas" en pruebas y es "Mochilas, Bolsos, Carry
+on" en producción; el 491 era "Salud y Cuidado personal" y es "Salud y
+Belleza". Sin borrar, el conector las encuentra por id y **les pisa el
+nombre**, dejando categorías con identidad mezclada. Mismo patrón que los
+iconos: **ningún identificador de CDO es estable entre entornos.**
+
+---
+
 ## Conector de CDO Promocionales / Stocksur — pusheado y en producción
 
 Segundo proveedor. **Pusheado, con Neon migrada y producción verificada.**

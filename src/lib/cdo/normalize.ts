@@ -1,53 +1,96 @@
 import { Prisma } from "@prisma/client";
 import type { CdoIcon, CdoProduct, CdoVariant } from "./types";
 
-/// Ids de los iconos de CDO que son TECNICAS DE IMPRESION.
+/// Iconos de CDO que son TECNICAS DE IMPRESION: id -> label esperado.
 ///
-/// La clasificacion va por id explicito y NO por heuristica sobre el texto:
-/// "Grabado láser gratis" y "Grabado en láser" se parecen muchisimo pero son
-/// cosas distintas (una condicion comercial y una tecnica). Adivinar por el
-/// nombre acierta hoy y falla callado el dia que agreguen uno.
+/// **Por que id Y label, y no uno de los dos.** Los dos son inestables, cada
+/// uno a su manera:
 ///
-/// Relevado sobre los 25 iconos del entorno de pruebas.
-const PRINTING_TECHNIQUE_ICON_IDS = new Set([
-  11, // Tampografía
-  21, // Serigrafía
-  31, // Grabado en láser
-  41, // Grabado en pantógrafo
-  51, // Transfer
-  61, // Bordado
-  62, // Bajo relieve
-  69, // Calco Vitrificable
-  70, // DTF (Transfer Digital)
-  71, // DTF UV (Transfer Digital UV)
-  76, // Grabado Láser UV
-  77, // Impresión 360° Digital
-  78, // Impresión Digital
-  91, // Sublimación
+/// - Por NOMBRE no se puede clasificar: "Grabado láser gratis" y "Grabado en
+///   láser" se parecen muchisimo y son cosas distintas (una condicion
+///   comercial y una tecnica).
+/// - Por ID tampoco alcanza: los ids son POR ENTORNO. Verificado el
+///   2026-08-25 comparando pruebas contra produccion — el id 87 era
+///   "RECICLABLE" (atributo) en pruebas y es "Sand Blast" (tecnica) en
+///   produccion. Clasificar por id a secas lo habria guardado mal, en
+///   silencio. Otros once ids se mudaron: "Sublimación" 91 -> 71,
+///   "BPA FREE" 68 -> 85, "Apto lavavajillas" 66 -> 99, etc.
+///
+/// Por eso se guardan los dos y se contrastan: si el label de un id cambia,
+/// el id se reutilizo para otra cosa y la clasificacion deja de valer. Ese
+/// caso se trata como desconocido y se loguea fuerte — perder un icono
+/// visible es mucho mejor que decirle a un cliente que puede bordar algo que
+/// en realidad va arenado.
+///
+/// Relevado sobre los 26 iconos de PRODUCCION (el entorno de pruebas tenia
+/// otros ids y ademas condiciones comerciales que aca no existen).
+const PRINTING_TECHNIQUE_ICONS = new Map<number, string>([
+  [11, "Tampografía"],
+  [21, "Serigrafía"],
+  [31, "Grabado en láser"],
+  [41, "Grabado en pantógrafo"],
+  [51, "Transfer"],
+  [61, "Bordado"],
+  [71, "Sublimación"],
+  [82, "Impresión Digital"],
+  [83, "Calco Vitrificable"],
+  // Arenado sobre vidrio. Es el id que en pruebas era "RECICLABLE": el caso
+  // que motivo la defensa del label.
+  [87, "Sand Blast"],
+  [95, "Láser CO2"],
+  [106, "DTF Textil"],
+  // Corte de vinilo. Va como tecnica aunque el nombre suene a material:
+  // describe COMO se aplica el logo.
+  [107, "Vinilo Láser"],
+  [109, "Grabado Láser UV"],
+  [110, "Impresión 360° Digital"],
+  [111, "DTF UV"],
 ]);
 
-/// Ids que son ATRIBUTOS: certificaciones, caracteristicas y condiciones
-/// comerciales. Van a ProductAttribute.
-const ATTRIBUTE_ICON_IDS = new Set([
-  1, // Caja de regalo
-  63, // A Pedido
-  66, // Apto lavavajillas
-  67, // Apto microondas
-  68, // BPA FREE
-  74, // Grabado láser gratis      <- condicion comercial, no tecnica
-  75, // grabado láser incluido    <- idem
-  80, // INAL approved
-  85, // MATERIALES RECICLADOS
-  87, // RECICLABLE
-  88, // REUTILIZABLE
+/// Iconos que son ATRIBUTOS: certificaciones, materiales y caracteristicas
+/// del producto. Van a ProductAttribute.
+const ATTRIBUTE_ICONS = new Map<number, string>([
+  [1, "Caja de regalo"],
+  [84, "INAL approved"],
+  [85, "BPA FREE"],
+  // Origen del producto, no una tecnica.
+  [86, "Industria nacional"],
+  [92, "RECICLABLE"],
+  [93, "REUTILIZABLE"],
+  [98, "Apto microondas"],
+  [99, "Apto lavavajillas"],
+  // PET reciclado: de que esta hecho, no como se estampa.
+  [101, "RPET"],
+  [105, "MAYORMENTE RECICLABLE"],
 ]);
+
+/// Por que un icono no se pudo clasificar.
+export type IconUnknownReason =
+  /// El id no esta en ninguna de las dos listas: CDO agrego algo nuevo.
+  | "id-nuevo"
+  /// El id esta en una lista pero con OTRO nombre: se reutilizo para otra
+  /// cosa y la clasificacion guardada ya no vale.
+  | "label-cambiado";
+
+export interface UnknownIcon {
+  icon: CdoIcon;
+  reason: IconUnknownReason;
+  /// Que esperabamos que fuera ese id. Solo para "label-cambiado".
+  expectedLabel?: string;
+}
 
 export interface IconSplit {
   printingTypes: CdoIcon[];
   attributes: CdoIcon[];
-  /// Iconos que no estan en ninguna de las dos listas. NO se descartan en
-  /// silencio: el sync los loguea para poder clasificarlos a mano.
-  unknown: CdoIcon[];
+  /// Iconos que no se pudieron clasificar. NO se descartan en silencio: el
+  /// sync los loguea para poder resolverlos a mano.
+  unknown: UnknownIcon[];
+}
+
+/// Los labels vienen con espacios al final en varios casos ("DTF UV "), asi
+/// que la comparacion va normalizada. Se guarda igual el label crudo.
+function sameLabel(a: string | null, b: string): boolean {
+  return (a ?? "").trim() === b.trim();
 }
 
 /// Separa los `icons` de CDO en tecnicas de impresion y atributos.
@@ -55,9 +98,23 @@ export function splitIcons(icons: CdoIcon[] | null | undefined): IconSplit {
   const split: IconSplit = { printingTypes: [], attributes: [], unknown: [] };
 
   for (const icon of icons ?? []) {
-    if (PRINTING_TECHNIQUE_ICON_IDS.has(icon.id)) split.printingTypes.push(icon);
-    else if (ATTRIBUTE_ICON_IDS.has(icon.id)) split.attributes.push(icon);
-    else split.unknown.push(icon);
+    const asTechnique = PRINTING_TECHNIQUE_ICONS.get(icon.id);
+    const asAttribute = ATTRIBUTE_ICONS.get(icon.id);
+    const expectedLabel = asTechnique ?? asAttribute;
+
+    if (expectedLabel === undefined) {
+      split.unknown.push({ icon, reason: "id-nuevo" });
+      continue;
+    }
+
+    // El id lo conocemos, pero se llama distinto: no se clasifica.
+    if (!sameLabel(icon.label, expectedLabel)) {
+      split.unknown.push({ icon, reason: "label-cambiado", expectedLabel });
+      continue;
+    }
+
+    if (asTechnique !== undefined) split.printingTypes.push(icon);
+    else split.attributes.push(icon);
   }
 
   return split;

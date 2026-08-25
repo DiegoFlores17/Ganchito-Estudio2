@@ -11,6 +11,7 @@ import {
   slugifyCategory,
   splitIcons,
   variantImageUrls,
+  type IconUnknownReason,
   type ImageProbe,
 } from "./normalize";
 import type { CdoCategory, CdoProduct } from "./types";
@@ -26,12 +27,22 @@ export interface CdoSyncSummary {
   sinImagen: Array<{ cdoId: number; name: string }>;
   /// Variantes cuyo sku venia vacio y se sintetizo desde el id.
   skuSintetico: number;
-  /// Iconos que no estan en ninguna de las dos listas de clasificacion.
-  /// NO se descartan en silencio: hay que mirarlos y clasificarlos a mano.
-  iconosDesconocidos: Array<{ id: number; label: string | null }>;
-  /// Calidad de las PORTADAS, para poder comparar el numero contra produccion
-  /// de CDO. Si la proporcion se mantiene, ~250 productos sobre 950 tendrian
-  /// foto inservible y eso es material para hablar con el proveedor.
+  /// Iconos que no se pudieron clasificar. NO se descartan en silencio: hay
+  /// que mirarlos y resolverlos a mano.
+  ///
+  /// Se distinguen dos casos porque significan cosas MUY distintas: un id
+  /// nuevo es CDO agregando algo, y un label cambiado es un id reutilizado —
+  /// o sea, la clasificacion que teniamos guardada apuntaba a otra cosa.
+  iconosDesconocidos: Array<{
+    id: number;
+    label: string | null;
+    reason: IconUnknownReason;
+    expectedLabel?: string;
+  }>;
+  /// Calidad de las PORTADAS. Se sigue midiendo en cada corrida, pero ya NO
+  /// es un problema del proveedor: medido contra la API de produccion el
+  /// 2026-08-25, 300 de 301 portadas estan bien (0,3% con problema). El 15,2%
+  /// que habiamos visto era del entorno de PRUEBAS.
   portadas: { ok: number; deformes: number; chicas: number; rotas: number };
   errors: Array<{ cdoId: number; message: string }>;
 }
@@ -92,9 +103,15 @@ export async function syncCdoProduct(
   const variants = product.variants ?? [];
   const icons = splitIcons(product.icons);
 
-  for (const icon of icons.unknown) {
+  for (const desconocido of icons.unknown) {
+    const { icon, reason, expectedLabel } = desconocido;
     if (!summary.iconosDesconocidos.some((i) => i.id === icon.id)) {
-      summary.iconosDesconocidos.push({ id: icon.id, label: icon.label });
+      summary.iconosDesconocidos.push({
+        id: icon.id,
+        label: icon.label,
+        reason,
+        expectedLabel,
+      });
     }
   }
 
@@ -313,10 +330,29 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
       `[cdo-sync] ${summary.sinImagen.length} producto(s) importados INACTIVOS por no tener ninguna imagen usable. Se reactivan solos si CDO les carga la foto.`
     );
   }
-  if (summary.iconosDesconocidos.length) {
+  // Los dos casos se loguean POR SEPARADO porque piden acciones distintas.
+  const idsNuevos = summary.iconosDesconocidos.filter((i) => i.reason === "id-nuevo");
+  const labelsCambiados = summary.iconosDesconocidos.filter(
+    (i) => i.reason === "label-cambiado"
+  );
+
+  if (idsNuevos.length) {
     console.warn(
-      `[cdo-sync] ${summary.iconosDesconocidos.length} icono(s) sin clasificar — hay que agregarlos a normalize.ts: ` +
-        summary.iconosDesconocidos.map((i) => `${i.id} (${i.label})`).join(", ")
+      `[cdo-sync] ${idsNuevos.length} icono(s) con id NUEVO — agregarlos a normalize.ts decidiendo si son tecnica o atributo: ` +
+        idsNuevos.map((i) => `${i.id} ("${i.label}")`).join(", ")
+    );
+  }
+
+  if (labelsCambiados.length) {
+    // Esto no es un aviso mas: significa que CDO reutilizo un id para otra
+    // cosa y que la clasificacion guardada apuntaba a algo distinto. Los
+    // iconos afectados NO se guardaron, a proposito.
+    console.error(
+      `[cdo-sync] ATENCION — ${labelsCambiados.length} icono(s) CAMBIARON DE SIGNIFICADO. ` +
+        `No se clasificaron (mejor perderlos que guardarlos mal). Revisar normalize.ts: ` +
+        labelsCambiados
+          .map((i) => `id ${i.id}: esperabamos "${i.expectedLabel}" y vino "${i.label}"`)
+          .join(" · ")
     );
   }
 

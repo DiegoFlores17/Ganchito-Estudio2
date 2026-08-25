@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatPriceArs } from "@/lib/format";
+import { requireAdmin } from "@/lib/admin-auth";
 import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
 import { StatusBadge } from "@/components/admin/status-badge";
@@ -10,6 +11,17 @@ export default async function CotizacionDetallePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // La autorizacion no puede quedar solo en el layout: ver el comentario de
+  // requireAdmin() en src/lib/admin-auth.ts.
+  //
+  // Esta pantalla se habia salteado en el fix de 1278e4c, que agrego el gate
+  // propio al resto del panel. Hoy no era un agujero —el gate del layout es
+  // bloqueante y no esta detras de Suspense— pero es la pantalla con MAS dato
+  // personal del panel (nombre, mail y telefono del cliente, mas su historial
+  // de cotizaciones), asi que es la ultima que conviene dejar dependiendo de
+  // una sola barrera.
+  await requireAdmin();
+
   const { id } = await params;
   const quote = await getQuoteById(id);
   if (!quote) notFound();

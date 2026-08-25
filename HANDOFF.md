@@ -74,6 +74,48 @@ ya no `--from-schema-datasource`.
 
 ---
 
+## Quién entra a qué en el panel
+
+Relevado sobre el código el 2026-08-25. Hay **dos roles**: `ADMIN` y
+`SUPER_ADMIN`. `requireAdmin()` acepta a los dos —alcanza con tener fila en
+`AdminUser`—; `requireSuperAdmin()` exige `SUPER_ADMIN` y si no redirige a
+`/admin`.
+
+| Pantalla | Rol | Qué puede hacer |
+|---|---|---|
+| `/admin` | ADMIN | solo redirige, no muestra nada |
+| `/admin/cotizaciones` | **ADMIN** | ver el listado y filtrar |
+| `/admin/cotizaciones/[id]` | **ADMIN** | ver el detalle y cambiar el estado |
+| `/admin/productos` | **ADMIN** | listar, buscar, pausar |
+| `/admin/productos/nuevo` | **ADMIN** | crear producto manual |
+| `/admin/productos/[id]` | **ADMIN** | editar y eliminar producto manual |
+| `/admin/categorias` | **ADMIN** | ocultar, crear propias, unificar |
+| `/admin/equipo` | **SUPER_ADMIN** | sumar y sacar admins |
+| `/admin/configuracion` | **SUPER_ADMIN** | margen, IVA y cotización del dólar |
+
+**El criterio, para decidir dónde va una pantalla nueva:** ADMIN es operación
+del catálogo y de los pedidos; SUPER_ADMIN es lo que cambia las reglas del
+negocio (los precios de todo el catálogo) o quién tiene acceso.
+
+Por eso categorías es de ADMIN: ocultar o unificar no toca ningún precio ni
+ningún producto, y es reversible de un click.
+
+**El nav refleja los permisos:** los links de Equipo y Configuración solo se
+renderizan para super-admin. Un ADMIN no ve puertas que no puede abrir.
+
+> **Las Server Actions tienen su propio gate**, no alcanza con el de la
+> pantalla: las cuatro de categorías y las tres de productos piden
+> `requireAdmin()`; las de equipo y configuración piden `requireSuperAdmin()`.
+> Una acción es un endpoint, y se puede invocar sin pasar por la página.
+
+> **Defensa en profundidad:** el layout del panel tiene su propio
+> `requireAdmin()` **bloqueante** (no detrás de `Suspense`, a propósito — ver
+> la sección del fix de autorización), y además cada página se autoriza a sí
+> misma. `requireAdmin()` está envuelta en `cache()` de React, así que las dos
+> llamadas son una sola consulta por request.
+
+---
+
 ## Producción
 
 El proyecto **ya está deployado y funcionando**.

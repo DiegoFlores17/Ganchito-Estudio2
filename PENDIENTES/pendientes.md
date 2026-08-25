@@ -101,6 +101,13 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
 
       Con Pro: 800s de duración y cron por minuto, así que cada 3-6 hs entra.
 
+      **OJO — dato nuevo del 2026-08-25:** el sync de **CDO producción tarda
+      597s (~10 min)**, casi todo medición de imágenes. Contra el techo de 800s
+      de Pro entra, pero con **poco margen**, y eso es UN solo proveedor. Si se
+      automatizan los dos, o si CDO crece, hay que paginar el trabajo o sacar la
+      medición de imágenes del camino del sync (por ejemplo, medir solo las URLs
+      que cambiaron desde la corrida anterior).
+
       **Al construirlo, tres cosas que ya salieron del análisis:**
       1. **Mover la función a `gru1` (São Paulo)** con `preferredRegion`. Por
          defecto las funciones corren en `iad1` (Washington) y Neon está en
@@ -184,11 +191,16 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
 
 ### Pendientes que dejó el conector de CDO
 
-- [ ] **`ProductAttribute` se guarda pero no se muestra en ningún lado.** El sync
-      escribe los atributos de CDO (certificaciones, "apto lavavajillas", "BPA
-      free", materiales reciclados) y no hay UI que los lea. Decidir si van en la
-      ficha, al lado de las técnicas de impresión, o si se descartan. Hoy es dato
-      muerto en la base.
+- [ ] **`ProductAttribute`: 764 filas guardadas y CERO visibles.** El sync escribe
+      los atributos de CDO y no hay UI que los lea. Confirmado en el navegador sobre
+      un producto real: el Bolígrafo "BALU" tiene RECICLABLE, REUTILIZABLE y RPET en
+      la base, y la ficha no muestra ninguno.
+
+      Ya no es un detalle: son 764 atributos sobre 301 productos, y varios son
+      argumento de venta ("BPA FREE", "Industria nacional", "Apto lavavajillas").
+      Decidir si van en la ficha junto a las técnicas de impresión —donde el
+      componente `PrintingInfo` ya tiene el patrón de chips— o si se descartan y se
+      deja de escribirlos.
 - [x] **Calidad de fotos de CDO: NO hace falta hablar con ellos.** Medido contra
       la API de **producción** el 2026-08-25: **300 de 301 portadas están bien, 1
       es muy chica, cero deformes y cero rotas (0,3%)**. El 15,2% de portadas
@@ -234,10 +246,16 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       panel. Resuelve las DUPLICADAS entre proveedores, que ocultar no resolvía:
       sacar una del filtro dejaba a sus productos sin ninguna vía de filtro, porque
       cada producto tiene una sola categoría.
-- [ ] **Armar el mapeo de categorías** (decisión, no código). Los 4 pares homónimos
-      son lo urgente —hoy producción muestra dos "Escritura" al cliente—: Escritura
-      (Zecat 26 + CDO 34), Llaveros (24 + 7), Paraguas (7 + 4), Tecnología (22 + 11).
-      Después, ocultar las campañas y ofertas.
+- [ ] **Armar el mapeo de categorías — EN MANOS DEL CLIENTE.** La herramienta está
+      construida y deployada; la decisión de qué unificar y qué ocultar la resuelve
+      el cliente. No avanzar por nuestra cuenta.
+
+      Con el catálogo REAL de CDO ya en local (855 productos, 57 categorías) los
+      pares homónimos son **cinco**, no cuatro: Escritura (Zecat 26 + CDO 42),
+      Llaveros (24 + 5), Paraguas (7 + 8), Tecnología (22 + 9) y **Gorros (4 + 1)**,
+      que no existía en el entorno de pruebas. Más las de campaña de CDO: Día de la
+      Madre, Mundial 2026, Mes Rosa, San Valentín, Primavera, AgroActiva, FIT,
+      Vuelve con todo.
 - [ ] **Revisar los pares que el matcheo por nombre NO detecta.** El panel sugiere por
       nombre normalizado, así que estos hay que verlos a ojo: "Hogar" (CDO, 24) vs
       "Hogar y Tiempo Libre" (Zecat, 26) son lo mismo y no matchean; "Carpetas, Bolsos

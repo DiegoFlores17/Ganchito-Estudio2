@@ -13,9 +13,9 @@ deployados y **verificados en producción**.
 migrations have been successfully applied") y se confirmó que el catálogo de
 producción funciona.
 
-> **Lo único sin pushear es el trabajo de categorías** (visibilidad +
-> unificación), con sus **dos migraciones aplicadas solo en local**. Vale el
-> orden de siempre: migrar Neon, verificar, después el push.
+**Todo pusheado y Neon al día.** El trabajo de categorías (visibilidad +
+unificación) se subió el 2026-08-25, con las dos migraciones aplicadas en Neon
+ANTES del push y producción verificada en el medio.
 
 El conector de CDO corre contra el entorno de **pruebas** de CDO y la base
 **local**, que es donde se pidió construirlo.
@@ -607,62 +607,20 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ---
 
-## Neon: dos migraciones pendientes (las de categorías)
+## Neon: al día
 
-Neon está migrada **hasta el conector de CDO inclusive**. Le faltan dos, las
-dos del trabajo de categorías y las dos aplicadas solo en local:
+Neon tiene **todas** las migraciones del repo. Las dos últimas
+—`20260821200000_add_category_visible` y
+`20260821210000_add_category_canonical`— se aplicaron el 2026-08-25 con
+`migrate deploy`, en ese orden y **antes** del push.
 
-1. `20260821200000_add_category_visible`
-2. `20260821210000_add_category_canonical`
+Las dos son aditivas, sin backfill y reversibles (`DROP COLUMN`). No cambiaron
+nada de lo visible: `visible` arranca en `true` para todas y `canonicalId` en
+`NULL`, así que ninguna categoría es alias de otra hasta que se decida desde
+el panel.
 
-**El orden de siempre, y no es negociable:**
-
-```
-1. migrar Neon   →   2. verificar   →   3. recién ahí, push
-```
-
-Vercel no aplica migraciones (ver "Regla de entornos"), así que si el código
-llega antes que la columna, rompe lo que la lea.
-
-### Las pendientes
-
-```sql
--- 20260821200000_add_category_visible
-ALTER TABLE "categories" ADD COLUMN "visible" BOOLEAN NOT NULL DEFAULT true;
-
--- 20260821210000_add_category_canonical
-ALTER TABLE "categories" ADD COLUMN "canonicalId" TEXT;
-CREATE INDEX "categories_canonicalId_idx" ON "categories"("canonicalId");
-ALTER TABLE "categories" ADD CONSTRAINT "categories_canonicalId_fkey"
-  FOREIGN KEY ("canonicalId") REFERENCES "categories"("id") ON DELETE SET NULL;
-```
-
-Aditivas, sin backfill y **totalmente reversibles**. Aplicarlas **no cambia
-nada de lo que se ve hoy**: `visible` arranca en `true` para todas y
-`canonicalId` en `NULL`, así que ninguna categoría es alias de otra hasta que
-alguien lo decida desde el panel.
-
-```bash
-# Con la guarda de siempre: verificar el destino en el MISMO comando.
-DATABASE_URL='<url-de-neon>' npx prisma migrate deploy
-```
-
-### Ya aplicada: `20260821174829_add_cdo_provider`
-
-Aplicada en Neon el 2026-08-21 con `migrate deploy`, y verificado después que
-el catálogo de producción funciona. Fue **enteramente aditiva**:
-
-| Qué | Cómo |
-|---|---|
-| `ProductOrigin` | `ADD VALUE 'CDO'` |
-| `products` | `+ cdoId TEXT` (nullable, único) |
-| `categories` | `+ cdoCategoryId TEXT` (nullable, único) |
-| `product_variants` | `+ colorHex TEXT` (nullable) |
-| `product_attributes` | tabla nueva, FK a `products` con `ON DELETE CASCADE` |
-
-> **Reversibilidad: parcial**, si alguna vez hiciera falta. Las columnas y la
-> tabla se dropean. El valor del enum **no**: PostgreSQL no tiene
-> `ALTER TYPE ... DROP VALUE`, habría que recrear el tipo entero.
+**Verificado entre la migración y el push:** el catálogo de producción sigue
+con sus 553 productos y precios correctos, y la home carga entera.
 
 ### Por qué el orden importa, con el caso concreto
 
@@ -1128,36 +1086,36 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Verificar en el navegador el flujo de unificación**, que es lo único que
-quedó a medias. Requiere **reiniciar el dev server**: se corrió
-`prisma generate` con el server levantado y quedó con el cliente viejo, así
-que la pantalla tira el error boundary aunque el código esté bien (las
-consultas se probaron aisladas y dan los números correctos).
+**Armar el mapeo de categorías desde el panel** — es decisión de negocio, no
+trabajo de código. La herramienta está construida, verificada en local y
+deployada.
 
-Qué mirar cuando esté arriba:
+Lo urgente son las **homónimas**, porque hoy el cliente ve dos filtros con el
+mismo nombre en producción:
 
-1. Que el bloque de sugerencias liste los 4 pares (Escritura, Llaveros,
-   Paraguas, Tecnología) con sus conteos.
-2. Crear una categoría propia y ver que aparece en "Categorías de la tienda"
-   con 0 productos y sin alias.
-3. Unificar desde una sugerencia: el nombre precargado tiene que ser editable,
-   y al confirmar los dos alias cuelgan de la nueva con el total sumado.
-4. Que el filtro de `/catalogo` muestre **una sola** entrada con el nombre
-   propio, y que filtrando por ahí aparezcan los productos de los dos
-   proveedores.
-5. Desunificar desde el selector "Unificar con..." y ver que vuelve todo atrás.
+| Par | Zecat | CDO | Total |
+|---|---|---|---|
+| Escritura | 26 | 34 | 60 |
+| Llaveros | 24 | 7 | 31 |
+| Paraguas | 7 | 4 | 11 |
+| Tecnología | 22 | 11 | 33 |
 
-Después, para llevarlo a producción:
+El panel las sugiere solas. **Ojo con dos cosas que la sugerencia no cubre:**
 
-6. `DATABASE_URL='<neon>' npx prisma migrate deploy` con las **dos**
-   migraciones, con la guarda que verifica el destino en el mismo comando.
-7. Confirmar que producción sigue igual (los defaults hacen que no cambie nada
-   visible).
-8. Push.
+- **Pares que NO detecta** (se escriben distinto y son lo mismo): "Hogar"
+  (CDO, 24) vs "Hogar y Tiempo Libre" (Zecat, 26); "Carpetas, Bolsos y
+  Mochilas" (CDO, 22) vs "Bolsos y Mochilas" (Zecat, 55); "Oficina y
+  Negocios" (CDO, 28) vs "Escritorio" (Zecat, 22).
+- **Un par que SÍ se parece y NO hay que unificar:** "Escritorio" y
+  "Escritura" son cosas distintas.
 
-**Decisión tuya, no trabajo de código:** con la pantalla andando, armar el
-mapeo. Los 4 pares homónimos son el caso urgente —hoy el cliente ve dos
-"Escritura" en producción— y las campañas se resuelven ocultando.
+Después, ocultar el ruido: campañas ("2026 *"), ofertas ("70%OFF *", con una
+en **0 productos**) y las que no son categorías ("Próximos Arribos" 69,
+"Logo 24hs" 76). Ahí sí conviene tener presente que sus productos quedan sin
+vía de filtro.
+
+**Primero conviene verificar la pantalla en producción**, que está deployada
+pero todavía sin mirar con datos reales.
 
 **Lo que queda del lado de CDO, aparte:**
 

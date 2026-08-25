@@ -156,6 +156,32 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       plantada, vacía y sin lógica. Falta la pantalla de admin para cargar
       proveedor + API key, en vez de tener los tokens sueltos en el `.env`.
 
+### Categorías múltiples: estamos tirando el 87% de la información
+
+- [ ] **Guardar TODAS las categorías de un producto, no solo la primera.**
+      Relevado contra la API de **producción** de CDO el 2026-08-25: cada producto
+      trae **7,7 categorías en promedio, hasta 21**, y **299 de 301 tienen más de
+      una**. Los dos conectores toman solo la primera (`families[0]` en Zecat,
+      `categories[0]` en CDO) y descartan el resto, porque `Product.categoryId` es
+      una FK simple.
+
+      **Por qué importa más ahora:** acabamos de construir la unificación de
+      categorías. Con una sola categoría por producto, ocultar o no unificar una
+      deja a sus productos sin ninguna vía de filtro. Con varias, el producto
+      seguiría siendo alcanzable por las otras — el problema que hoy nos obliga a
+      elegir con cuidado desaparecería casi entero.
+
+      **Qué implica:** tabla intermedia `ProductCategory` (migración de expansión
+      + backfill desde `categoryId`), tocar los dos conectores, y revisar el filtro
+      del catálogo y el conteo del panel. **No es chico.** Evaluar después de que
+      el mapeo de categorías esté armado y en producción, para no mover dos cosas
+      a la vez.
+
+      > Ojo al diseñarlo: en producción de CDO la primera categoría suele ser la
+      > REAL ("Escritura") y las de campaña vienen después ("Reingresos Super
+      > Esperados"). Ese orden es información, no ruido: si se guardan todas,
+      > conviene conservar la posición.
+
 ### Pendientes que dejó el conector de CDO
 
 - [ ] **`ProductAttribute` se guarda pero no se muestra en ningún lado.** El sync
@@ -163,14 +189,11 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       free", materiales reciclados) y no hay UI que los lea. Decidir si van en la
       ficha, al lado de las técnicas de impresión, o si se descartan. Hoy es dato
       muerto en la base.
-- [ ] **Hablar con CDO sobre la calidad de las fotos.** En el entorno de pruebas,
-      **27 de 178 portadas** son inservibles (19 deformes, 4 menores a 200px, 4 que
-      no descargan) y **33 de 207 productos no tienen NINGUNA foto usable** — esos
-      entran inactivos. Si la proporción se mantiene en producción serían ~145 de
-      950 productos con la portada comprometida. **No es algo a resolver del lado
-      del código:** ya se descarta lo indefendible y se reencuadra lo alargado. El
-      sync loguea los cuatro números en cada corrida justamente para poder comparar
-      pruebas contra producción y llevarle el dato al proveedor.
+- [x] **Calidad de fotos de CDO: NO hace falta hablar con ellos.** Medido contra
+      la API de **producción** el 2026-08-25: **300 de 301 portadas están bien, 1
+      es muy chica, cero deformes y cero rotas (0,3%)**. El 15,2% de portadas
+      inservibles era del entorno de PRUEBAS, no de su catálogo real. Se midió
+      antes de escribirles, y menos mal.
 - [ ] **Revisar los ids de iconos de CDO al pasar a producción.** La clasificación
       (técnica de impresión vs. atributo) se relevó sobre los 25 iconos del entorno
       de pruebas, con listas explícitas de ids en `src/lib/cdo/normalize.ts`.

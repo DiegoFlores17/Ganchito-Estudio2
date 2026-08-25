@@ -1,57 +1,15 @@
+/// Sync de CDO contra el entorno de PRUEBAS.
+///
+/// Usa CDO_API_URL / CDO_API_TOKEN tal como estan en el .env, que apuntan a
+/// pruebas. Para produccion hay un comando aparte: `npm run sync:cdo:prod`.
 import "dotenv/config";
-import { prisma } from "../src/lib/prisma";
-import { syncCdoCatalog } from "../src/lib/cdo/sync";
+import { runCdoSync, cerrar } from "./run-cdo-sync";
 
-async function main() {
-  console.log("Iniciando sincronizacion con CDO Promocionales...");
-  const start = Date.now();
+const url = process.env.CDO_API_URL ?? "(sin CDO_API_URL)";
 
-  const summary = await syncCdoCatalog();
-
-  const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
-
-  console.log("\nResumen de la sincronizacion:");
-  console.log(`  Total procesados:   ${summary.total}`);
-  console.log(`  Creados:            ${summary.created}`);
-  console.log(`  Actualizados:       ${summary.updated}`);
-  console.log(`  Fallidos:           ${summary.failed}`);
-  console.log(`  Inactivos sin foto: ${summary.sinImagen.length}`);
-  console.log(`  SKU sintetico:      ${summary.skuSintetico}`);
-  console.log(`  Tiempo:             ${elapsedSeconds}s`);
-
-  if (summary.sinImagen.length) {
-    console.log(
-      "\nImportados INACTIVOS por no tener ninguna imagen usable (se reactivan solos si CDO les carga la foto):"
-    );
-    for (const p of summary.sinImagen) {
-      console.log(`  - [${p.cdoId}] ${p.name}`);
-    }
-  }
-
-  if (summary.iconosDesconocidos.length) {
-    console.log(
-      "\nIconos SIN CLASIFICAR — agregarlos a PRINTING_TECHNIQUE_ICON_IDS o ATTRIBUTE_ICON_IDS en src/lib/cdo/normalize.ts:"
-    );
-    for (const icon of summary.iconosDesconocidos) {
-      console.log(`  - ${icon.id}: ${icon.label}`);
-    }
-  }
-
-  if (summary.errors.length) {
-    console.log("\nErrores:");
-    for (const error of summary.errors) {
-      console.log(`  - producto ${error.cdoId}: ${error.message}`);
-    }
-  }
-
-  if (summary.failed > 0) {
-    process.exitCode = 1;
-  }
-}
-
-main()
+runCdoSync(`PRUEBAS — ${url}`)
   .catch((error) => {
     console.error("La sincronizacion fallo:", error);
     process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(cerrar);

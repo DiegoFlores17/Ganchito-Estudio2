@@ -142,10 +142,16 @@ export function PricingConfigForm({
           min="0.01"
           defaultValue={usdRate}
           required
-          // En AUTO el campo se deshabilita: dejarlo editable invitaría a
-          // cargar un número que el próximo job pisa sin avisar.
-          disabled={modo === "AUTO"}
-          className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary disabled:bg-foreground/[0.04] disabled:text-foreground/50"
+          // readOnly y NO disabled. Se ve igual, pero un input `disabled`
+          // **no se envía con el formulario**: al pasar a Automática, usdRate
+          // llegaba vacío al servidor, Number(null) daba 0 y la validación lo
+          // rechazaba con "tiene que ser un número mayor a 0".
+          //
+          // En AUTO no se edita a mano porque el próximo job lo pisaría sin
+          // avisar; el valor viaja igual para que la validación lo acepte, y
+          // después refreshUsdRate() lo reemplaza por el oficial.
+          readOnly={modo === "AUTO"}
+          className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary read-only:bg-foreground/[0.04] read-only:text-foreground/50 read-only:focus:border-foreground/15"
         />
 
         <fieldset className="flex flex-col gap-2">

@@ -125,6 +125,12 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
          reventaría el límite igual. Con Pro los logs duran 1 día, que sigue
          siendo poco para un cron. Hace falta el registro en base para poder
          verlo desde el panel.
+- [ ] **Cargar `CRON_SECRET` en Vercel (Production) y redeployar.** El cron ya
+      está registrado pero devuelve **503**: la variable no existe en el proyecto,
+      verificado contra el dashboard. Ojo con el falso positivo que nos comimos:
+      el botón "Actualizar ahora" del panel **no usa el secret** (va por una
+      Server Action), así que verlo funcionar no prueba nada sobre el endpoint.
+      Y acordarse de **redeployar**: las variables se inyectan en el deployment.
 - [x] **Enchufar el cron de la cotización del dólar.** Hecho: `vercel.json` con
       `0 19 * * *`. **Las expresiones de Vercel son UTC**, así que corre a las
       **16:00 ART**, después de que el BNA cierre — dolarapi actualiza a las

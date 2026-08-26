@@ -7,10 +7,10 @@ Se actualiza al final de cada tanda de trabajo.
 **Branch:** `main`. **Todo pusheado y Neon al día.** Nada de lo último trae
 migración ni toca la base.
 
-**La cotización del dólar ya es automática de punta a punta.** Modo
-**Automática** en producción, `CRON_SECRET` cargado, y un cron diario en
-`vercel.json` que dispara `/api/cron/usd-rate`. Nadie tiene que apretar nada;
-el botón "Actualizar ahora" del panel queda como forzado manual.
+**La cotización del dólar está a UN PASO de ser automática.** Modo
+**Automática** en producción y cron diario registrado en Vercel, pero
+**falta cargar `CRON_SECRET`**: sin esa variable el endpoint devuelve 503 y el
+cron no aplica nada. Ver "🔴 El cron devuelve 503" más abajo.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -1352,9 +1352,45 @@ Construido, pusheado y **verificado en producción por el usuario el
 formulario). Migración `20260826180000_add_usd_rate_automation`, aplicada en
 Neon antes del push.
 
-**Estado actual de producción:** `CRON_SECRET` cargado en Vercel, modo
-**Automática** (`usdRateMode = AUTO`) y `usdRate` en **1535**, traído del
-oficial del Banco Nación con el botón del panel.
+**Estado actual de producción:** modo **Automática** (`usdRateMode = AUTO`) y
+`usdRate` en **1535**, traído del oficial del Banco Nación con el botón del
+panel. **`CRON_SECRET` NO está cargado** — ver acá abajo.
+
+### 🔴 El cron devuelve 503: falta `CRON_SECRET`
+
+La primera corrida manual (botón **Run** del dashboard, 2026-08-26 19:13)
+devolvió **503**, y en este endpoint ese código significa exactamente una
+cosa: `process.env.CRON_SECRET` no existe.
+
+**Verificado en Vercel → Settings → Environment Variables**: el proyecto tiene
+ocho variables (`BLOB_READ_WRITE_TOKEN`, `ZECAT_API_TOKEN`, `ZECAT_API_URL`,
+`AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`,
+`INITIAL_SUPER_ADMIN_EMAIL`, `DATABASE_URL`) y **`CRON_SECRET` no está entre
+ellas**.
+
+> **Por qué nadie lo notó antes, que es la parte que importa.** Se dio por
+> verificado porque "el botón del panel funciona" — pero **el botón nunca usa
+> `CRON_SECRET`**. Llama a la Server Action `refreshUsdRateNow()`, que va
+> directo a `refreshUsdRate()`. El secret solo protege el endpoint HTTP, que
+> es la puerta por la que entra Vercel Cron. Son **dos caminos distintos hacia
+> la misma función**, y probar uno no dice nada del otro.
+>
+> Este HANDOFF llegó a afirmar "`CRON_SECRET` cargado en Vercel" como hecho
+> verificado, cuando venía de un reporte y nunca se había comprobado contra el
+> dashboard.
+
+**Para cerrarlo** (lo tiene que hacer una persona: son credenciales):
+
+1. Generar el valor: `openssl rand -hex 32`.
+2. Vercel → Settings → Environment Variables → Add. Nombre exacto
+   **`CRON_SECRET`**, alcance **Production** (como mínimo).
+3. **Redeployar.** Las variables se inyectan en el deployment: agregarla no
+   afecta a los que ya están corriendo. Sin este paso sigue dando 503.
+4. Volver a Cron Jobs → **Run** y confirmar **200** en View Logs.
+
+> **El 503 hizo lo que tenía que hacer.** El endpoint está escrito para quedar
+> cerrado cuando falta el secret, en vez de abierto a cualquiera que adivine
+> la URL. Falló ruidoso y del lado seguro.
 
 ### Qué se construyó
 
@@ -1531,9 +1567,10 @@ y que las cinco tablas se puedan arrastrar de costado hasta la última columna.
 
 Después de eso, lo que queda son decisiones, no código:
 
-1. **Confirmar la primera corrida real del cron del dólar**, después de las
-   16:00 ART del día siguiente al deploy. Se mira en el panel: `usdRateUpdatedAt`
-   tiene que avanzar sin que nadie haya tocado el botón.
+1. **Cargar `CRON_SECRET` en Vercel y redeployar.** Es lo único que separa a la
+   cotización de ser automática de verdad: hoy el cron corre y devuelve 503.
+   Los pasos están en "🔴 El cron devuelve 503". Después, **Run** y confirmar
+   200; y al día siguiente, que `usdRateUpdatedAt` avance solo.
 
 2. **El mapeo de categorías** — en manos del cliente. La herramienta está
    construida y deployada; falta que definan qué unificar y qué ocultar. El

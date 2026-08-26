@@ -3,13 +3,20 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-26 — contacto editable + íconos del footer
-**Branch:** `main`. **Todo pusheado y Neon al día.** No queda nada local sin
-subir ni ninguna migración pendiente.
+**Última actualización:** 2026-08-26 — panel de administración en el celular
+**Branch:** `main`. **Neon al día** (ninguna migración pendiente), pero **el
+trabajo del panel mobile está sin commitear ni pushear**. Es solo frontend: no
+trae migración ni toca la base.
 
-Lo último verificado en producción por el usuario: los datos de contacto
-reales cargados desde el panel, con el WhatsApp de Córdoba bien agrupado
-(`+54 9 351 687-1724`) y los tres íconos renderizando.
+Lo último verificado en producción por el usuario: `CRON_SECRET` cargado en
+Vercel, el botón **"Actualizar ahora"** del panel funcionando, y la cotización
+pasada a modo **Automática**, que quedó en **1535** (el oficial del BNA).
+
+> **Ojo con lo que "Automática" significa hoy:** el modo está en AUTO, pero
+> **todavía no hay ningún cron que dispare el endpoint**. No existe
+> `vercel.json` con `crons`, así que la cotización se actualiza únicamente
+> cuando alguien aprieta el botón del panel. Ver la sección "Cotización del
+> dólar" acá abajo.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -164,6 +171,11 @@ Construido, commiteado y visible funcionando en producción:
   > Hubo que crearla a mano como `BLOB_READ_WRITE_TOKEN`. Si se cambia de store de
   > Blob, revisar esto primero: el síntoma es que las subidas fallan por falta de
   > token aunque el store figure conectado en el dashboard.
+- **Cotización del dólar contra el oficial del BNA** (`ffc6e61`, `51079c7`).
+  Verificado en producción el 2026-08-26: `CRON_SECRET` cargado en Vercel, el
+  botón "Actualizar ahora" del panel funciona, y la cotización quedó en modo
+  **Automática** con valor **1535**. Falta el cron que lo dispare solo — ver la
+  sección "Cotización del dólar".
 - **Fix de la paginación del catálogo** (`f6871d9`). Verificado en producción el
   2026-08-18: entrar a `/catalogo?page=3` ya no devuelve a la página 1.
 - **Skeleton del catálogo** (`b0dbcdd`). Verificado en producción: el esqueleto
@@ -643,8 +655,8 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 ## Neon: al día
 
 Neon tiene **todas** las migraciones del repo. La última aplicada fue
-`20260826120000_add_site_config` (2026-08-26); antes,
-`20260821200000_add_category_visible` y
+`20260826180000_add_usd_rate_automation` (2026-08-26); antes,
+`20260826120000_add_site_config`, `20260821200000_add_category_visible` y
 `20260821210000_add_category_canonical`. Todas con `migrate deploy`, **antes**
 del push y verificando producción en el medio.
 
@@ -1196,10 +1208,12 @@ corresponde a lo que eligió.
 panel actualiza todo el catálogo al instante, sin re-sincronizar ~950
 productos. Mismo criterio que el margen.
 
-**Por qué `usdRate` es manual y no sale de una API de dólar**: el valor que usa
-CDO (su web muestra $1510) es una **decisión comercial de ellos**, no el dólar
-de mercado. Una API externa daría el oficial o el blue y desalinearía los
-precios contra lo que CDO factura.
+**Por qué `usdRate` era manual — DECISIÓN REVERTIDA el 2026-08-26**: el
+razonamiento original era que el valor que usa CDO (su web mostraba $1510) es
+una **decisión comercial de ellos**, no el dólar de mercado, y una API externa
+desalinearía los precios contra lo que CDO factura. Hoy se usa el oficial del
+BNA y el modo es configurable. El detalle está en "Cotización del dólar" acá
+abajo.
 
 Los commits, en orden: `f33937e` (agregar + migración con backfill), `857b697`
 (leer/escribir desde la variante), `07a2fae` (borrar `Product.costPrice`).
@@ -1255,6 +1269,176 @@ variante. Con un producto de dos variantes a 200 y 500: ficha 290 y 725, card
 
 ---
 
+## Panel de administración en el celular (2026-08-26)
+
+Construido y **verificado a 390px** con la técnica del iframe (ver abajo). Sin
+pushear todavía.
+
+### El header no tenía un solo breakpoint
+
+`src/app/admin/(panel)/layout.tsx` era un `flex justify-between` con 5 links +
+el email + "Cerrar sesión" en una sola fila. La tienda pública ya había
+resuelto esto con `MobileNav`; el panel nunca lo recibió.
+
+Ahora hay `src/components/admin/admin-mobile-nav.tsx`, mismo patrón que el de
+la tienda (`fixed inset-0`, hamburguesa, cierra al tocar). La nav de escritorio
+aparece recién de `md:` para arriba.
+
+> **Los links se arman UNA sola vez** en el layout y se pasan a los dos menús.
+> Si cada uno armara su lista, tarde o temprano uno queda con una pantalla de
+> menos. La acción de cerrar sesión viaja como prop porque es una Server Action
+> y el menú es un componente de cliente.
+
+### 🔴 Cinco tablas usaban `overflow-hidden`, no `overflow-x-auto`
+
+Esto no era "se ve apretado": con `hidden`, **las columnas que no entran quedan
+cortadas y sin ninguna forma de llegar a ellas** — incluida la del botón de
+acción. Afectaba a productos, categorías (las dos), equipo y el detalle de
+cotización.
+
+El listado de cotizaciones era la única bien resuelta (`overflow-x-auto` +
+`min-w`). Alguien lo pensó ahí y no se replicó.
+
+| Pantalla | Cols | `min-w` | Verificado a 390px |
+|---|---|---|---|
+| Categorías (unificadas) | 5 | 760px | 356 → 760, llega al final ✅ |
+| Categorías (todas) | 6 | 860px | 356 → 860, llega al final ✅ |
+| Productos | 5 | 680px | 356 → 680, llega al final ✅ |
+| Equipo | 5 | 720px | visual ✅ |
+| Detalle de cotización | 5 | 640px | visual ✅ |
+| Listado de cotizaciones | 7 | 880px (era 720) | visual ✅ |
+
+Al listado de cotizaciones se le subió el piso de 720 a 880: con 7 columnas y
+Cliente/Empresa/Email al lado, a 720 se comprimían y el email se partía en
+varias líneas. El scroll ya estaba bien; lo que faltaba era el ancho.
+
+### Dos desbordes que aparecieron al medir
+
+Los encontró la medición, no la vista: `/admin/productos` empujaba la página a
+**512px de ancho en un viewport de 390**.
+
+1. **El esqueleto de carga.** `AdminPageHeaderSkeleton` usa `w-56` y `w-80`
+   (320px) y al lado tenía un `Skeleton w-40 shrink-0`: 320 + 16 + 160 + 32 de
+   padding = **512**, el número exacto medido. Se le puso `max-w-full` a las
+   piezas del esqueleto y `flex-wrap` al contenedor. Se veía solo mientras
+   carga, que es justo cuando nadie mira dos veces.
+2. **El header real de la pantalla.** El botón "Nuevo producto" (`shrink-0`) no
+   entra al lado del título en un celular y quedaba encimado contra la bajada.
+   Mismo arreglo: `flex-wrap`.
+
+### 🟡 Cómo verificar anchos de celular en este entorno
+
+El HANDOFF decía que "el resize del navegador no responde". **Es más preciso
+que eso**, y conviene saberlo para no perder tiempo:
+
+- `resize_window` **sí funciona** (la ventana se achicó a 658px de `outerWidth`).
+- Pero el navegador tenía **zoom-out**, así que el viewport CSS seguía en
+  **1144px** y el layout se renderizaba como escritorio. El zoom no se puede
+  cambiar desde las herramientas (`cmd+0` no está soportado).
+- **Lo que sí sirve: un iframe de 390px.** Crea un viewport propio, las media
+  queries evalúan contra él, y se puede medir por dentro
+  (`documentElement.scrollWidth`, `scrollLeft`/`scrollWidth` de cada tabla).
+
+> Dos trampas de esa técnica, ya pagadas: **medir en el mismo turno en que se
+> carga el iframe da ceros** (el layout todavía no ocurrió — hay que medir en
+> una llamada aparte), y **vaciar el `body` del documento padre le rompe el
+> árbol a React** y dispara la pantalla de error al primer Fast Refresh. El
+> iframe va montado en un contenedor propio colgado del `documentElement`.
+
+Esto **no reemplaza** probarlo en un teléfono real: el iframe valida el layout
+y las media queries, no el touch, ni el scroll con el dedo, ni la barra del
+navegador móvil.
+
+---
+
+## Cotización del dólar: automatizable contra el oficial del BNA
+
+Construido, pusheado y **verificado en producción por el usuario el
+2026-08-26**. Commits: `ffc6e61` (la funcionalidad) y `51079c7` (el fix del
+formulario). Migración `20260826180000_add_usd_rate_automation`, aplicada en
+Neon antes del push.
+
+**Estado actual de producción:** `CRON_SECRET` cargado en Vercel, modo
+**Automática** (`usdRateMode = AUTO`) y `usdRate` en **1535**, traído del
+oficial del Banco Nación con el botón del panel.
+
+### Qué se construyó
+
+| Pieza | Dónde |
+|---|---|
+| Lógica de refresco | `src/lib/usd-rate.ts` (`refreshUsdRate()`) |
+| Endpoint para el cron | `src/app/api/cron/usd-rate/route.ts` |
+| Botón "Actualizar ahora" + selector de modo | `src/components/admin/pricing-config-form.tsx` |
+| Server actions | `src/app/admin/(panel)/configuracion/actions.ts` |
+
+Campos nuevos en `PricingConfig`: `usdRateMode` (AUTO / MANUAL),
+`usdRateOfficial`, `usdRateOfficialAt`, `usdRateUpdatedAt`, `usdRateSource`.
+
+### 🔴 Lo que FALTA para que "Automática" sea automática de verdad
+
+**No hay ningún cron programado.** No existe `vercel.json`, y sin la clave
+`crons` Vercel no dispara nada. Hoy el modo AUTO solo significa "cuando se
+llame a `refreshUsdRate()`, aplicá el oficial en vez de solo registrarlo" — y
+la única vía de llamada es el botón del panel.
+
+El endpoint ya está listo y protegido: Vercel manda solo
+`Authorization: Bearer ${CRON_SECRET}` cuando esa variable existe, y sin la
+variable el endpoint devuelve 503 (cerrado por defecto, a propósito).
+
+**Enchufar el cron espera a Vercel Pro**, junto con el sync automático de
+productos. Cuando se contrate, es un `vercel.json` con la ruta
+`/api/cron/usd-rate` y una expresión diaria — el endpoint ya está escrito y no
+hay que tocarlo.
+
+> Dicho sea de paso: para el dólar solo, **Hobby alcanzaría**. Ahí el cron
+> corre una vez por día (y una expresión más frecuente **rompe el deploy**, no
+> falla en runtime), y una vez por día es de sobra para una cotización. Lo que
+> empuja hacia Pro es el sync de productos, no esto. Si en algún momento se
+> quiere el dólar al día antes de contratar Pro, se puede agregar el cron
+> diario sin esperar nada.
+
+### Decisiones que conviene no deshacer
+
+- **Se usa `venta`, no `compra`**: es lo que cuesta COMPRAR los dólares para
+  pagarle al proveedor. Con `compra` subestimaríamos el costo.
+- **El default es MANUAL.** Una actualización automática que pisa un valor
+  cargado a mano mueve el precio de todo el catálogo de CDO por sorpresa. En
+  MANUAL el job igual registra el oficial en `usdRateOfficial`, para que el
+  panel muestre la diferencia sin cambiar nada.
+- **Guarda de ±20% contra el valor guardado.** Es contra basura, no contra el
+  mercado: estas APIs gratuitas a veces devuelven 0, y un cero pondría en CERO
+  el precio de todo el catálogo de CDO **sin que nada falle**. Si el valor no
+  pasa la guarda, no se escribe ni siquiera como oficial.
+- **Si la API no responde, no se escribe nada** y queda el último valor
+  conocido. El endpoint devuelve 502 solo en ese caso: que un tercero esté
+  caído no es un error nuestro, y un 500 haría que Vercel marque el cron como
+  fallido cuando se comportó bien.
+- **El costo asumido**: el oficial del BNA **puede diferir del que factura
+  CDO**. El día de la decisión eran 1510 (CDO) contra 1535 (BNA), un 1,66%. Se
+  acepta porque el precio que ve el cliente es **estimado** —la venta se cierra
+  por WhatsApp— y un valor cargado a mano se olvida. Si la brecha se empieza a
+  comer el margen, la salida es pasar a MANUAL desde el panel; no hace falta
+  tocar código.
+
+### El bug del formulario: `disabled` no viaja en el FormData
+
+Pasar el modo a "Automática" rechazaba el guardado con **"tiene que ser un
+número mayor a 0"** — o sea, la única forma de activar la automatización
+estaba rota.
+
+**Causa raíz:** el input de la cotización estaba `disabled` cuando el modo era
+AUTO, y **un input deshabilitado no se envía con el formulario**. `usdRate`
+llegaba null al servidor, `Number(null)` daba 0, y la validación lo rechazaba.
+
+**Arreglo:** `readOnly` en vez de `disabled`. Se ve igual y sigue sin poder
+editarse a mano, pero el valor viaja. Después `refreshUsdRate()` lo reemplaza
+por el oficial.
+
+> Se revisaron los otros 17 `disabled=` del proyecto: son todos botones o
+> selects que no se envían por formulario, así que este era el único caso.
+
+---
+
 ## En pausa: sync automático con Vercel Cron
 
 **Analizado a fondo el 2026-08-21, decidido, y explícitamente pospuesto.** No
@@ -1276,21 +1460,32 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**No hay trabajo abierto ni nada sin pushear.** Lo que sigue son decisiones,
-no código:
+**Lo primero: commitear y pushear el panel mobile**, que está construido y
+verificado a 390px pero sigue local. Después, **mirarlo en un teléfono real** —
+el iframe valida el layout, no el touch ni el scroll con el dedo. Lo que hay
+que probar ahí: que el menú hamburguesa abra y cierre, y que las cinco tablas
+se puedan arrastrar de costado hasta la última columna.
 
-1. **El mapeo de categorías** — en manos del cliente. La herramienta está
+Después de eso, lo que queda son decisiones, no código:
+
+1. **Enchufar el cron de la cotización del dólar** cuando se contrate Vercel
+   Pro. El endpoint (`/api/cron/usd-rate`) y el `CRON_SECRET` ya están; falta
+   el `vercel.json` con la expresión diaria. Hasta entonces la cotización se
+   actualiza solo con el botón del panel, aunque el modo diga "Automática".
+
+2. **El mapeo de categorías** — en manos del cliente. La herramienta está
    construida y deployada; falta que definan qué unificar y qué ocultar. El
    caso urgente son los **cinco pares homónimos** (Escritura, Llaveros,
    Paraguas, Tecnología, Gorros): hoy producción muestra dos filtros con el
    mismo nombre.
 
-2. **Cargar dirección y horarios** en `/admin/configuracion`, si el cliente
+3. **Cargar dirección y horarios** en `/admin/configuracion`, si el cliente
    quiere mostrarlos. Los íconos (pin y reloj) ya están hechos; hoy el footer
    muestra solo los tres links porque esos dos campos están vacíos.
 
-3. **Verificar el footer en un teléfono real.** Es lo único que quedó sin
-   confirmar de verdad: el resize del navegador no responde en este entorno,
+4. **Verificar el footer en un teléfono real.** Es lo único que quedó sin
+   confirmar de verdad: en su momento el resize del navegador no respondió
+   (ver la técnica del iframe en la sección del panel mobile, que sí sirve),
    así que el layout mobile se verificó forzando las clases sobre un
    contenedor de 260px. Mismo criterio que se usó con la tanda 6.
 

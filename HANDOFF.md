@@ -3,22 +3,13 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-21 — visibilidad de categorías
-**Branch:** `main`. Las tandas 1-8 y el precio por variante están pusheados,
-deployados y **verificados en producción**.
+**Última actualización:** 2026-08-26 — contacto editable + íconos del footer
+**Branch:** `main`. **Todo pusheado y Neon al día.** No queda nada local sin
+subir ni ninguna migración pendiente.
 
-**El conector de CDO está pusheado, migrado y verificado en producción.** El
-2026-08-21 se pushearon los 7 commits (`aff3ed9` → `ba9f7d7`), se aplicó
-`20260821174829_add_cdo_provider` en Neon con `migrate deploy` ("All
-migrations have been successfully applied") y se confirmó que el catálogo de
-producción funciona.
-
-**Todo pusheado y Neon al día.** El trabajo de categorías (visibilidad +
-unificación) se subió el 2026-08-25, con las dos migraciones aplicadas en Neon
-ANTES del push y producción verificada en el medio.
-
-El conector de CDO corre contra el entorno de **pruebas** de CDO y la base
-**local**, que es donde se pidió construirlo.
+Lo último verificado en producción por el usuario: los datos de contacto
+reales cargados desde el panel, con el WhatsApp de Córdoba bien agrupado
+(`+54 9 351 687-1724`) y los tres íconos renderizando.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -651,10 +642,11 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
 ## Neon: al día
 
-Neon tiene **todas** las migraciones del repo. Las dos últimas
-—`20260821200000_add_category_visible` y
-`20260821210000_add_category_canonical`— se aplicaron el 2026-08-25 con
-`migrate deploy`, en ese orden y **antes** del push.
+Neon tiene **todas** las migraciones del repo. La última aplicada fue
+`20260826120000_add_site_config` (2026-08-26); antes,
+`20260821200000_add_category_visible` y
+`20260821210000_add_category_canonical`. Todas con `migrate deploy`, **antes**
+del push y verificando producción en el medio.
 
 Las dos son aditivas, sin backfill y reversibles (`DROP COLUMN`). No cambiaron
 nada de lo visible: `visible` arranca en `true` para todas y `canonicalId` en
@@ -691,6 +683,98 @@ aplicadas en Neon**, en ese orden y antes del push.
 Verificado en producción por el usuario: el campo de cotización carga, el
 precio cambia según la variante elegida en la ficha, y la cotización congela
 el precio de **esa** variante. El margen quedó de vuelta en 45.
+
+---
+
+## Datos de contacto editables + atributos en la ficha (2026-08-26)
+
+Las dos cosas están **pusheadas, deployadas y verificadas en producción**.
+
+### Contacto editable desde el panel
+
+`SiteConfig` (tabla propia, singleton id=1) + sección "Contacto" en
+`/admin/configuracion`, solo SUPER_ADMIN. Campos: email, WhatsApp, Instagram,
+dirección y horarios — **todos opcionales**.
+
+**Tabla propia y no campos en `PricingConfig`**, por dos razones: mezclar el
+teléfono con el margen hace que ninguna configuración se entienda sola, y
+`getPricingConfig()` se lee en CADA cálculo de precio, así que le arrastraría
+campos de contacto a todas esas consultas para nada.
+
+**El WhatsApp se guarda SOLO EN DÍGITOS** y las dos formas se derivan: el link
+(`wa.me/54...`) y la etiqueta legible. Guardarlas por separado las dejaría
+desincronizarse.
+
+La validación ataja los tres errores que **rompen el link en silencio** —
+wa.me no falla, abre un chat con un número inexistente: falta el código de
+país, sobra el 0 de larga distancia, sobra el 15.
+
+**El formateador necesita la tabla de códigos de área** (`AREAS_TRES_DIGITOS`
+en `lib/site-config.ts`): el área argentina tiene 2, 3 o 4 dígitos y el
+abonado ocupa lo que sobra de los 10. Sin saber cuál es, el corte cae mal —
+una versión partía el 351 de Córdoba como `+54 9 35 1555-1234`. Ganchito es de
+Córdoba, así que ese caso importaba. Lo que no está en la tabla se trata como
+área de 4, que es lo correcto para el resto del país.
+
+Se eliminó `src/lib/contact.ts`, que tenía el mail y un
+`+54 9 11 0000-0000` de relleno hardcodeados. Los tres consumidores leen de la
+config: footer, botón "Contacto" del hero (que ya no se renderiza si no hay
+adónde mandarlo) y la pantalla del panel.
+
+### 🔴 El bug que volteó un build de producción: crear filas desde un render
+
+**Vale más que el feature.** `getSiteConfig()` hacía *leer → si no existe,
+crear*. El Footer vive en el layout, así que corre en el render de TODAS las
+páginas públicas. Al prerenderizar, varias se renderizan a la vez: todas ven
+la tabla vacía, todas intentan crear la fila `id=1`, una gana y el resto
+revienta con `P2002`. El build de Vercel se cayó en `/cotizar`.
+
+**La primera vez que corre con la tabla vacía es la única vez que puede
+fallar** — y esa vez fue el build de producción.
+
+El arreglo no es reintentar: es **sacar la escritura del render**.
+`getSiteConfig()` ahora solo lee y devuelve una config vacía si no hay fila.
+La fila la crea `updateSiteConfig` con un `upsert`, que es donde se espera
+escribir y además es atómico.
+
+> **`getPricingConfig()` tenía la MISMA carrera** y no se había disparado solo
+> porque su fila ya existe en las dos bases; una base nueva la habría volteado
+> igual. Ahí no se puede devolver un objeto vacío —los defaults de margen, IVA
+> y dólar viven en el schema y duplicarlos en código los desincronizaría— así
+> que se resolvió con un `try/catch` que relee.
+
+**Cómo se verificó:** vaciando `site_config` en local y corriendo
+`npm run build`, que es la condición exacta que rompió. Compilar no alcanzaba.
+
+### Íconos del footer
+
+SVG inline en `src/components/icons/contact-icons.tsx`, **sin librería**. Las
+genéricas (Lucide, Heroicons) no traen logos de marca a propósito, por marca
+registrada: harían falta `simple-icons` ADEMÁS de una genérica, dos
+dependencias para cinco íconos.
+
+Detalles medidos, no estimados:
+
+- **18px y no 16**: a 16 el glifo de WhatsApp se empasta.
+- **Contraste sobre el violeta**: íconos 5,61:1 (umbral de componentes no
+  textuales: 3:1), texto 9,17:1.
+- `items-start` + `shrink-0`: con un mail que parte en dos líneas, el ícono
+  queda a la altura de la primera y no se aplasta.
+
+### Atributos de producto en la ficha
+
+Bloque "Características" con chips violetas, **arriba** de "Personalización" y
+no adentro: aquella contesta *cómo le pongo mi logo* y esta *qué es este
+producto*. 764 atributos sobre 301 productos de CDO.
+
+**Zecat no tiene equivalente** — relevado contra su API: `badges` son
+etiquetas comerciales (SALE, NOVEDAD) y los `subattributes` que podrían ser
+certificaciones son flags "Si"/"No" **sin nombre**, y no hay endpoint que
+liste qué significa cada `attribute_id`. Sus productos no muestran el bloque.
+
+`formatAttributeName()` normaliza la capitalización: sentence case, salvo que
+la palabra venga después de una sigla. "MAYORMENTE RECICLABLE" → "Mayormente
+reciclable", pero "BPA FREE" → "BPA Free".
 
 ---
 
@@ -1192,36 +1276,23 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Armar el mapeo de categorías desde el panel** — es decisión de negocio, no
-trabajo de código. La herramienta está construida, verificada en local y
-deployada.
+**No hay trabajo abierto ni nada sin pushear.** Lo que sigue son decisiones,
+no código:
 
-Lo urgente son las **homónimas**, porque hoy el cliente ve dos filtros con el
-mismo nombre en producción:
+1. **El mapeo de categorías** — en manos del cliente. La herramienta está
+   construida y deployada; falta que definan qué unificar y qué ocultar. El
+   caso urgente son los **cinco pares homónimos** (Escritura, Llaveros,
+   Paraguas, Tecnología, Gorros): hoy producción muestra dos filtros con el
+   mismo nombre.
 
-| Par | Zecat | CDO | Total |
-|---|---|---|---|
-| Escritura | 26 | 34 | 60 |
-| Llaveros | 24 | 7 | 31 |
-| Paraguas | 7 | 4 | 11 |
-| Tecnología | 22 | 11 | 33 |
+2. **Cargar dirección y horarios** en `/admin/configuracion`, si el cliente
+   quiere mostrarlos. Los íconos (pin y reloj) ya están hechos; hoy el footer
+   muestra solo los tres links porque esos dos campos están vacíos.
 
-El panel las sugiere solas. **Ojo con dos cosas que la sugerencia no cubre:**
-
-- **Pares que NO detecta** (se escriben distinto y son lo mismo): "Hogar"
-  (CDO, 24) vs "Hogar y Tiempo Libre" (Zecat, 26); "Carpetas, Bolsos y
-  Mochilas" (CDO, 22) vs "Bolsos y Mochilas" (Zecat, 55); "Oficina y
-  Negocios" (CDO, 28) vs "Escritorio" (Zecat, 22).
-- **Un par que SÍ se parece y NO hay que unificar:** "Escritorio" y
-  "Escritura" son cosas distintas.
-
-Después, ocultar el ruido: campañas ("2026 *"), ofertas ("70%OFF *", con una
-en **0 productos**) y las que no son categorías ("Próximos Arribos" 69,
-"Logo 24hs" 76). Ahí sí conviene tener presente que sus productos quedan sin
-vía de filtro.
-
-**Primero conviene verificar la pantalla en producción**, que está deployada
-pero todavía sin mirar con datos reales.
+3. **Verificar el footer en un teléfono real.** Es lo único que quedó sin
+   confirmar de verdad: el resize del navegador no responde en este entorno,
+   así que el layout mobile se verificó forzando las clases sobre un
+   contenedor de 260px. Mismo criterio que se usó con la tanda 6.
 
 **Lo que queda del lado de CDO, aparte:**
 

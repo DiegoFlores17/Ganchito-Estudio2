@@ -4,9 +4,9 @@ Registro del estado real del proyecto para poder retomar sin reconstruir context
 Se actualiza al final de cada tanda de trabajo.
 
 **Última actualización:** 2026-08-26 — panel de administración en el celular
-**Branch:** `main`. **Neon al día** (ninguna migración pendiente), pero **el
-trabajo del panel mobile está sin commitear ni pushear**. Es solo frontend: no
-trae migración ni toca la base.
+**Branch:** `main`. **Todo pusheado y Neon al día.** El panel mobile se pusheó
+en `6db0740` (+ `ad7653a` de docs); es solo frontend, no trae migración ni
+toca la base, así que Neon no necesitaba nada.
 
 Lo último verificado en producción por el usuario: `CRON_SECRET` cargado en
 Vercel, el botón **"Actualizar ahora"** del panel funcionando, y la cotización
@@ -1271,8 +1271,8 @@ variante. Con un producto de dos variantes a 200 y 500: ficha 290 y 725, card
 
 ## Panel de administración en el celular (2026-08-26)
 
-Construido y **verificado a 390px** con la técnica del iframe (ver abajo). Sin
-pushear todavía.
+Construido y **verificado a 390px** con la técnica del iframe (ver abajo).
+Pusheado en `6db0740`. **Falta mirarlo en un teléfono real.**
 
 ### El header no tenía un solo breakpoint
 
@@ -1460,11 +1460,10 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Lo primero: commitear y pushear el panel mobile**, que está construido y
-verificado a 390px pero sigue local. Después, **mirarlo en un teléfono real** —
-el iframe valida el layout, no el touch ni el scroll con el dedo. Lo que hay
-que probar ahí: que el menú hamburguesa abra y cierre, y que las cinco tablas
-se puedan arrastrar de costado hasta la última columna.
+**Lo primero: mirar el panel mobile en un teléfono real.** Ya está pusheado y
+verificado a 390px, pero el iframe valida el layout, no el touch ni el scroll
+con el dedo. Lo que hay que probar ahí: que el menú hamburguesa abra y cierre,
+y que las cinco tablas se puedan arrastrar de costado hasta la última columna.
 
 Después de eso, lo que queda son decisiones, no código:
 

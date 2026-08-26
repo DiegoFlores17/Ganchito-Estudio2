@@ -125,12 +125,28 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
          reventaría el límite igual. Con Pro los logs duran 1 día, que sigue
          siendo poco para un cron. Hace falta el registro en base para poder
          verlo desde el panel.
-- [ ] **Cargar `CRON_SECRET` en Vercel (Production) y redeployar.** El cron ya
-      está registrado pero devuelve **503**: la variable no existe en el proyecto,
-      verificado contra el dashboard. Ojo con el falso positivo que nos comimos:
-      el botón "Actualizar ahora" del panel **no usa el secret** (va por una
-      Server Action), así que verlo funcionar no prueba nada sobre el endpoint.
-      Y acordarse de **redeployar**: las variables se inyectan en el deployment.
+- [x] **Cargar `CRON_SECRET` en Vercel (Production) y redeployar.** Hecho y
+      verificado: la corrida de las 19:26 dio **200** con `vercel-cron/1.0`.
+      Antes daba 503 porque la variable no existía. **El falso positivo que nos
+      costó una vuelta**: el botón "Actualizar ahora" del panel **no usa el
+      secret** (va por una Server Action), así que verlo funcionar no probaba
+      nada sobre el endpoint. Y ojo con **redeployar**: las variables se
+      inyectan en el deployment.
+- [ ] **Poner `sslmode=verify-full` explícito en la `DATABASE_URL` de Neon.** El
+      log del cron tira: *"The SSL modes 'prefer', 'require', and 'verify-ca' are
+      treated as aliases for 'verify-full'. In the next major version
+      (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard
+      libpq semantics, which have weaker security guarantees."*
+
+      **No rompe nada hoy** —el modo actual se comporta como `verify-full`— pero
+      al actualizar `pg` a v9 la misma connection string va a **validar menos, en
+      silencio, sin que nada falle**. Es una degradación de seguridad que no avisa
+      cuando ocurre, solo antes. Hacerlo antes de esa actualización.
+- [ ] **`preferredRegion = "gru1"` en las funciones que pegan mucho a la base.**
+      Confirmado con dato real en el log del cron: la función corre en **`iad1`
+      (Washington)** y Neon está en `sa-east-1`. Para el cron del dólar da igual
+      (dos queries), pero el sync de productos hace 12-15 idas y vueltas **por
+      producto**. Ver el ítem de automatizar el sync.
 - [x] **Enchufar el cron de la cotización del dólar.** Hecho: `vercel.json` con
       `0 19 * * *`. **Las expresiones de Vercel son UTC**, así que corre a las
       **16:00 ART**, después de que el BNA cierre — dolarapi actualiza a las

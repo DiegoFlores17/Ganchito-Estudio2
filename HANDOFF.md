@@ -7,10 +7,10 @@ Se actualiza al final de cada tanda de trabajo.
 **Branch:** `main`. **Todo pusheado y Neon al día.** Nada de lo último trae
 migración ni toca la base.
 
-**La cotización del dólar está a UN PASO de ser automática.** Modo
-**Automática** en producción y cron diario registrado en Vercel, pero
-**falta cargar `CRON_SECRET`**: sin esa variable el endpoint devuelve 503 y el
-cron no aplica nada. Ver "🔴 El cron devuelve 503" más abajo.
+**La cotización del dólar ya es automática de punta a punta, verificada.** Modo
+**Automática**, cron diario a las 16:00 ART, y la corrida del 2026-08-26 19:26
+devolvió **200** con `User Agent: vercel-cron/1.0` — o sea que la disparó
+Vercel, no una prueba a mano. Nadie del equipo tiene que apretar nada.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -1352,45 +1352,71 @@ Construido, pusheado y **verificado en producción por el usuario el
 formulario). Migración `20260826180000_add_usd_rate_automation`, aplicada en
 Neon antes del push.
 
-**Estado actual de producción:** modo **Automática** (`usdRateMode = AUTO`) y
-`usdRate` en **1535**, traído del oficial del Banco Nación con el botón del
-panel. **`CRON_SECRET` NO está cargado** — ver acá abajo.
+**Estado actual de producción (verificado el 2026-08-26):** modo **Automática**
+(`usdRateMode = AUTO`), `usdRate` en **1535**, `CRON_SECRET` cargado, y el
+cron corriendo. El panel muestra *"Valor actual: 1535 · origen: Banco Nación
+(dolarapi.com) · 26/8/26, 7:26 p. m."*, hora que coincide con el log del cron.
 
-### 🔴 El cron devuelve 503: falta `CRON_SECRET`
+### El falso positivo que costó una vuelta: el botón no prueba el secret
 
-La primera corrida manual (botón **Run** del dashboard, 2026-08-26 19:13)
-devolvió **503**, y en este endpoint ese código significa exactamente una
-cosa: `process.env.CRON_SECRET` no existe.
+La primera corrida (botón **Run**, 19:13) devolvió **503**, que en este
+endpoint significa exactamente una cosa: `process.env.CRON_SECRET` no existe.
+Y no existía: verificado contra Vercel → Settings → Environment Variables, el
+proyecto tenía ocho variables y `CRON_SECRET` no estaba entre ellas.
 
-**Verificado en Vercel → Settings → Environment Variables**: el proyecto tiene
-ocho variables (`BLOB_READ_WRITE_TOKEN`, `ZECAT_API_TOKEN`, `ZECAT_API_URL`,
-`AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`,
-`INITIAL_SUPER_ADMIN_EMAIL`, `DATABASE_URL`) y **`CRON_SECRET` no está entre
-ellas**.
-
-> **Por qué nadie lo notó antes, que es la parte que importa.** Se dio por
-> verificado porque "el botón del panel funciona" — pero **el botón nunca usa
-> `CRON_SECRET`**. Llama a la Server Action `refreshUsdRateNow()`, que va
-> directo a `refreshUsdRate()`. El secret solo protege el endpoint HTTP, que
-> es la puerta por la que entra Vercel Cron. Son **dos caminos distintos hacia
-> la misma función**, y probar uno no dice nada del otro.
+> **Por qué se había dado por cargado, que es la parte que importa.** Porque
+> "el botón del panel funciona" — pero **el botón nunca usa `CRON_SECRET`**.
+> Llama a la Server Action `refreshUsdRateNow()`, que va directo a
+> `refreshUsdRate()`. El secret solo protege el endpoint HTTP, que es la
+> puerta por la que entra Vercel Cron. Son **dos caminos distintos hacia la
+> misma función**, y probar uno no dice nada del otro.
 >
 > Este HANDOFF llegó a afirmar "`CRON_SECRET` cargado en Vercel" como hecho
 > verificado, cuando venía de un reporte y nunca se había comprobado contra el
-> dashboard.
+> dashboard. **Regla que queda:** las credenciales se verifican contra el
+> dashboard, no contra un camino de la app que podría no usarlas.
 
-**Para cerrarlo** (lo tiene que hacer una persona: son credenciales):
+**Se resolvió así** (los pasos, por si hay que repetirlo en otro entorno):
 
 1. Generar el valor: `openssl rand -hex 32`.
-2. Vercel → Settings → Environment Variables → Add. Nombre exacto
-   **`CRON_SECRET`**, alcance **Production** (como mínimo).
+2. Vercel → Settings → Environment Variables → Add, nombre exacto
+   **`CRON_SECRET`**, alcance **Production**.
 3. **Redeployar.** Las variables se inyectan en el deployment: agregarla no
    afecta a los que ya están corriendo. Sin este paso sigue dando 503.
-4. Volver a Cron Jobs → **Run** y confirmar **200** en View Logs.
+4. Cron Jobs → **Run** → confirmar **200** en View Logs.
 
 > **El 503 hizo lo que tenía que hacer.** El endpoint está escrito para quedar
 > cerrado cuando falta el secret, en vez de abierto a cualquiera que adivine
 > la URL. Falló ruidoso y del lado seguro.
+
+**La corrida buena, para saber qué mirar:** `AUG 26 19:26:31 GET 200`, con
+`User Agent: vercel-cron/1.0` y Firewall `Allowed`. Ese user agent es la
+prueba de que lo disparó Vercel y no una prueba a mano.
+
+### 🟡 Dos cosas que aparecieron en el log del cron
+
+Ninguna rompe nada hoy; las dos conviene tenerlas anotadas.
+
+**1. Warning de SSL de `pg`** (Vercel lo pinta como "1 Error" aunque el
+request haya dado 200 — es Node escribiendo a stderr):
+
+> *SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are
+> treated as aliases for 'verify-full'. In the next major version
+> (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard
+> libpq semantics, which have weaker security guarantees.*
+
+O sea: la `DATABASE_URL` de Neon usa `sslmode=require` (o equivalente). **Hoy
+eso se comporta como `verify-full`**, que es lo seguro. Cuando `pg` suba a v9,
+**el mismo string va a validar menos, en silencio y sin que nada falle.** La
+mitigación es poner `sslmode=verify-full` explícito en la connection string,
+antes de esa actualización.
+
+**2. La función corre en `iad1` (Washington).** Confirmado en el log:
+*"Received in Washington, D.C., USA (iad1)"*, con Neon en `sa-east-1`. Para
+este cron da igual (son dos queries), pero es **la confirmación con dato real**
+de la advertencia que ya estaba anotada para el sync de productos, donde son
+12-15 idas y vueltas a la base **por producto**. Ahí sí hay que poner
+`preferredRegion = "gru1"`.
 
 ### Qué se construyó
 
@@ -1567,10 +1593,10 @@ y que las cinco tablas se puedan arrastrar de costado hasta la última columna.
 
 Después de eso, lo que queda son decisiones, no código:
 
-1. **Cargar `CRON_SECRET` en Vercel y redeployar.** Es lo único que separa a la
-   cotización de ser automática de verdad: hoy el cron corre y devuelve 503.
-   Los pasos están en "🔴 El cron devuelve 503". Después, **Run** y confirmar
-   200; y al día siguiente, que `usdRateUpdatedAt` avance solo.
+1. **Confirmar la primera corrida automática del cron**, después de las 16:00
+   ART. El disparo a mano ya dio 200; falta ver que el horario programado
+   dispare solo. Se mira en el panel: la fecha de "Valor actual" tiene que
+   avanzar sin que nadie toque nada.
 
 2. **El mapeo de categorías** — en manos del cliente. La herramienta está
    construida y deployada; falta que definan qué unificar y qué ocultar. El

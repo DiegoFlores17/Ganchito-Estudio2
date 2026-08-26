@@ -38,7 +38,10 @@ export default async function CotizacionesPage({
       />
 
       <div className="mt-8 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
-        <table className="w-full min-w-[720px] text-sm">
+        {/* Siete columnas, y Cliente/Empresa/Email son textos largos: con 720
+            se comprimían y el email se partía en varias líneas. El scroll ya
+            estaba bien resuelto acá; lo que faltaba era el piso de ancho. */}
+        <table className="w-full min-w-[880px] text-sm">
           <thead>
             <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
               <th className="px-4 py-3 font-medium">Fecha</th>

@@ -25,7 +25,9 @@ export default async function ProductosPage({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-4">
+      {/* flex-wrap: en un celular el boton no entra al lado del titulo y
+          quedaba encimado contra la bajada. Al envolver, baja completo. */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-medium text-foreground">
             Productos manuales
@@ -50,8 +52,11 @@ export default async function ProductosPage({
         />
       </div>
 
-      <div className="mt-8 overflow-hidden rounded-xl border border-foreground/10 bg-background">
-        <table className="w-full text-sm">
+      {/* overflow-x-auto y NO overflow-hidden: con `hidden`, en un celular
+          las columnas que no entran quedan cortadas y sin ninguna forma de
+          llegar a ellas — incluida la del botón de acción. */}
+      <div className="mt-8 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
+        <table className="w-full min-w-[680px] text-sm">
           <thead>
             <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
               <th className="px-4 py-3 font-medium">Nombre</th>

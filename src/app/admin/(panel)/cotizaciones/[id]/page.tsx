@@ -56,8 +56,11 @@ export default async function CotizacionDetallePage({
       <div className="mt-8 grid grid-cols-1 gap-8 md:grid-cols-3">
         <section className="md:col-span-2">
           <h2 className="text-sm font-medium text-foreground/60">Items</h2>
-          <div className="mt-3 overflow-hidden rounded-xl border border-foreground/10 bg-background">
-            <table className="w-full text-sm">
+          {/* overflow-x-auto y NO overflow-hidden: con `hidden`, en un celular
+              las columnas que no entran quedan cortadas y sin ninguna forma de
+              llegar a ellas. Acá lo que se perdía era el subtotal. */}
+          <div className="mt-3 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
                   <th className="px-4 py-3 font-medium">Producto</th>

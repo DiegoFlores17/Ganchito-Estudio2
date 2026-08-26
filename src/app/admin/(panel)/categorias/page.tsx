@@ -142,8 +142,11 @@ export default async function CategoriasPage() {
           productos de las categorías de proveedor unificadas debajo.
         </p>
 
-        <div className="mt-4 overflow-hidden rounded-xl border border-foreground/10 bg-background">
-          <table className="w-full text-sm">
+        {/* overflow-x-auto y NO overflow-hidden: con `hidden`, en un celular
+            las columnas que no entran quedan cortadas y sin ninguna forma de
+            llegar a ellas — incluida la del botón de acción. */}
+        <div className="mt-4 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
                 <th className="px-4 py-3 font-medium">Categoría</th>
@@ -248,8 +251,9 @@ export default async function CategoriasPage() {
           les puso el proveedor.
         </p>
 
-        <div className="mt-4 overflow-hidden rounded-xl border border-foreground/10 bg-background">
-          <table className="w-full text-sm">
+        {/* Seis columnas, una con un select: es la tabla más ancha del panel. */}
+        <div className="mt-4 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
+          <table className="w-full min-w-[860px] text-sm">
             <thead>
               <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
                 <th className="px-4 py-3 font-medium">Categoría</th>

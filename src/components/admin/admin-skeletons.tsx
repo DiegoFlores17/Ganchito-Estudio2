@@ -11,9 +11,12 @@ export function AdminPageHeaderSkeleton({
   withSubtitle?: boolean;
 }) {
   return (
-    <div>
-      <Skeleton className="h-8 w-56" />
-      {withSubtitle && <Skeleton className="mt-2 h-4 w-80" />}
+    // max-w-full: los anchos fijos (w-56, w-80) son mas grandes que el ancho
+    // disponible en un celular, y sin el tope el esqueleto desborda la pagina
+    // — el contenido real nunca lo hace, asi que se veria solo mientras carga.
+    <div className="max-w-full">
+      <Skeleton className="h-8 w-56 max-w-full" />
+      {withSubtitle && <Skeleton className="mt-2 h-4 w-80 max-w-full" />}
     </div>
   );
 }

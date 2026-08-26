@@ -52,6 +52,19 @@ enum QuoteStatus {
   EXPIRED
 }
 
+/// Si la cotización del dólar se actualiza sola contra la API o queda fija.
+///
+/// MANUAL es el default a propósito: una actualización automática que pisa un
+/// valor cargado a mano, sin que nadie lo haya pedido, mueve el precio de
+/// todo el catálogo de CDO por sorpresa.
+enum UsdRateMode {
+  /// El job pisa `usdRate` con el oficial del Banco Nación.
+  AUTO
+  /// El job NO toca `usdRate`, pero igual registra el oficial en
+  /// `usdRateOfficial` para poder mostrar la diferencia en el panel.
+  MANUAL
+}
+
 /// SUPER_ADMIN: configuración de negocio (margen, IVA, gestión de equipo).
 /// ADMIN: operación del día a día (cotizaciones). No ve equipo ni configuración.
 enum AdminRole {
@@ -142,6 +155,23 @@ model PricingConfig {
   /// Pendiente: se le preguntó a CDO si tienen endpoint de cotización sin
   /// documentar. Si aparece, esto pasa a alimentarse solo.
   usdRate             Decimal  @default(1510) @db.Decimal(12, 2)
+
+  /// Si `usdRate` se actualiza sola o queda fija. Ver el enum.
+  usdRateMode         UsdRateMode @default(MANUAL)
+  /// Cuándo cambió `usdRate` por última vez, sea a mano o por el job.
+  usdRateUpdatedAt    DateTime?
+  /// De dónde salió el valor actual: "Banco Nación (dolarapi.com)" o "Manual".
+  /// Texto y no enum: es para mostrar, y la fuente puede cambiar sin migración.
+  usdRateSource       String?
+  /// Último oficial visto en la API, se haya aplicado o no.
+  ///
+  /// Se guarda SIEMPRE, incluso en modo MANUAL: es lo que permite decirle al
+  /// admin "tenés 1510 cargado y el oficial hoy es 1535" sin cambiarle nada.
+  usdRateOfficial     Decimal? @db.Decimal(12, 2)
+  /// Cuándo se consultó la API con éxito por última vez. Distinto de
+  /// `usdRateUpdatedAt`: en modo MANUAL la consulta anda y el valor no cambia.
+  usdRateOfficialAt   DateTime?
+
   updatedAt           DateTime @updatedAt
 
   // Garantiza que exista una sola fila de config (id siempre = 1).

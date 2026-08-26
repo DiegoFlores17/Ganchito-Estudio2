@@ -83,10 +83,21 @@ API), CDO (vía la suya), carga manual, y futuros proveedores.
 - **Margen global editable:** vive en `PricingConfig` como `defaultMarginPercent`.
   Valor inicial: **45** (o sea, costo × 1.45). Se edita desde el panel admin,
   sin tocar código ni re-sincronizar.
-- **Cotización del dólar:** vive en `PricingConfig` como `usdRate`, y **es manual**
-  (ver la sección de CDO más abajo). Los costos en USD se convierten **al leer**, no
-  al sincronizar: mover el valor en el panel actualiza todo el catálogo al instante,
-  sin re-sincronizar ~950 productos. Mismo criterio que el margen.
+- **Cotización del dólar:** vive en `PricingConfig` como `usdRate`. Los costos en
+  USD se convierten **al leer**, no al sincronizar: mover el valor actualiza todo el
+  catálogo al instante, sin re-sincronizar. Mismo criterio que el margen.
+  - **Se usa el dólar oficial del Banco Nación** (`venta`), vía dolarapi.com.
+    `venta` y no `compra` porque es lo que cuesta COMPRAR los dólares para pagarle
+    al proveedor.
+  - **`usdRateMode` decide si se actualiza sola** (`AUTO`) o queda fija (`MANUAL`).
+    El default es MANUAL: una actualización automática que pisa un valor cargado a
+    mano mueve el precio de todo el catálogo de CDO por sorpresa. En MANUAL el job
+    igual registra el oficial en `usdRateOfficial`, para que el panel muestre la
+    diferencia sin cambiar nada.
+  - **Si la API falla, no se escribe nada** y queda el último valor conocido. Hay
+    una guarda de ±20% contra el valor guardado: estas APIs gratuitas a veces
+    devuelven basura, y un cero pondría en CERO el precio de todo el catálogo de CDO
+    sin que nada falle.
 - El **IVA va siempre aparte**, nunca embebido en el precio. Se suma encima del precio
   de venta al hacer el pedido (como la página actual: "$ X + IVA"). Vive en
   `PricingConfig` como `vatRate`.
@@ -186,10 +197,21 @@ devuelve exactamente `available` **y** se conserva el total. Mapear `available`
 directo a `reservedStock` daría lo reservado en vez de lo disponible: el error justo
 al revés, y no se nota mirando la pantalla.
 
-**3. La cotización del dólar es MANUAL (`PricingConfig.usdRate`), y no sale de una
-API.** El valor que usa CDO (su web muestra $1510) es una **decisión comercial de
-ellos**, no el dólar de mercado. Una API de cotizaciones daría el oficial o el blue y
-desalinearía nuestros precios contra lo que CDO factura. Se edita desde el panel.
+**3. La cotización del dólar: DECISIÓN REVERTIDA el 2026-08-26.** Antes era manual
+a propósito, con este razonamiento: el valor que usa CDO (su web mostraba $1510) es
+una **decisión comercial de ellos**, no el dólar de mercado, y una API daría el
+oficial y desalinearía nuestros precios contra lo que CDO factura.
+
+**Ahora se usa el oficial del Banco Nación.** Qué cambió: el precio que ve el cliente
+es **estimado** —la venta se cierra por WhatsApp y el presupuesto final lo arma
+Ganchito a mano— así que no necesita coincidir con la factura de CDO. Lo que sí
+importa es que no quede desactualizado, y un valor cargado a mano se olvida.
+
+**El costo asumido, para que quien lea esto lo sepa:** el oficial del BNA **puede
+diferir del que factura CDO**. El día que se tomó la decisión eran 1510 (CDO) contra
+1535 (BNA), un 1,66%. Esa brecha se va a mover. Si algún día el margen real se
+empieza a comer por ahí, la salida es pasar `usdRateMode` a MANUAL desde el panel y
+volver a cargar el valor de CDO — no hace falta tocar código.
 
 **4. Los iconos se clasifican por LISTA EXPLÍCITA de ids, nunca por heurística sobre
 el texto.** "Grabado láser gratis" y "Grabado en láser" se parecen muchísimo y son

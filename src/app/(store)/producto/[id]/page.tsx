@@ -1,3 +1,4 @@
+import { Currency } from "@prisma/client";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Gallery } from "@/components/product/gallery";
@@ -103,6 +104,20 @@ export default async function ProductoPage({
               rango ? formatPriceArs(rango.min) : formatPriceArs(0)
             }
           />
+
+          {/* Solo para lo que cotiza en dólares (hoy CDO): su precio en pesos
+              depende de la cotización, así que el número puede moverse entre
+              que el cliente lo ve y que recibe el presupuesto.
+
+              Deliberadamente discreto —texto chico, gris, sin ícono de
+              alerta ni color de advertencia—: la idea es que entienda que es
+              orientativo, no que desconfíe del precio. */}
+          {product.currency === Currency.USD && (
+            <p className="-mt-4 text-xs text-foreground/50">
+              Precio estimado según la cotización del dólar. Se confirma en el
+              presupuesto final.
+            </p>
+          )}
 
           {/* Va ANTES de Personalización: primero qué es el producto,
               después cómo se personaliza. */}

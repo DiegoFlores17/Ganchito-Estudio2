@@ -28,6 +28,17 @@ export default async function ConfiguracionPage() {
             defaultMarginPercent={Number(config.defaultMarginPercent)}
             vatPercent={Number(config.vatRate) * 100}
             usdRate={Number(config.usdRate)}
+            usdRateMode={config.usdRateMode}
+            usdRateSource={config.usdRateSource}
+            // Las fechas se formatean ACÁ y no en el cliente: si cada lado usa
+            // su propia zona horaria, el texto cambia al hidratar.
+            usdRateUpdatedAt={formatearFecha(config.usdRateUpdatedAt)}
+            usdRateOfficial={
+              config.usdRateOfficial === null
+                ? null
+                : Number(config.usdRateOfficial)
+            }
+            usdRateOfficialAt={formatearFecha(config.usdRateOfficialAt)}
           />
         </div>
       </section>
@@ -51,4 +62,15 @@ export default async function ConfiguracionPage() {
       </section>
     </div>
   );
+}
+
+/// Fecha corta en horario argentino. Se hace en el servidor para que el texto
+/// sea el mismo antes y después de hidratar.
+function formatearFecha(fecha: Date | null): string | null {
+  if (!fecha) return null;
+  return new Intl.DateTimeFormat("es-AR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Argentina/Buenos_Aires",
+  }).format(fecha);
 }

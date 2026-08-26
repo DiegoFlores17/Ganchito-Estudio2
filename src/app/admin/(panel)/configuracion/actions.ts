@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/admin-auth";
+import { UsdRateMode } from "@prisma/client";
 import { getPricingConfig } from "@/lib/pricing";
+import { refreshUsdRate, FUENTE_MANUAL } from "@/lib/usd-rate";
 import {
   normalizeInstagramHandle,
   validateWhatsappNumber,
@@ -40,15 +42,34 @@ export async function updatePricingConfig(
     };
   }
 
-  await getPricingConfig(); // garantiza que exista la fila (id=1)
+  const modo =
+    formData.get("usdRateMode") === "AUTO" ? UsdRateMode.AUTO : UsdRateMode.MANUAL;
+
+  const previa = await getPricingConfig(); // garantiza que exista la fila (id=1)
+  const cambioLaCotizacion = Number(previa.usdRate) !== usdRate;
+
   await prisma.pricingConfig.update({
     where: { id: 1 },
     data: {
       defaultMarginPercent: marginPercent,
       vatRate: vatPercent / 100,
       usdRate,
+      usdRateMode: modo,
+      // El origen y la fecha solo se tocan si el numero cambio de verdad:
+      // guardar el formulario para editar el margen no tiene por que decir
+      // que la cotizacion se cargo a mano hoy.
+      ...(cambioLaCotizacion
+        ? { usdRateSource: FUENTE_MANUAL, usdRateUpdatedAt: new Date() }
+        : {}),
     },
   });
+
+  // Pasar a AUTO tiene que APLICAR el oficial, no esperar seis horas. Si la
+  // API falla, refreshUsdRate no escribe nada y queda el valor que se acaba
+  // de guardar — nunca cero.
+  if (modo === UsdRateMode.AUTO) {
+    await refreshUsdRate();
+  }
 
   revalidatePath("/admin/configuracion");
   revalidatePath("/catalogo");
@@ -132,4 +153,20 @@ export async function updateSiteConfig(
   // de una ruta suelta.
   revalidatePath("/", "layout");
   return { success: true };
+}
+
+/// Consulta la cotización ahora mismo, desde el botón del panel.
+///
+/// Es la MISMA función que llama el cron, así que lo que se ve acá es
+/// exactamente lo que va a pasar automáticamente.
+export async function refreshUsdRateNow() {
+  await requireSuperAdmin();
+  const resultado = await refreshUsdRate();
+  revalidatePath("/admin/configuracion");
+  // Si se aplico, cambia el precio de todo lo que cotiza en dolares.
+  if (resultado.status === "aplicado") {
+    revalidatePath("/catalogo");
+    revalidatePath("/");
+  }
+  return resultado;
 }

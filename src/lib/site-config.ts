@@ -1,12 +1,36 @@
 import type { SiteConfig } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-/// Datos de contacto de la tienda. Singleton (id = 1), igual que
-/// PricingConfig: si la fila no existe, se crea vacia.
+/// La config cuando todavia no hay fila: todo vacio. No hay riesgo de que se
+/// desincronice con los defaults del schema porque en esta tabla no hay
+/// defaults — los cinco campos son nullable.
+const SITE_CONFIG_VACIA: SiteConfig = {
+  id: 1,
+  contactEmail: null,
+  whatsappNumber: null,
+  instagramHandle: null,
+  address: null,
+  openingHours: null,
+  updatedAt: new Date(0),
+};
+
+/// Datos de contacto de la tienda. Singleton (id = 1).
+///
+/// **Solo lee: no crea la fila.** El Footer vive en el layout de la tienda,
+/// asi que esto corre en el render de TODAS las paginas publicas — y crear
+/// una fila desde un render es un efecto secundario donde no corresponde.
+///
+/// No es teorico: la primera version hacia leer-y-si-no-existe-crear, y el
+/// build de produccion se cayo con `P2002 Unique constraint failed`. Al
+/// prerenderizar, varias paginas estaticas renderizan el Footer a la vez,
+/// las tres ven que la fila no existe, las tres intentan crearla y solo una
+/// gana.
+///
+/// La fila la crea `updateSiteConfig` con un upsert, que es donde se espera
+/// escribir.
 export async function getSiteConfig(): Promise<SiteConfig> {
   const existing = await prisma.siteConfig.findUnique({ where: { id: 1 } });
-  if (existing) return existing;
-  return prisma.siteConfig.create({ data: { id: 1 } });
+  return existing ?? SITE_CONFIG_VACIA;
 }
 
 // ---------------------------------------------------------------------------

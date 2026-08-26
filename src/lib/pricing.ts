@@ -4,10 +4,28 @@ import { prisma } from "@/lib/prisma";
 /// PricingConfig es una fila unica (id siempre 1). Si todavia no existe
 /// (proyecto recien clonado, nadie la edito nunca desde el admin), se crea
 /// con los defaults del schema la primera vez que se necesita.
+/// Config de precios. Singleton (id = 1); si no existe, se crea con los
+/// defaults del schema.
+///
+/// Aca SI se crea al leer, a diferencia de getSiteConfig(): los defaults de
+/// margen, IVA y dolar viven en el schema, y devolver un objeto "vacio"
+/// obligaria a duplicarlos en codigo, donde se desincronizarian.
+///
+/// El create va con try/catch por la carrera: si dos renders concurrentes
+/// encuentran la tabla vacia, los dos intentan crear la fila y uno falla con
+/// P2002. Eso volteo un build entero cuando paso en SiteConfig — aca todavia
+/// no se disparo solo porque la fila ya existe en las dos bases, pero una
+/// base nueva lo dispararia igual.
 export async function getPricingConfig(): Promise<PricingConfig> {
   const existing = await prisma.pricingConfig.findUnique({ where: { id: 1 } });
   if (existing) return existing;
-  return prisma.pricingConfig.create({ data: { id: 1 } });
+
+  try {
+    return await prisma.pricingConfig.create({ data: { id: 1 } });
+  } catch {
+    // Otro render la creo primero: la fila ya esta, solo hay que leerla.
+    return prisma.pricingConfig.findUniqueOrThrow({ where: { id: 1 } });
+  }
 }
 
 /// Lo unico que necesita el calculo de precio. Se acepta el objeto entero de

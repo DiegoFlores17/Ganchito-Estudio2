@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { requireSuperAdmin } from "@/lib/admin-auth";
 import { getPricingConfig } from "@/lib/pricing";
 import {
-  getSiteConfig,
   normalizeInstagramHandle,
   validateWhatsappNumber,
 } from "@/lib/site-config";
@@ -107,18 +106,24 @@ export async function updateSiteConfig(
     };
   }
 
-  await getSiteConfig(); // garantiza que exista la fila (id = 1)
-  await prisma.siteConfig.update({
+  // upsert y no update: getSiteConfig() ya NO crea la fila (crear desde el
+  // render del Footer volteo un build entero, ver el comentario ahi). La fila
+  // nace aca, que es donde se espera escribir, y el upsert es atomico asi que
+  // dos guardados simultaneos no se pisan.
+  const datos = {
+    // Vacio se guarda como null y no como "": asi el footer lo saltea con el
+    // mismo chequeo para todos los campos.
+    contactEmail: contactEmail || null,
+    whatsappNumber: whatsapp.value ?? null,
+    instagramHandle: instagramHandle || null,
+    address: texto("address") || null,
+    openingHours: texto("openingHours") || null,
+  };
+
+  await prisma.siteConfig.upsert({
     where: { id: 1 },
-    data: {
-      // Vacio se guarda como null y no como "": asi el footer lo saltea con
-      // el mismo chequeo para todos los campos.
-      contactEmail: contactEmail || null,
-      whatsappNumber: whatsapp.value ?? null,
-      instagramHandle: instagramHandle || null,
-      address: texto("address") || null,
-      openingHours: texto("openingHours") || null,
-    },
+    update: datos,
+    create: { id: 1, ...datos },
   });
 
   revalidatePath("/admin/configuracion");

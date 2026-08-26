@@ -163,6 +163,40 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       plantada, vacía y sin lógica. Falta la pantalla de admin para cargar
       proveedor + API key, en vez de tener los tokens sueltos en el `.env`.
 
+### Material y capacidad en la ficha (dato de Zecat que hoy se pierde)
+
+- [ ] **Mostrar material y capacidad de los productos de Zecat.** Para merch
+      corporativo "Acero inoxidable, 500 ml" es información que el cliente busca, y
+      **ya viene estructurada** en el campo `subattributes` de la API de Zecat, que
+      hoy no mapeamos.
+
+      Relevado el 2026-08-26 sobre una muestra de 40 productos (endpoint de detalle;
+      el listado trae `subattributes` pero **sin** el `attribute_id`, así que no
+      sirve para agrupar):
+
+      | Grupo | Contenido |
+      |---|---|
+      | 9 y 23 | material: Acero, Aluminio, Plástico, Cerámica, Metal |
+      | 3 | capacidad en ml: "Menos de 500 ml", "501 a 1000 ml" |
+      | 4 | capacidad en litros: "Menos de 10 Litros", "Más de 20 Litros" |
+      | 2 | marca/línea: Tahg, Re use me, Pampa Spirit, Kingtech |
+
+      **Lo que NO sirve de ahí:** el grupo 8 son técnicas de impresión, que ya
+      mapeamos desde `printing_types`; y los grupos 5, 19, 20, 21 y 22 son flags
+      **"Si"/"No" sin nombre** — la API no dice qué significa cada `attribute_id` y
+      **no hay endpoint que los liste** (probados `/attribute`, `/attributes`,
+      `/subattribute`, `/generic_product_attribute`: los cuatro dan 404).
+
+      **Al implementarlo, dos cosas:** la capacidad viene como RANGO en texto
+      ("501 a 1000 ml"), no como número, así que no sirve para filtrar ni ordenar
+      sin parsearla. Y los grupos hay que confirmarlos sobre el catálogo completo,
+      no sobre la muestra de 40 — puede haber grupos que no aparecieron.
+
+      > Ojo con el modelo: esto NO va en `ProductAttribute`, que es para
+      > características binarias tipo "Reciclable". Material y capacidad son
+      > campos con valor, y mezclarlos convertiría el bloque "Características"
+      > en una bolsa de todo.
+
 ### Categorías múltiples: estamos tirando el 87% de la información
 
 - [ ] **Guardar TODAS las categorías de un producto, no solo la primera.**

@@ -43,15 +43,32 @@ const SIGLAS = new Set([
 /// Una palabra que ya trae minusculas se deja intacta, porque ahi el
 /// proveedor ya decidio como se escribe y adivinar solo puede empeorarlo
 /// ("Apto lavavajillas" no tiene que volverse "Apto Lavavajillas").
+///
+/// Lo que se aplica es **sentence case**, no title case: en español
+/// "Mayormente Reciclable" se lee raro, va "Mayormente reciclable".
+///
+/// **La excepcion es la sigla.** Cuando la frase arranca con una, lo que
+/// sigue es un termino y no prosa: "BPA Free" es el nombre de la
+/// caracteristica, no una oracion, asi que ahi la segunda palabra si va en
+/// mayuscula. Por eso una palabra que viene despues de una sigla se
+/// capitaliza igual que la primera.
 export function formatAttributeName(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((palabra) => {
+  const palabras = name.trim().split(/\s+/);
+
+  return palabras
+    .map((palabra, i) => {
       if (SIGLAS.has(palabra.toUpperCase())) return palabra.toUpperCase();
+
       // Ya viene con minusculas: el proveedor decidio, no lo tocamos.
       if (palabra !== palabra.toUpperCase()) return palabra;
-      return palabra.charAt(0) + palabra.slice(1).toLowerCase();
+
+      const anteriorEsSigla =
+        i > 0 && SIGLAS.has(palabras[i - 1].toUpperCase());
+      const vaEnMayuscula = i === 0 || anteriorEsSigla;
+
+      return vaEnMayuscula
+        ? palabra.charAt(0) + palabra.slice(1).toLowerCase()
+        : palabra.toLowerCase();
     })
     .join(" ");
 }

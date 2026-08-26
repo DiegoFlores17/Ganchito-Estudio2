@@ -83,6 +83,41 @@ model AdminUser {
 //  código ni re-sincronizar el catálogo.
 // ----------------------------------------------------------------------------
 
+/// Datos de contacto de la tienda, editables desde el panel.
+///
+/// Tabla PROPIA y no campos dentro de PricingConfig, por dos razones. La
+/// conceptual: mezclar el telefono del cliente con el margen de ganancia hace
+/// que ninguna de las dos configuraciones se entienda sola. Y una practica:
+/// `getPricingConfig()` se lee en CADA calculo de precio (catalogo, ficha,
+/// cotizacion, panel), asi que meterle campos de contacto los arrastraria a
+/// todas esas consultas para nada.
+///
+/// Singleton igual que PricingConfig: una sola fila con id = 1.
+///
+/// TODOS los campos son opcionales a proposito: es preferible que el footer
+/// no muestre un dato a que muestre uno de relleno. Antes de esta tabla habia
+/// un "+54 9 11 0000-0000" hardcodeado que llego a produccion.
+model SiteConfig {
+  id              Int      @id @default(1)
+  contactEmail    String?
+  /// SOLO DIGITOS, con codigo de pais y sin el "+" (ej: "5491155551234").
+  /// Es el formato que necesita el link de wa.me, y la version legible se
+  /// deriva al mostrar (ver formatWhatsappLabel en lib/site-config.ts).
+  /// Guardar las dos formas por separado las dejaria desincronizarse.
+  whatsappNumber  String?
+  /// El usuario SIN el "@" (ej: "ganchitoestudio"). El panel acepta que se
+  /// pegue el usuario o la URL entera y normaliza a esto.
+  instagramHandle String?
+  /// Direccion o ciudad. Opcional.
+  address         String?
+  /// Horarios de atencion, texto libre. Opcional.
+  openingHours    String?
+
+  updatedAt       DateTime @updatedAt
+
+  @@map("site_config")
+}
+
 model PricingConfig {
   id                  Int      @id @default(1)
   /// Margen global sobre el costo, en porcentaje (no fracción). Ej: 45 = costo * 1.45.

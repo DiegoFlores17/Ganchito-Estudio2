@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ProductCard } from "@/components/catalog/product-card";
 import { Skeleton } from "@/components/skeleton";
 import { getFeaturedProducts, hasAvailableStock } from "@/lib/catalog";
-import { WHATSAPP_URL } from "@/lib/contact";
+import { buildContactView, getSiteConfig } from "@/lib/site-config";
 import { getHomeCategoryShowcase, HOME_CATEGORY_COUNT } from "@/lib/home";
 import { computePriceRange, getPricingConfig } from "@/lib/pricing";
 
@@ -63,7 +63,13 @@ const PROCESS_STEPS = [
 /// motivo, y el cliente veria la pantalla entera en skeleton cuando en
 /// realidad casi toda estaba lista. Con Suspense por seccion, el shell
 /// aparece instantaneo y solo esperan las dos partes que consultan datos.
-export default function HomePage() {
+export default async function HomePage() {
+  // Consulta unica por PK y la home se sirve cacheada (revalidate = 300), asi
+  // que esto no se paga por visita. Va en el shell y no dentro de un Suspense
+  // a proposito: el boton esta arriba de todo, y aparecer despues seria un
+  // salto de layout justo donde el ojo aterriza.
+  const contacto = buildContactView(await getSiteConfig());
+
   return (
     <div>
       <section className="bg-primary-dark">
@@ -82,14 +88,20 @@ export default function HomePage() {
             >
               Ver catálogo
             </Link>
-            <a
-              href={WHATSAPP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-full border border-white/30 px-7 py-3.5 text-sm font-medium text-white transition-colors hover:border-white hover:bg-white/5"
-            >
-              Contacto
-            </a>
+            {/* Si no hay ni WhatsApp ni mail cargados, el boton no
+                aparece: un CTA que no lleva a ningun lado es peor que no
+                tenerlo. buildContactView elige WhatsApp y cae al mail. */}
+            {contacto.primaryHref && (
+              <a
+                href={contacto.primaryHref}
+                {...(contacto.primaryHref.startsWith("http")
+                  ? { target: "_blank", rel: "noopener noreferrer" }
+                  : {})}
+                className="rounded-full border border-white/30 px-7 py-3.5 text-sm font-medium text-white transition-colors hover:border-white hover:bg-white/5"
+              >
+                Contacto
+              </a>
+            )}
           </div>
         </div>
       </section>

@@ -3,20 +3,14 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-26 — panel de administración en el celular
-**Branch:** `main`. **Todo pusheado y Neon al día.** El panel mobile se pusheó
-en `6db0740` (+ `ad7653a` de docs); es solo frontend, no trae migración ni
-toca la base, así que Neon no necesitaba nada.
+**Última actualización:** 2026-08-26 — cron diario de la cotización
+**Branch:** `main`. **Todo pusheado y Neon al día.** Nada de lo último trae
+migración ni toca la base.
 
-Lo último verificado en producción por el usuario: `CRON_SECRET` cargado en
-Vercel, el botón **"Actualizar ahora"** del panel funcionando, y la cotización
-pasada a modo **Automática**, que quedó en **1535** (el oficial del BNA).
-
-> **Ojo con lo que "Automática" significa hoy:** el modo está en AUTO, pero
-> **todavía no hay ningún cron que dispare el endpoint**. No existe
-> `vercel.json` con `crons`, así que la cotización se actualiza únicamente
-> cuando alguien aprieta el botón del panel. Ver la sección "Cotización del
-> dólar" acá abajo.
+**La cotización del dólar ya es automática de punta a punta.** Modo
+**Automática** en producción, `CRON_SECRET` cargado, y un cron diario en
+`vercel.json` que dispara `/api/cron/usd-rate`. Nadie tiene que apretar nada;
+el botón "Actualizar ahora" del panel queda como forzado manual.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -1374,28 +1368,40 @@ oficial del Banco Nación con el botón del panel.
 Campos nuevos en `PricingConfig`: `usdRateMode` (AUTO / MANUAL),
 `usdRateOfficial`, `usdRateOfficialAt`, `usdRateUpdatedAt`, `usdRateSource`.
 
-### 🔴 Lo que FALTA para que "Automática" sea automática de verdad
+### El cron diario, y por qué corre a las 16:00 ART
 
-**No hay ningún cron programado.** No existe `vercel.json`, y sin la clave
-`crons` Vercel no dispara nada. Hoy el modo AUTO solo significa "cuando se
-llame a `refreshUsdRate()`, aplicá el oficial en vez de solo registrarlo" — y
-la única vía de llamada es el botón del panel.
+`vercel.json` (nuevo, antes no existía):
 
-El endpoint ya está listo y protegido: Vercel manda solo
+```json
+{ "crons": [{ "path": "/api/cron/usd-rate", "schedule": "0 19 * * *" }] }
+```
+
+**Las expresiones de Vercel son UTC**, así que `0 19` son las **16:00 de
+Argentina** (UTC-3, sin horario de verano). Es fácil equivocarse acá: una
+expresión pensada "a las 12" en realidad corre a las 9 de la mañana.
+
+**La hora se eligió con un dato, no a ojo.** dolarapi devuelve
+`fechaActualizacion` a las **18:00Z (15:00 ART)**, que es el cierre del
+mercado cambiario. Correr antes de esa hora traería el valor **del día
+anterior**. Se deja una hora de margen porque en Hobby la precisión del cron
+es de **±59 minutos**.
+
+> **Para el dólar, Hobby alcanza.** Una vez por día es de sobra para una
+> cotización; lo que empuja hacia Pro es el sync de productos, no esto. Ojo:
+> en Hobby una expresión **más frecuente** que diaria **rompe el deploy**, no
+> falla en runtime.
+
+El endpoint está protegido con `CRON_SECRET`: Vercel manda solo
 `Authorization: Bearer ${CRON_SECRET}` cuando esa variable existe, y sin la
-variable el endpoint devuelve 503 (cerrado por defecto, a propósito).
+variable devuelve 503 (cerrado por defecto, a propósito).
 
-**Enchufar el cron espera a Vercel Pro**, junto con el sync automático de
-productos. Cuando se contrate, es un `vercel.json` con la ruta
-`/api/cron/usd-rate` y una expresión diaria — el endpoint ya está escrito y no
-hay que tocarlo.
+El botón "Actualizar ahora" del panel **se mantiene**: llama a la misma
+función y sirve para forzarla sin esperar al cron.
 
-> Dicho sea de paso: para el dólar solo, **Hobby alcanzaría**. Ahí el cron
-> corre una vez por día (y una expresión más frecuente **rompe el deploy**, no
-> falla en runtime), y una vez por día es de sobra para una cotización. Lo que
-> empuja hacia Pro es el sync de productos, no esto. Si en algún momento se
-> quiere el dólar al día antes de contratar Pro, se puede agregar el cron
-> diario sin esperar nada.
+> Si alguna vez hay que volver a MANUAL, se hace desde el panel. El cron sigue
+> corriendo, pero en MANUAL solo registra el oficial en `usdRateOfficial` sin
+> tocar `usdRate` — que es justamente lo que permite ver la diferencia en el
+> panel sin que se muevan los precios.
 
 ### Decisiones que conviene no deshacer
 
@@ -1511,10 +1517,9 @@ y que las cinco tablas se puedan arrastrar de costado hasta la última columna.
 
 Después de eso, lo que queda son decisiones, no código:
 
-1. **Enchufar el cron de la cotización del dólar** cuando se contrate Vercel
-   Pro. El endpoint (`/api/cron/usd-rate`) y el `CRON_SECRET` ya están; falta
-   el `vercel.json` con la expresión diaria. Hasta entonces la cotización se
-   actualiza solo con el botón del panel, aunque el modo diga "Automática".
+1. **Confirmar la primera corrida real del cron del dólar**, después de las
+   16:00 ART del día siguiente al deploy. Se mira en el panel: `usdRateUpdatedAt`
+   tiene que avanzar sin que nadie haya tocado el botón.
 
 2. **El mapeo de categorías** — en manos del cliente. La herramienta está
    construida y deployada; falta que definan qué unificar y qué ocultar. El

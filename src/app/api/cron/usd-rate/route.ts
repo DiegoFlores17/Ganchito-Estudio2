@@ -13,10 +13,19 @@ import { refreshUsdRate } from "@/lib/usd-rate";
 /// variable, el endpoint queda cerrado — es preferible que no funcione a que
 /// quede abierto a cualquiera que adivine la URL.
 ///
-/// Todavía NO hay `vercel.json` con el cron: en Hobby la frecuencia máxima es
-/// una vez por día y una expresión más frecuente ROMPE el deploy (ver
-/// PENDIENTES). Mientras tanto, el panel tiene un botón "Actualizar ahora"
-/// que llama a la misma función.
+/// El cron está declarado en `vercel.json` como `0 19 * * *`. **Las
+/// expresiones de Vercel son UTC**, así que son las 16:00 de Argentina.
+///
+/// La hora no es arbitraria: dolarapi devuelve `fechaActualizacion` a las
+/// 18:00Z (15:00 ART), que es el cierre del mercado cambiario. Correr antes
+/// de esa hora traería el valor del día anterior. Se deja una hora de margen
+/// porque en el plan Hobby la precisión del cron es de ±59 minutos.
+///
+/// Una expresión MÁS frecuente que diaria rompe el deploy en Hobby (no falla
+/// en runtime). Diaria alcanza de sobra para una cotización.
+///
+/// El panel mantiene el botón "Actualizar ahora", que llama a la misma
+/// función, para poder forzarla sin esperar al cron.
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
 

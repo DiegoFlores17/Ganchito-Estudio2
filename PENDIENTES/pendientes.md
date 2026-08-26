@@ -125,16 +125,13 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
          reventaría el límite igual. Con Pro los logs duran 1 día, que sigue
          siendo poco para un cron. Hace falta el registro en base para poder
          verlo desde el panel.
-- [ ] **Enchufar el cron de la cotización del dólar.** El endpoint
-      (`/api/cron/usd-rate`) está escrito y protegido con `CRON_SECRET`, que ya
-      está cargado en Vercel. Falta el `vercel.json` con `crons` y una expresión
-      **diaria**. Hasta entonces, el modo "Automática" solo aplica cuando alguien
-      aprieta el botón del panel.
-
-      Espera a Vercel Pro junto con el sync de productos, **aunque para el dólar
-      solo Hobby alcanzaría**: ahí el cron corre una vez por día, que es de sobra
-      para una cotización. Ojo que en Hobby una expresión más frecuente **rompe el
-      deploy**, no falla en runtime.
+- [x] **Enchufar el cron de la cotización del dólar.** Hecho: `vercel.json` con
+      `0 19 * * *`. **Las expresiones de Vercel son UTC**, así que corre a las
+      **16:00 ART**, después de que el BNA cierre — dolarapi actualiza a las
+      18:00Z (15:00 ART), y correr antes traería el valor del día anterior.
+      No hizo falta Pro: para el dólar, Hobby alcanza. Ojo que en Hobby una
+      expresión más frecuente que diaria **rompe el deploy**, no falla en
+      runtime.
 - [ ] Confirmar si el token de Zecat es de preprod o producción y apuntar la
       `ZECAT_API_URL` correcta.
 

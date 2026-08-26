@@ -53,7 +53,13 @@ export function DeleteProductButton({
           </p>
           <button
             type="button"
-            onClick={() => setConfirmando(true)}
+            // Se limpia el error del intento anterior: dejarlo puesto mientras
+            // se pregunta "¿seguro?" mezcla el resultado de la vez pasada con
+            // la pregunta de ahora.
+            onClick={() => {
+              setError(null);
+              setConfirmando(true);
+            }}
             className="mt-4 rounded-lg border border-primary-dark/30 px-4 py-2 text-sm font-medium text-primary-dark transition-colors hover:bg-primary-dark/5"
           >
             Eliminar producto

@@ -70,7 +70,12 @@ export function CategorySuggestion({
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <input
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          // El error habla del nombre que se intento aplicar, asi que deja de
+          // aplicar apenas se lo edita.
+          onChange={(e) => {
+            setName(e.target.value);
+            setError(null);
+          }}
           maxLength={60}
           aria-label="Nombre de la categoría unificada"
           className="w-64 rounded-full border border-foreground/15 bg-background px-4 py-2 text-sm text-foreground focus:border-primary focus:outline-none"

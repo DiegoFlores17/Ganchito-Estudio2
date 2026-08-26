@@ -1420,6 +1420,50 @@ hay que tocarlo.
   comer el margen, la salida es pasar a MANUAL desde el panel; no hace falta
   tocar código.
 
+### Avisos que sobrevivían al estado que los generó
+
+Consultar la cotización estando en **Fija** dejaba el mensaje *"El oficial hoy
+es 1535. No se aplicó porque la cotización está fija"*, y ese texto **seguía
+ahí después de mover el radio a Automática** — contradiciendo lo que mostraba
+la pantalla — hasta que se guardaba.
+
+**La causa es el patrón, no el mensaje**: el aviso se guardaba como texto ya
+armado en el momento del cálculo, así que describía un estado que después
+cambiaba. El mismo patrón estaba **dos veces más en esa pantalla** (el
+"Guardado." seguía después de editar un campo, y un error de validación seguía
+después de corregirlo) y en cinco componentes más del panel.
+
+Se resuelve limpiando los avisos **en el `onChange` del `<form>`**, no en cada
+input: el evento `change` burbujea, así que un solo handler cubre todos los
+campos y no hay forma de olvidarse de uno al agregar el próximo.
+
+| Componente | Qué quedaba pegado |
+|---|---|
+| `pricing-config-form` | el aviso del dólar, "Guardado." y el error |
+| `site-config-form` | "Guardado." y el error |
+| `product-form` | errores que señalan un campo ("el stock de la variante X…") |
+| `team-management` | el error del alta, que habla del email cargado |
+| `new-category-form` | el error, que habla del nombre escrito |
+| `category-suggestion` | ídem (sin `<form>`: va en el `onChange` del input) |
+| `delete-product-button` | el error del intento anterior, visible mientras se pregunta "¿seguro?" |
+
+> **Por qué se limpia y no se recalcula.** Derivar el texto del estado actual
+> del formulario haría que, con el radio en Automática pero sin guardar, el
+> mensaje dijera "se aplicó" — y no se aplicó, porque en la base el modo sigue
+> siendo MANUAL. Mentiría igual, solo que al revés. El aviso describe una
+> acción ya ocurrida: si su contexto cambia, deja de tener sentido y se va.
+
+También se unificó la lectura de valores. Antes salían siempre dos líneas
+("Valor actual: 1535" y "Oficial del Banco Nación: 1535"); ahora la segunda
+solo aparece cuando los números **difieren**. Si coinciden porque el valor se
+cargó a mano, se agrega "· igual al oficial del Banco Nación"; si coinciden
+porque el valor **salió** de la consulta, no se aclara nada — el origen ya lo
+dice, y repetirlo mostraba "Banco Nación" y la fecha dos veces.
+
+Y el texto pasó a decir **"fija"** en vez de "modo manual", que es la palabra
+que usa el radio button. Dos nombres para el mismo modo obligan al lector a
+deducir que son lo mismo.
+
 ### El bug del formulario: `disabled` no viaja en el FormData
 
 Pasar el modo a "Automática" rechazaba el guardado con **"tiene que ser un

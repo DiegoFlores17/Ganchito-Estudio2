@@ -28,9 +28,12 @@ export function NewCategoryForm() {
   }
 
   return (
+    // onChange: el error habla del nombre que se escribio ("ya existe una
+    // categoria con ese nombre"), asi que deja de aplicar apenas se lo edita.
     <form
       ref={formRef}
       action={handleSubmit}
+      onChange={() => setError(null)}
       className="flex flex-wrap items-start gap-3"
     >
       <div>

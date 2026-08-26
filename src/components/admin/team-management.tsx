@@ -74,8 +74,11 @@ export function TeamManagement({
 
   return (
     <div>
+      {/* onChange: el error del alta habla del email cargado ("ya está en el
+          equipo"), asi que deja de aplicar apenas se lo edita. */}
       <form
         onSubmit={handleAdd}
+        onChange={() => setError(null)}
         className="flex flex-wrap items-end gap-4 rounded-xl border border-foreground/10 bg-background p-4"
       >
         <div className="flex flex-col gap-1">

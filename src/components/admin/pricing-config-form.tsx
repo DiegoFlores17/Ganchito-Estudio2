@@ -13,6 +13,7 @@ export function PricingConfigForm({
   usdRate,
   usdRateMode,
   usdRateSource,
+  usdRateEsOficial,
   usdRateUpdatedAt,
   usdRateOfficial,
   usdRateOfficialAt,
@@ -22,6 +23,9 @@ export function PricingConfigForm({
   usdRate: number;
   usdRateMode: "AUTO" | "MANUAL";
   usdRateSource: string | null;
+  /// Si el valor guardado salio de la consulta al oficial (y no de una carga
+  /// a mano). Lo resuelve el server component.
+  usdRateEsOficial: boolean;
   /// Ya formateadas en el servidor: los Date no cruzan lindo a un client
   /// component y ademas el formato de fecha tiene que ser el mismo en los dos
   /// lados para no ver un salto al hidratar.
@@ -44,6 +48,10 @@ export function PricingConfigForm({
   const hayDiferencia =
     modo === "MANUAL" && diferencia !== null && Math.abs(diferencia) >= 0.5;
 
+  /// Los dos son Decimal serializados a number, asi que se comparan directo.
+  const coincideConOficial =
+    usdRateOfficial !== null && usdRateOfficial === usdRate;
+
   async function consultarAhora() {
     setConsultando(true);
     setAvisoDolar(null);
@@ -61,8 +69,11 @@ export function PricingConfigForm({
     } else if (r.status === "aplicado") {
       setAvisoDolar(`Cotización actualizada: ${r.anterior} → ${r.valor}.`);
     } else {
+      // "fija" y no "manual": es la palabra que usa el radio button. Dos
+      // nombres para el mismo modo obligan al lector a deducir que son lo
+      // mismo.
       setAvisoDolar(
-        `El oficial hoy es ${r.valor}. No se aplicó porque la cotización está en modo manual.`
+        `El oficial hoy es ${r.valor}. No se aplicó porque la cotización está fija.`
       );
     }
     router.refresh();
@@ -71,6 +82,23 @@ export function PricingConfigForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  /// Limpia los avisos en cuanto se toca el formulario.
+  ///
+  /// Un aviso describe el resultado de una accion sobre un estado dado; si ese
+  /// estado cambia, el aviso pasa a contradecir lo que muestra la pantalla.
+  /// Pasaba con los tres: "Guardado." seguia despues de editar un campo, el
+  /// error seguia despues de corregirlo, y el aviso del dolar decia "esta
+  /// fija" con el radio ya en Automatica.
+  ///
+  /// Va en el form y no en cada input: el evento `change` burbujea, asi que
+  /// un solo handler cubre todos los campos y no hay forma de olvidarse de
+  /// uno al agregar el proximo.
+  function limpiarAvisos() {
+    setSaved(false);
+    setError(null);
+    setAvisoDolar(null);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     // onSubmit + preventDefault: si el servidor rechaza el valor, no
@@ -93,6 +121,7 @@ export function PricingConfigForm({
   return (
     <form
       onSubmit={handleSubmit}
+      onChange={limpiarAvisos}
       className="flex max-w-md flex-col gap-6 rounded-xl border border-foreground/10 bg-background p-6"
     >
       <div className="flex flex-col gap-1.5">
@@ -188,8 +217,19 @@ export function PricingConfigForm({
             Valor actual: <strong className="text-foreground/70">{usdRate}</strong>
             {usdRateSource && <> · origen: {usdRateSource}</>}
             {usdRateUpdatedAt && <> · {usdRateUpdatedAt}</>}
+            {/* Solo cuando el valor se cargo A MANO y ademas coincide: ahi el
+                dato no es obvio y vale decirlo. Si el valor YA salio de la
+                consulta al oficial, aclarar que coincide con el oficial es
+                repetir el origen que se acaba de mostrar. */}
+            {coincideConOficial && !usdRateEsOficial && (
+              <>
+                {" "}
+                · igual al oficial del Banco Nación
+                {usdRateOfficialAt && <>, consultado {usdRateOfficialAt}</>}
+              </>
+            )}
           </p>
-          {usdRateOfficial !== null && (
+          {usdRateOfficial !== null && !coincideConOficial && (
             <p>
               Oficial del Banco Nación:{" "}
               <strong className="text-foreground/70">{usdRateOfficial}</strong>

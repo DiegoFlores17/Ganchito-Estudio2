@@ -194,7 +194,14 @@ export function ProductForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex max-w-2xl flex-col gap-6">
+    // onChange: casi todos los errores de acá señalan un campo concreto ("el
+    // stock de la variante X no es válido"). Dejarlos puestos después de que
+    // se corrigió ese campo es apuntar a un problema que ya no existe.
+    <form
+      onSubmit={handleSubmit}
+      onChange={() => setError(null)}
+      className="flex max-w-2xl flex-col gap-6"
+    >
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">Nombre *</label>
         <input

@@ -1,5 +1,6 @@
 import { requireSuperAdmin } from "@/lib/admin-auth";
 import { getPricingConfig } from "@/lib/pricing";
+import { FUENTE_OFICIAL } from "@/lib/usd-rate";
 import { formatWhatsappLabel, getSiteConfig } from "@/lib/site-config";
 import { PricingConfigForm } from "@/components/admin/pricing-config-form";
 import { SiteConfigForm } from "@/components/admin/site-config-form";
@@ -30,6 +31,10 @@ export default async function ConfiguracionPage() {
             usdRate={Number(config.usdRate)}
             usdRateMode={config.usdRateMode}
             usdRateSource={config.usdRateSource}
+            // Se resuelve acá y no en el formulario: la constante vive en
+            // lib/usd-rate, que importa prisma, y arrastrarla a un componente
+            // de cliente meteria el cliente de la base en el bundle.
+            usdRateEsOficial={config.usdRateSource === FUENTE_OFICIAL}
             // Las fechas se formatean ACÁ y no en el cliente: si cada lado usa
             // su propia zona horaria, el texto cambia al hidratar.
             usdRateUpdatedAt={formatearFecha(config.usdRateUpdatedAt)}

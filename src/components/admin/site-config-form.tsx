@@ -44,9 +44,19 @@ export function SiteConfigForm({
     });
   }
 
+  /// Mismo criterio que PricingConfigForm: un aviso deja de ser cierto en
+  /// cuanto se toca el formulario que lo genero — "Guardado." despues de
+  /// editar un campo, o un error ya corregido. Va en el form porque el evento
+  /// `change` burbujea y asi cubre todos los campos de una.
+  function limpiarAvisos() {
+    setSaved(false);
+    setError(null);
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
+      onChange={limpiarAvisos}
       className="flex max-w-md flex-col gap-6 rounded-xl border border-foreground/10 bg-background p-6"
     >
       <Campo

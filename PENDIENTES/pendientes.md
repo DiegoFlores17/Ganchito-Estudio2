@@ -255,10 +255,18 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       de pruebas, con listas explícitas de ids en `src/lib/cdo/normalize.ts`.
       Producción puede traer otros: el sync loguea los "sin clasificar", hay que
       mirar ese log y agregarlos a mano.
-- [x] **`NEON_DATABASE_URL` fuera del `.env`.** Verificado el 2026-08-21: el `.env`
-      tiene 12 claves y ninguna es de Neon. `DATABASE_URL` apunta a local, como manda
-      la regla de entornos. La URL de producción se pasa inline cuando hace falta y no
-      queda guardada en ningún archivo del repo.
+- [ ] **`NEON_DATABASE_URL` volvió al `.env` — decidir si se saca.** Estaba
+      resuelto el 2026-08-21 (12 claves, ninguna de Neon), pero al 2026-08-26 el
+      `.env` tiene **14 claves y una es `NEON_DATABASE_URL`**.
+
+      **Lo crítico sigue bien:** `DATABASE_URL` apunta a `localhost`, verificado, así
+      que Prisma no toca producción por accidente. Y ningún `.env` está trackeado en
+      git (solo `.env.example`), así que no se filtró.
+
+      Lo que sí contradice es el espíritu de la regla: la URL de producción **queda
+      guardada en un archivo** en vez de pasarse inline cuando hace falta. Decidir si
+      se saca o si se acepta a conciencia y se actualiza la regla — lo que no conviene
+      es que el documento diga una cosa y el archivo tenga otra.
 
       - [ ] **Sincronizar dos listas de acceso al panel al sumar/sacar admins:** los
       "Test users" en Google Cloud Console Y la tabla `AdminUser`. Alguien tiene

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Gallery } from "@/components/product/gallery";
 import { PrintingInfo } from "@/components/product/printing-info";
+import { ProductAttributes } from "@/components/product/product-attributes";
 import { PurchasePanel } from "@/components/product/purchase-panel";
 import { getProductById } from "@/lib/product";
 import {
@@ -102,6 +103,10 @@ export default async function ProductoPage({
               rango ? formatPriceArs(rango.min) : formatPriceArs(0)
             }
           />
+
+          {/* Va ANTES de Personalización: primero qué es el producto,
+              después cómo se personaliza. */}
+          <ProductAttributes attributes={product.attributes} />
 
           <PrintingInfo areas={product.printingAreas} types={product.printingTypes} />
         </div>

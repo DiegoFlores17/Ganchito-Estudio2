@@ -191,16 +191,13 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
 
 ### Pendientes que dejó el conector de CDO
 
-- [ ] **`ProductAttribute`: 764 filas guardadas y CERO visibles.** El sync escribe
-      los atributos de CDO y no hay UI que los lea. Confirmado en el navegador sobre
-      un producto real: el Bolígrafo "BALU" tiene RECICLABLE, REUTILIZABLE y RPET en
-      la base, y la ficha no muestra ninguno.
+- [x] **Atributos de producto en la ficha.** Resuelto: bloque "Características" con
+      chips violetas, arriba de "Personalización". 764 atributos sobre 301 productos
+      de CDO.
 
-      Ya no es un detalle: son 764 atributos sobre 301 productos, y varios son
-      argumento de venta ("BPA FREE", "Industria nacional", "Apto lavavajillas").
-      Decidir si van en la ficha junto a las técnicas de impresión —donde el
-      componente `PrintingInfo` ya tiene el patrón de chips— o si se descartan y se
-      deja de escribirlos.
+      **Zecat no tiene equivalente**, relevado contra su API el 2026-08-26. No es
+      que no lo mapeamos: el dato no existe como tal. Ver el detalle en HANDOFF.
+      Sus productos simplemente no muestran el bloque, que era el fallback previsto.
 - [x] **Calidad de fotos de CDO: NO hace falta hablar con ellos.** Medido contra
       la API de **producción** el 2026-08-25: **300 de 301 portadas están bien, 1
       es muy chica, cero deformes y cero rotas (0,3%)**. El 15,2% de portadas

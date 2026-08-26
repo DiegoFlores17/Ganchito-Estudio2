@@ -28,6 +28,10 @@ export async function getProductById(id: string) {
       },
       printingAreas: true,
       printingTypes: true,
+      // Caracteristicas del producto (Reciclable, BPA Free, Apto
+      // lavavajillas). Hoy solo las traen los productos de CDO: la API de
+      // Zecat no las expone como dato (ver HANDOFF).
+      attributes: { orderBy: { name: "asc" } },
     },
   });
 }

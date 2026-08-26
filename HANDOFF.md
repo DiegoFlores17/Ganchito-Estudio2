@@ -1391,6 +1391,20 @@ es de **±59 minutos**.
 > en Hobby una expresión **más frecuente** que diaria **rompe el deploy**, no
 > falla en runtime.
 
+**Verificado en el dashboard de Vercel** (no solo commiteado), en
+Project Settings → Cron Jobs: la entrada `/api/cron/usd-rate` figura con
+`0 19 * * *`, "At 07:00 PM" y el feature **Enabled**. La propia UI confirma
+los dos supuestos con los que se eligió la hora: *"All scheduled times use the
+UTC timezone. Cron jobs on Hobby have a flexible time window of 1-hour."*
+
+> **El proyecto está en Hobby**, confirmado en el dashboard (ofrece "Upgrade
+> to Pro"). Así que la expresión diaria no era solo suficiente: era la única
+> que no rompe el deploy.
+
+Esa pantalla tiene además un botón **Run** para disparar el cron a mano y
+**View Logs** para ver las corridas — es el lugar donde mirar si algún día la
+cotización deja de moverse.
+
 El endpoint está protegido con `CRON_SECRET`: Vercel manda solo
 `Authorization: Bearer ${CRON_SECRET}` cuando esa variable existe, y sin la
 variable devuelve 503 (cerrado por defecto, a propósito).

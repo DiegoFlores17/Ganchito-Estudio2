@@ -96,6 +96,29 @@ export function whatsappUrl(number: string | null): string | null {
   return digits ? `https://wa.me/${digits}` : null;
 }
 
+/// Codigos de area argentinos de TRES digitos: las capitales de provincia y
+/// las ciudades grandes.
+///
+/// Existe para poder agrupar bien el numero al mostrarlo. El area argentina
+/// tiene 2, 3 o 4 digitos y el abonado ocupa lo que sobra de los 10; sin
+/// saber cual es, el corte cae en el lugar equivocado.
+///
+/// La lista no es exhaustiva —hay decenas de areas de 4 digitos— pero no hace
+/// falta que lo sea: lo que no esta aca se trata como area de 4, que es lo
+/// correcto para el resto del pais. El unico area de 2 digitos es el 11.
+const AREAS_TRES_DIGITOS = new Set([
+  // Buenos Aires provincia
+  "220", "221", "223", "230", "236", "237", "249", "291",
+  // Cuyo
+  "260", "261", "263", "264", "266",
+  // Patagonia
+  "280", "294", "297", "298", "299",
+  // Litoral y centro
+  "336", "341", "342", "343", "345", "351", "353", "358",
+  // Norte
+  "362", "364", "370", "376", "379", "380", "381", "383", "385", "387", "388",
+]);
+
 /// Version legible del numero, derivada de los digitos guardados.
 ///
 /// Se DERIVA en vez de guardarse aparte: dos campos para el mismo dato se
@@ -112,18 +135,22 @@ export function formatWhatsappLabel(number: string | null): string | null {
   if (digits.startsWith("549")) {
     const resto = digits.slice(3); // sin el 54 9
 
-    // En Argentina el numero nacional son 10 digitos, pero el area puede ser
-    // de 2 (11), 3 (351, 341, 261...) o 4 (2954...), y el abonado ocupa el
-    // resto. Sin una tabla de codigos de area no se puede saber donde corta.
-    //
-    // Se agrupa SOLO el caso de Buenos Aires, que es el unico area de 2
-    // digitos y el mas probable para este cliente. Para el resto se muestra
-    // sin agrupar: prefiero un numero correcto y menos bonito antes que uno
-    // partido en el lugar equivocado ("+54 9 35 1555-1234" para un 351 de
-    // Cordoba, que fue lo que hacia la version anterior de esta funcion).
-    if (resto.startsWith("11") && resto.length === 10) {
-      const abonado = resto.slice(2);
-      return `+54 9 11 ${abonado.slice(0, 4)}-${abonado.slice(4)}`;
+    // En Argentina el numero nacional son SIEMPRE 10 digitos, pero el corte
+    // entre area y abonado se mueve: 2 + 8 (Buenos Aires), 3 + 7 (las
+    // capitales de provincia) o 4 + 6 (el resto). Sin saber cual es, agrupar
+    // sale mal: una version anterior partia el 351 de Cordoba como
+    // "+54 9 35 1555-1234".
+    if (resto.length === 10) {
+      const largoArea = resto.startsWith("11")
+        ? 2
+        : AREAS_TRES_DIGITOS.has(resto.slice(0, 3))
+          ? 3
+          : 4;
+
+      const area = resto.slice(0, largoArea);
+      const abonado = resto.slice(largoArea);
+      const corte = abonado.length - 4;
+      return `+54 9 ${area} ${abonado.slice(0, corte)}-${abonado.slice(corte)}`;
     }
 
     return `+54 9 ${resto}`;

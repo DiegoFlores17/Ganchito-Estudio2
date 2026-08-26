@@ -217,17 +217,32 @@ export function instagramLabel(handle: string | null): string | null {
 //  Vista lista para renderizar
 // ---------------------------------------------------------------------------
 
+/// Que dato es. Lo usa el footer para elegir el icono, y existe para que esa
+/// eleccion NO se haga adivinando por el contenido del string.
+export type ContactKind =
+  | "email"
+  | "whatsapp"
+  | "instagram"
+  | "address"
+  | "hours";
+
 export interface ContactLink {
+  kind: ContactKind;
   label: string;
   href: string;
   /// Si abre fuera del sitio (WhatsApp, Instagram).
   external: boolean;
 }
 
+export interface ContactText {
+  kind: ContactKind;
+  value: string;
+}
+
 export interface ContactView {
   links: ContactLink[];
   /// Texto sin link (direccion, horarios).
-  texts: string[];
+  texts: ContactText[];
   /// Si no hay NADA cargado, el bloque entero no se renderiza.
   isEmpty: boolean;
   /// El destino del boton "Contacto" del hero: WhatsApp si hay, si no el
@@ -244,6 +259,7 @@ export function buildContactView(config: SiteConfig): ContactView {
 
   if (config.contactEmail) {
     links.push({
+      kind: "email",
       label: config.contactEmail,
       href: `mailto:${config.contactEmail}`,
       external: false,
@@ -253,18 +269,22 @@ export function buildContactView(config: SiteConfig): ContactView {
   const wa = whatsappUrl(config.whatsappNumber);
   const waLabel = formatWhatsappLabel(config.whatsappNumber);
   if (wa && waLabel) {
-    links.push({ label: waLabel, href: wa, external: true });
+    links.push({ kind: "whatsapp", label: waLabel, href: wa, external: true });
   }
 
   const ig = instagramUrl(config.instagramHandle);
   const igLabel = instagramLabel(config.instagramHandle);
   if (ig && igLabel) {
-    links.push({ label: igLabel, href: ig, external: true });
+    links.push({ kind: "instagram", label: igLabel, href: ig, external: true });
   }
 
-  const texts = [config.address, config.openingHours].filter(
-    (t): t is string => !!t?.trim()
-  );
+  const texts: ContactText[] = [];
+  if (config.address?.trim()) {
+    texts.push({ kind: "address", value: config.address });
+  }
+  if (config.openingHours?.trim()) {
+    texts.push({ kind: "hours", value: config.openingHours });
+  }
 
   return {
     links,

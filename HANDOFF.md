@@ -1145,7 +1145,20 @@ variante. Con un producto de dos variantes a 200 y 500: ficha 290 y 725, card
 ### Decisiones que conviene no deshacer
 
 - **Cards**: "Desde $X" **solo** cuando las variantes difieren; precio exacto
-  cuando son iguales. Mostrar un piso es honesto; guardarlo como si fuera el
+  cuando son iguales.
+
+  > **Hoy "Desde" no aparece NUNCA, y no es un bug.** Verificado el
+  > 2026-08-26: los 855 productos tienen un solo precio entre todas sus
+  > variantes. Zecat por diseño (su API da un precio por PRODUCTO, y el
+  > backfill lo copió a todas las variantes); CDO producción porque manda el
+  > mismo `net_price` en todas, aunque el campo esté por variante.
+  >
+  > El caso que motivó mover `costPrice` a la variante —el producto OCEAN con
+  > 194.97 y 205.23— era del entorno de **pruebas** y no existe en producción.
+  > El modelo igual quedó bien: el precio pertenece a la variante, CDO expone
+  > el campo ahí, y la cotización congela por `(productId, variantSku)`, que es
+  > más preciso que antes. Pero el camino de "Desde" no se ejercita con datos
+  > reales. Mostrar un piso es honesto; guardarlo como si fuera el
   precio sería mentir. Por eso `computePriceRange` se calcula al leer y no se
   persiste.
 - **`submitQuote`** busca por `(productId, variantSku)`. Si el sku ya no

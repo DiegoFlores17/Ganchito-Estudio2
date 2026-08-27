@@ -15,6 +15,7 @@ import {
   clearQuoteCart,
   getQuoteCart,
   removeFromQuoteCart,
+  replaceQuoteCart,
 } from "@/lib/quote-cart";
 import {
   getQuoteItemsSummary,
@@ -27,12 +28,30 @@ export default function CotizarPage() {
   const [loadingItems, setLoadingItems] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Productos del borrador que ya no se pueden cotizar. Se muestran, no se
+  // descartan en silencio: si al cliente le desaparece un item sin aviso, va
+  // a pensar que se olvido de agregarlo.
+  const [unavailable, setUnavailable] = useState<string[]>([]);
+  const [omittedOnSubmit, setOmittedOnSubmit] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     const cart = getQuoteCart();
     getQuoteItemsSummary(cart).then((summary) => {
-      setItems(summary);
+      setItems(summary.items);
+      if (summary.unavailableNames.length > 0) {
+        setUnavailable(summary.unavailableNames);
+        // Podar el carrito guardado para que quede IGUAL al resumen: el
+        // "Quitar" de cada linea borra por indice, y con el carrito mas
+        // largo que el resumen los indices se corren y borra otra linea.
+        replaceQuoteCart(
+          summary.items.map((item) => ({
+            productId: item.productId,
+            variantSku: item.variantSku,
+            quantity: item.quantity,
+          }))
+        );
+      }
       setLoadingItems(false);
     });
   }, []);
@@ -70,6 +89,9 @@ export default function CotizarPage() {
         return;
       }
       clearQuoteCart();
+      // Carrera rara pero posible: un producto pausado/eliminado entre que
+      // se cargo la pagina y se envio. La confirmacion lo dice.
+      setOmittedOnSubmit(result.omittedProducts ?? []);
       setSubmitted(true);
     });
   }
@@ -109,6 +131,14 @@ export default function CotizarPage() {
         <p className="mt-4 text-foreground/70">
           Te contactamos a la brevedad para avanzar con tu cotización.
         </p>
+        {omittedOnSubmit.length > 0 && (
+          <p className="mx-auto mt-6 max-w-md rounded-lg bg-accent/15 px-4 py-3 text-sm text-foreground/80">
+            Ojo: {omittedOnSubmit.length === 1 ? "este producto dejó" : "estos productos dejaron"}{" "}
+            de estar disponible{omittedOnSubmit.length === 1 ? "" : "s"} y no
+            {omittedOnSubmit.length === 1 ? " entró" : " entraron"} en la
+            cotización: <strong>{omittedOnSubmit.join(", ")}</strong>.
+          </p>
+        )}
         <Link
           href="/catalogo"
           className="mt-8 inline-block rounded-full bg-accent px-6 py-3 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
@@ -129,6 +159,15 @@ export default function CotizarPage() {
         <h1 className="text-3xl font-black tracking-tight text-foreground">
           Tu cotización está vacía
         </h1>
+        {/* Caso especial: el borrador TENIA productos, pero todos dejaron de
+            estar disponibles. Sin este aviso el cliente ve "vacía" y piensa
+            que perdió el carrito. */}
+        {unavailable.length > 0 && (
+          <p className="mx-auto mt-6 max-w-md rounded-lg bg-accent/15 px-4 py-3 text-sm text-foreground/80">
+            Los productos que tenías guardados dejaron de estar disponibles y
+            los sacamos del pedido: <strong>{unavailable.join(", ")}</strong>.
+          </p>
+        )}
         <p className="mt-4 text-foreground/70">
           Agregá productos desde el catálogo para armar tu pedido.
         </p>
@@ -158,6 +197,17 @@ export default function CotizarPage() {
         Revisá tu pedido y completá tus datos. No es una compra con pago
         inmediato: te contactamos con el boceto y el precio final.
       </p>
+
+      {unavailable.length > 0 && (
+        <p className="mt-6 rounded-lg bg-accent/15 px-4 py-3 text-sm text-foreground/80">
+          {unavailable.length === 1
+            ? "Un producto de tu pedido dejó"
+            : "Algunos productos de tu pedido dejaron"}{" "}
+          de estar disponible{unavailable.length === 1 ? "" : "s"} y{" "}
+          {unavailable.length === 1 ? "lo sacamos" : "los sacamos"}:{" "}
+          <strong>{unavailable.join(", ")}</strong>.
+        </p>
+      )}
 
       <div className="mt-10 flex flex-col gap-4">
         {items.map((item, index) => (

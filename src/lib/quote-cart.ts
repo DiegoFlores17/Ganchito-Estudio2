@@ -60,6 +60,16 @@ export function addToQuoteCart(item: QuoteCartItem): QuoteCartItem[] {
   return items;
 }
 
+/// Reemplaza el borrador entero. Lo usa /cotizar cuando el resumen del
+/// servidor descarto lineas (productos pausados/eliminados): el carrito
+/// guardado tiene que quedar igual al resumen que se muestra, porque
+/// removeFromQuoteCart borra POR INDICE — si el resumen es mas corto que el
+/// carrito, los indices se corren y "Quitar" borraria la linea equivocada.
+export function replaceQuoteCart(items: QuoteCartItem[]): QuoteCartItem[] {
+  writeRaw(items);
+  return items;
+}
+
 export function removeFromQuoteCart(index: number): QuoteCartItem[] {
   const items = readRaw();
   items.splice(index, 1);

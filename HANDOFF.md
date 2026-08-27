@@ -3,9 +3,17 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-26 — cron diario de la cotización
-**Branch:** `main`. **Todo pusheado y Neon al día.** Nada de lo último trae
-migración ni toca la base.
+**Última actualización:** 2026-08-27 — auditoría pre-entrega
+**Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
+el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
+Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
+`submitQuote` + filtros de vivo al cotizar, con aviso en pantalla de líneas
+descartadas; contenido real de los logos validado; nanoid parcheado; stock
+disponible calculado server-side). Los hallazgos 2/5/7/9 quedaron en
+PENDIENTES con su cuándo. Nada de esto trae migración ni toca la base.
+La distinción que NO se tocó: las cotizaciones ya enviadas conservan sus
+ítems aunque el producto muera después — los filtros nuevos aplican solo al
+CREAR una cotización.
 
 **La cotización del dólar ya es automática de punta a punta, verificada.** Modo
 **Automática**, cron diario a las 16:00 ART, y la corrida del 2026-08-26 19:26

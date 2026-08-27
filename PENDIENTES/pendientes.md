@@ -5,6 +5,37 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ---
 
+## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
+
+Los hallazgos 1, 3, 4 y 6 se atacaron en la rama de la auditoría. Estos
+cuatro quedaron a propósito, cada uno con su cuándo:
+
+- [ ] **(Hallazgo 2) Anti-abuso en el formulario público de cotización** —
+      **después del lanzamiento real**, cuando haya tráfico que proteger.
+      `submitQuote` no tiene rate limit ni honeypot; cada envío puede subir
+      15MB a Blob (que factura). La validación de entrada y de contenido ya
+      corta lo peor; lo que falta es el volumen. Empezar por el honeypot
+      (barato, sin dependencias) y evaluar el firewall de Vercel o Upstash si
+      aparece spam de verdad. Un rate limit en memoria NO sirve en serverless.
+- [ ] **(Hallazgo 5) Fijar el hostname de CloudFront en `next/image`** —
+      cuando se confirme el id de la distribución de producción de CDO. El
+      comodín `*.cloudfront.net` deja que cualquier distribución del mundo
+      pase por nuestro optimizador (cuota de Vercel: 5K/mes en Hobby). Ojo al
+      verificar: un host no configurado **rompe la página entera** — probar
+      el catálogo completo tras el cambio.
+- [ ] **(Hallazgo 7) Paginar `getQuotes`** — cuando el panel pase de ~200
+      cotizaciones. Hoy trae TODAS las filas (con nombre, email y teléfono)
+      en cada carga del listado. Red de seguridad barata mientras tanto:
+      `take: 200`. La paginación completa pide UI, no es una línea.
+- [ ] **(Hallazgo 9) Unificar el contrato de los dos conectores** — como
+      **PRIMER paso del trabajo del cron de productos**, no antes. Zecat
+      (259 líneas) y CDO (366) comparten toda la forma sin compartir código:
+      el lock de concurrencia y la tabla `SyncRun` del cron habría que
+      escribirlos dos veces. Refactorizar justo antes de ese trabajo lo paga;
+      refactorizar antes de la entrega solo agrega riesgo.
+
+---
+
 ## Pulido de diseño (pasada final — en curso, fase por fase)
 
 - [x] **Filtros de categoría en mobile:** resuelto en la Fase 2 — boton

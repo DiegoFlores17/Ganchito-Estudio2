@@ -4,6 +4,12 @@ Rama `auditoria-pre-entrega`, solo local. Tres frentes: seguridad, calidad,
 rendimiento. Ordenado por prioridad real, no por categoría. Al final, la lista
 de lo que se revisó y NO es problema — vale tanto como los hallazgos.
 
+**Estado (2026-08-27):** hallazgos **1, 3, 4 y 6 atacados y verificados** en
+esta rama (ver los commits y los scripts `scripts/audit-verify-*.ts`, que se
+pueden re-correr contra la base local). Los hallazgos **2, 5, 7 y 9 quedaron
+anotados en PENDIENTES** con su cuándo. El 8 se resolvió en la parte que
+tocaba código vivo (el helper de stock ahora se usa); el resto es cosmético.
+
 ---
 
 ## 1. 🔴 `submitQuote` no valida la entrada que le llega (ALTA)

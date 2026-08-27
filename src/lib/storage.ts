@@ -44,11 +44,63 @@ function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
-/// Guarda un archivo subido TAL CUAL (sin parsear ni procesar el
-/// contenido) en Vercel Blob, con un nombre generado (nunca el nombre
-/// original del cliente), y devuelve la URL para servirlo. Blob resuelve
-/// inline vs. descarga forzada el mismo (ver CONTENT_TYPES / downloadUrl),
-/// no hace falta un route handler propio.
+/// Valida que el CONTENIDO del archivo corresponda a su extension, no solo
+/// el nombre. Sin esto, cualquier binario renombrado a .png entra y se sirve
+/// inline con content-type de imagen.
+///
+/// Por tipo:
+/// - Raster (png/jpg/jpeg): sharp lee los metadatos SIN recomprimir — el
+///   archivo que se guarda es el original byte a byte. Es arte del cliente:
+///   degradarlo seria perder informacion que no es nuestra (a diferencia de
+///   las fotos de producto, que si se recomprimen en saveProductImage).
+/// - PDF: magic bytes "%PDF".
+/// - AI/EPS: "%!PS" (PostScript clasico) o "%PDF" — los .ai modernos son
+///   PDF por dentro, rechazarlos rompe justo el formato que mas mandan los
+///   disenadores.
+/// - SVG: sin validacion de contenido A PROPOSITO. Puede traer <script>,
+///   por eso se sirve SIEMPRE con descarga forzada (nunca inline) y eso es
+///   lo que lo hace seguro — validarlo no cambiaria nada.
+async function validateFileContent(
+  buffer: Buffer,
+  extension: string
+): Promise<void> {
+  const fail = () => {
+    throw new UploadValidationError(
+      `El archivo no parece ser un .${extension} válido. Verificá que no esté dañado.`
+    );
+  };
+
+  if (extension === "png" || extension === "jpg" || extension === "jpeg") {
+    try {
+      const metadata = await sharp(buffer).metadata();
+      const esperado = extension === "png" ? "png" : "jpeg";
+      if (metadata.format !== esperado) fail();
+    } catch (error) {
+      if (error instanceof UploadValidationError) throw error;
+      fail();
+    }
+    return;
+  }
+
+  const head = buffer.subarray(0, 5).toString("latin1");
+  if (extension === "pdf") {
+    if (!head.startsWith("%PDF")) fail();
+    return;
+  }
+  if (extension === "ai" || extension === "eps") {
+    if (!head.startsWith("%PDF") && !head.startsWith("%!PS")) fail();
+    return;
+  }
+  // svg y cualquier otro tipo permitido a futuro: sin chequeo de contenido,
+  // la seguridad la da la descarga forzada (ver CONTENT_TYPES).
+}
+
+/// Guarda un archivo subido SIN recomprimir en Vercel Blob, con un nombre
+/// generado (nunca el nombre original del cliente), y devuelve la URL para
+/// servirlo. El contenido se VALIDA antes de guardar (ver
+/// validateFileContent), pero lo que se sube es el original intacto. Blob
+/// resuelve inline vs. descarga forzada el mismo (ver CONTENT_TYPES /
+/// downloadUrl), no hace falta un route handler propio.
 export async function saveUploadedFile(
   file: File,
   { subdir, allowedExtensions }: { subdir: string; allowedExtensions: Set<string> }
@@ -65,8 +117,11 @@ export async function saveUploadedFile(
     );
   }
 
+  const buffer = Buffer.from(await file.arrayBuffer());
+  await validateFileContent(buffer, extension);
+
   const filename = `${randomUUID()}.${extension}`;
-  const blob = await put(`${subdir}/${filename}`, file, {
+  const blob = await put(`${subdir}/${filename}`, buffer, {
     access: "public",
     addRandomSuffix: false,
     contentType: CONTENT_TYPES[extension],

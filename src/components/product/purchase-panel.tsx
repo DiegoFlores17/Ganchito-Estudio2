@@ -12,8 +12,9 @@ interface VariantData {
   colorName: string | null;
   sizeName: string | null;
   materialName: string | null;
-  stock: number;
-  reservedStock: number;
+  /// Ya calculado server-side (stock - reservado): el bruto y el reservado
+  /// no cruzan al cliente — son informacion operativa del proveedor.
+  availableStock: number;
   active: boolean;
 }
 
@@ -126,9 +127,7 @@ export function PurchasePanel({
     toastTimeoutRef.current = setTimeout(() => setAddedToast(null), TOAST_MS);
   }
 
-  const available = selectedVariant
-    ? Math.max(0, selectedVariant.stock - selectedVariant.reservedStock)
-    : 0;
+  const available = selectedVariant ? selectedVariant.availableStock : 0;
   const outOfStock = selectedVariant ? available <= 0 : false;
   // Sin stock: no se cappea la cantidad (se avisa y se deja pedir igual,
   // el cliente puede necesitar mas de lo que el sync todavia reflejo).

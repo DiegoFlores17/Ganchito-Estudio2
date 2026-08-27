@@ -5,7 +5,7 @@ import { Gallery } from "@/components/product/gallery";
 import { PrintingInfo } from "@/components/product/printing-info";
 import { ProductAttributes } from "@/components/product/product-attributes";
 import { PurchasePanel } from "@/components/product/purchase-panel";
-import { getProductById } from "@/lib/product";
+import { getProductById, getVariantAvailableStock } from "@/lib/product";
 import {
   computePriceRange,
   computeSellPrice,
@@ -88,14 +88,18 @@ export default async function ProductoPage({
             // cruzan la frontera a un client component, y con "todo menos X"
             // el dia que se agregue otro Decimal vuelve a romper en runtime.
             // El precio ya viaja formateado en priceBySku.
+            //
+            // El stock cruza YA CALCULADO (disponible = stock - reservado):
+            // el bruto y el reservado son informacion operativa del proveedor
+            // que el cliente no necesita, y todo lo que se pasa aca termina
+            // legible en el payload de la pagina.
             variants={product.variants.map((v) => ({
               id: v.id,
               sku: v.sku,
               colorName: v.colorName,
               sizeName: v.sizeName,
               materialName: v.materialName,
-              stock: v.stock,
-              reservedStock: v.reservedStock,
+              availableStock: getVariantAvailableStock(v),
               active: v.active,
             }))}
             minOrderQuantity={product.minOrderQuantity}

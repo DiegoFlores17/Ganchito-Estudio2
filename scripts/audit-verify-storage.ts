@@ -6,7 +6,8 @@ import { saveUploadedFile, QUOTE_LOGO_EXTENSIONS, UploadValidationError } from "
 
 function fakeFile(name: string, content: Buffer | string): File {
   const buf = typeof content === "string" ? Buffer.from(content) : content;
-  return new File([buf], name);
+  // Uint8Array y no Buffer directo: el tipo BlobPart no acepta Buffer.
+  return new File([new Uint8Array(buf)], name);
 }
 
 async function expectReject(label: string, file: File) {

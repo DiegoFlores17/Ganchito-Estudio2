@@ -3,7 +3,7 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-31 — envío de cotización por WhatsApp
+**Última actualización:** 2026-08-31 — fix de precios de Zecat (re-import local)
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -109,6 +109,50 @@ por email).
 4. Cargar `NEXT_PUBLIC_SITE_URL=https://ganchitoestudio.com` en Vercel.
 5. Recién ahí, push/merge del código. **Nunca al revés**: el código lee las
    columnas nuevas.
+
+---
+
+## Fix de precios de Zecat: el costo era el precio publico (2026-08-31)
+
+`costPrice` guardaba `price` de Zecat, que es el **precio sugerido de venta
+al público** (= `final_consumer_price_wepod`). El margen del 45% se aplicaba
+sobre un precio que ya traía el margen de Zecat: **todo el catálogo de Zecat
+cotizaba ~43% de más**. El costo real es
+`price × (1 − discount_partner/100)`, con `discount_partner` (%) a nivel
+variante. Verificado al centavo: Bolso Championship 5515,
+37311.99 × 0.70 = 26118.39. El detalle del modelo, en `CLAUDE.md`.
+
+**Re-import LOCAL hecho y verificado** (producción NO tocada todavía):
+
+| Métrica | Valor |
+|---|---|
+| Procesados | 545 (7 creados, 538 actualizados) |
+| Fallidos / salteados / pausados | **0 / 0 / 0** |
+| Variantes | 1692 → 1716 (los 7 productos nuevos) |
+| Sanity: costo ≥ price público | 0 |
+| Sanity: costo ≤ 0 o nulo | 0 |
+
+**Distribución de `discount_partner`** — no es pareja, leer el campo era la
+única opción correcta: 30% (447 productos), 32.5% (26), 40% (70), 43% (2).
+**Nunca varía entre variantes del mismo producto** (0 casos): el "Desde" de
+las cards y el orden de la grilla no se ven afectados.
+
+**🔴 Pendiente de decisión antes de la Fase 2: los 15 productos zombie.**
+Están en la base, **ya no vienen en la API de Zecat**, y quedaron activos
+con el costo viejo inflado (el sync no toca a los ausentes, por diseño).
+Ids: 3750, 4034, 4343, 4450, 4516, 4659, 4733, 4792, 5256, 5437, 5472,
+5573, 5753, 5755, 5919. Recomendación: **pausarlos** — sin fuente en la API
+no hay forma de recalcularles el costo, y probablemente Zecat los
+discontinuó. Ninguno está en los destacados de la home (verificado contra
+`HOME_CATEGORY_PICKS`).
+
+**Efecto visible del fix**: los precios del catálogo bajan ~30%. Con el
+margen del 45% sobre el costo real, el precio final queda ≈ el precio
+sugerido de Zecat (+1.5%) — coherente, antes quedaba un 45% arriba del
+público.
+
+Snapshot pre-reimport para comparar/restaurar:
+`backups/zecat-snapshot-pre-reimport-2026-08-31.json` (local, sin commitear).
 
 ---
 

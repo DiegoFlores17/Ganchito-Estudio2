@@ -36,6 +36,15 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       el cliente elige técnica al cotizar (y se cotiza su costo), o se borra
       el campo.
 
+## Fix de precios de Zecat (2026-08-31)
+
+- [ ] **Re-import de PRODUCCIÓN** — esperando el OK tras el informe local
+      (0 salteados, 0 pausados). Antes: branch en Neon (la saca el usuario).
+      Después: decidir las cotizaciones existentes (pruebas → borrar;
+      reales → dejar).
+- [ ] **Los 15 productos zombie**: en la base, ausentes de la API, activos
+      con el costo viejo inflado. Recomendación: pausarlos. Ids en HANDOFF.
+
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 
 Los hallazgos 1, 3, 4 y 6 se atacaron en la rama de la auditoría. Estos

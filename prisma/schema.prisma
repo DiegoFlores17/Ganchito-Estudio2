@@ -476,6 +476,15 @@ model Quote {
   id           String       @id @default(cuid())
   status       QuoteStatus  @default(DRAFT)
 
+  /// Token para la URL publica (/cotizacion/[token]). Es un SECRETO, no un
+  /// identificador: el cuid del id no esta diseñado para funcionar como
+  /// capacidad de acceso. 32 hex chars (crypto.randomBytes(16)).
+  publicToken  String       @unique
+  /// Codigo corto y LEGIBLE para mencionar por telefono o WhatsApp
+  /// ("cotizacion A7F3C2"). Publico a proposito, a diferencia del token.
+  /// 6 chars de un charset sin ambiguos (sin O/0/I/1/L).
+  shortCode    String       @unique
+
   // Datos del cliente que pide el presupuesto.
   customerName  String
   customerEmail String

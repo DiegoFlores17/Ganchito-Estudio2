@@ -45,6 +45,10 @@ export interface ZecatVariantRecord {
   reservedStock?: string | number | null;
   active?: boolean;
   images?: ZecatImage[];
+  /// Descuento de partner en PORCENTAJE (ej: 30). El costo real es
+  /// price x (1 - discount_partner/100) — `price` a secas es el precio
+  /// sugerido de venta al PUBLICO, no el costo. Ver extractCostPrice().
+  discount_partner?: number | string | null;
 }
 
 export interface ZecatVariantGroup {

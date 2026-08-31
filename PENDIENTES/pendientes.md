@@ -17,10 +17,24 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       propio**. Si el envío falla: log y nada más, la cotización ya está
       guardada. Link del aviso a `/admin/cotizaciones/{id}` con
       `NEXT_PUBLIC_SITE_URL` de base.
-- [ ] **`printingType` nunca se carga.** El campo existe en `QuoteItem`, y el
-      mensaje de WhatsApp y la página pública ya lo muestran si está — pero el
-      panel de compra no pide técnica de impresión, así que siempre va null.
-      Decidir si el cliente debe elegirla al cotizar o si se borra el campo.
+- [ ] **Escala de descuento por volumen de Zecat (opción B del fix de
+      precios).** El costo importado es el del tramo base; la API trae además
+      `discountRangeProduct` por variante: 6 tramos acumulativos de 0.1%
+      (2 u.) a 5.1% (2700+ u.) de descuento adicional. Ignorarla juega a
+      favor (se cotiza apenas alto en pedidos enormes), por eso quedó afuera
+      del fix. Si algún día se quiere precisión por cantidad: tabla de tramos
+      por variante + `computeSellPrice` por cantidad + congelar por tramo al
+      cotizar + la ficha mostrando precio por cantidad. No es chico.
+- [ ] **`printingType` nunca se carga — y ahora sabemos dónde vive el costo.**
+      El campo existe en `QuoteItem`, y el mensaje de WhatsApp lo muestra si
+      está — pero el panel de compra no pide técnica, así que siempre va null.
+      El hallazgo nuevo (2026-08-31): la API de Zecat trae
+      `genericPrintingTypeTemplate` por variante con **`setupPrice` y
+      `unitPrice` de cada técnica** (ej: bordado $70.000 de setup + $1.214,90
+      por unidad, con su propia escala de descuento en `hitDiscountRanges`).
+      O sea que cotizar la personalización con costo real es posible. Decidir:
+      el cliente elige técnica al cotizar (y se cotiza su costo), o se borra
+      el campo.
 
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 

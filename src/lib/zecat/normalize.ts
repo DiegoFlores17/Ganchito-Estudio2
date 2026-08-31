@@ -6,21 +6,61 @@ import type {
   ZecatVariantRecord,
 } from "./types";
 
-/// ÚNICO lugar que decide qué campo de la API es el "costo puro". Confirmado
-/// contra la API real: price (= unit_price, siempre iguales) x 1.20 coincide
-/// exacto con el precio actual de Ganchito para un producto sin oferta
-/// (Mochila Space Max). NO usar total_price/total_with_taxes ni aplicar
-/// ningún margen acá: el conector solo guarda el costo crudo, el margen se
-/// calcula aparte con PricingConfig.defaultMarginPercent.
-export function extractCostPrice(product: ZecatGenericProduct): number {
-  const raw = product.price ?? product.unit_price;
-  const parsed = typeof raw === "number" ? raw : parseFloat(String(raw));
-  if (Number.isNaN(parsed)) {
-    throw new Error(
-      `No se pudo extraer el costo (price/unit_price) del producto ${product.id}: valor recibido = ${JSON.stringify(raw)}`
+/// Error propio para que el sync distinga "no se pudo calcular el costo"
+/// de cualquier otra falla: ante este error el producto NO se importa y,
+/// si ya existia con el precio viejo inflado, se PAUSA.
+export class ZecatPricingError extends Error {}
+
+/// ÚNICO lugar que decide el "costo puro". CORREGIDO el 2026-08-31 contra
+/// la doc oficial de la API 2.0 y la respuesta real del Bolso Championship
+/// (5515): `price`/`unit_price` es el PRECIO SUGERIDO DE VENTA AL PUBLICO
+/// (= final_consumer_price_wepod, el nombre lo confiesa). El costo real de
+/// partner es price x (1 - discount_partner/100), con `discount_partner`
+/// en PORCENTAJE a nivel VARIANTE. Verificado al centavo:
+/// 37311.99 x (1 - 30/100) = 26118.39 = el costo del backoffice de Zecat.
+///
+/// La validacion anterior ("price x 1.20 coincide con la web de Ganchito")
+/// comparaba contra un PRECIO DE VENTA de la web vieja — probaba que price
+/// es un precio de venta, o sea exactamente lo contrario de lo que
+/// concluimos. El margen del 45% aplicado sobre price cobraba un 43% de mas.
+///
+/// SIN fallback a proposito: si discount_partner no viene o no es valido,
+/// se tira ZecatPricingError y el producto no se importa. Caer a `price`
+/// seria guardar el precio inflado en silencio — un producto faltante y
+/// visible en el log es preferible a uno con precio que nadie detecta.
+///
+/// NO usar total_price: es el costo del tramo MAS PROFUNDO de la escala de
+/// volumen (2700+ unidades) — cobraria de menos en pedidos chicos. La
+/// escala completa (discountRangeProduct, 0.1% a 5.1% adicional) queda
+/// anotada en PENDIENTES como mejora; su ganancia maxima es 5.1% y juega a
+/// favor ignorarla (se cotiza apenas alto en pedidos enormes).
+export function extractCostPrice(
+  product: ZecatGenericProduct,
+  variant: ZecatVariantRecord
+): number {
+  const rawPrice = product.price ?? product.unit_price;
+  const publicPrice =
+    typeof rawPrice === "number" ? rawPrice : parseFloat(String(rawPrice));
+  if (Number.isNaN(publicPrice) || publicPrice <= 0) {
+    throw new ZecatPricingError(
+      `Producto ${product.id}: price/unit_price invalido (${JSON.stringify(rawPrice)}).`
     );
   }
-  return parsed;
+
+  const rawDiscount = variant.discount_partner;
+  const discount =
+    typeof rawDiscount === "number"
+      ? rawDiscount
+      : parseFloat(String(rawDiscount));
+  // 0 y 100 tambien son invalidos: 0 dejaria el precio publico como costo
+  // (el bug exacto que estamos corrigiendo) y 100 daria costo cero.
+  if (Number.isNaN(discount) || discount <= 0 || discount >= 100) {
+    throw new ZecatPricingError(
+      `Producto ${product.id}, variante ${variant.sku}: discount_partner invalido (${JSON.stringify(rawDiscount)}). No se importa para no guardar el precio publico como costo.`
+    );
+  }
+
+  return publicPrice * (1 - discount / 100);
 }
 
 export function parseStock(value: unknown): number {

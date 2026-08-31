@@ -4,7 +4,7 @@ import {
   fetchGenericProductDetail,
   searchGenericProducts,
 } from "../src/lib/zecat/client";
-import { extractCostPrice } from "../src/lib/zecat/normalize";
+import { extractCostPrice, flattenVariants } from "../src/lib/zecat/normalize";
 import { syncProduct } from "../src/lib/zecat/sync";
 
 // Script de validacion puntual: busca UN producto por nombre, muestra los
@@ -60,10 +60,15 @@ async function main() {
   }
   console.log(`  currency: ${JSON.stringify(rawDetail.currency)}`);
 
-  const costPrice = extractCostPrice(detail);
-  console.log(
-    `\nextractCostPrice() devolvio: ${costPrice}  (leyendo el campo "price_import")`
-  );
+  // El costo ahora es POR VARIANTE (price publico x descuento de partner).
+  const primeraVariante = flattenVariants(detail.variants)[0];
+  if (primeraVariante) {
+    const costPrice = extractCostPrice(detail, primeraVariante);
+    console.log(
+      `\nextractCostPrice() para la variante ${primeraVariante.sku}: ${costPrice}` +
+        ` (price ${detail.price} x (1 - ${primeraVariante.discount_partner}/100))`
+    );
+  }
 
   console.log("\nCorriendo el conector para este producto unicamente...");
   const result = await syncProduct(detail);

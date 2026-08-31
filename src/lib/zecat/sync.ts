@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchGenericProductDetail, iterateAllGenericProducts } from "./client";
 import {
   extractCostPrice,
+  ZecatPricingError,
   flattenVariants,
   mapVariantAttributes,
   parseStock,
@@ -58,8 +59,16 @@ async function resolveCategoryId(
 export async function syncProduct(
   detail: ZecatGenericProduct
 ): Promise<"created" | "updated"> {
-  const costPrice = extractCostPrice(detail);
   const variants = flattenVariants(detail.variants);
+
+  // El costo se calcula POR VARIANTE (price publico x descuento de partner
+  // de esa variante) y ANTES de la transaccion: si alguna variante no tiene
+  // discount_partner valido, ZecatPricingError corta el producto entero sin
+  // haber escrito nada. Sin fallback a proposito — ver extractCostPrice().
+  const costBySku = new Map<string, number>();
+  for (const variant of variants) {
+    costBySku.set(variant.sku, extractCostPrice(detail, variant));
+  }
 
   return prisma.$transaction(async (tx) => {
     const categoryId = await resolveCategoryId(tx, detail.families?.[0]);
@@ -98,6 +107,9 @@ export async function syncProduct(
     for (const variant of variants) {
       const { colorName, sizeName, materialName } =
         mapVariantAttributes(variant);
+      // Calculado arriba, antes de la transaccion. El costo es POR VARIANTE:
+      // el discount_partner viene en cada una y puede variar.
+      const costPrice = costBySku.get(variant.sku)!;
 
       await tx.productVariant.upsert({
         where: { sku: variant.sku },
@@ -109,10 +121,6 @@ export async function syncProduct(
           stock: parseStock(variant.stock),
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,
-          // Zecat tiene un unico costo por producto, asi que se repite en
-          // todas sus variantes. No es redundancia: el costo vive en la
-          // variante porque otros proveedores SI difieren entre variantes
-          // (ver el comentario de ProductVariant.costPrice en el schema).
           costPrice,
         },
         create: {
@@ -252,6 +260,23 @@ export async function syncZecatCatalog(): Promise<SyncSummary> {
         zecatId: listItem.id,
         message: error instanceof Error ? error.message : String(error),
       });
+
+      // Sin costo calculable NO puede quedar a la venta el precio viejo:
+      // si el producto ya existia (importado cuando costPrice guardaba el
+      // precio PUBLICO, inflado un ~43%), se pausa. "Un producto faltante y
+      // visible en el log es preferible a uno con precio inflado que nadie
+      // detecta." Si no existia, no hay nada que pausar.
+      if (error instanceof ZecatPricingError) {
+        const paused = await prisma.product.updateMany({
+          where: { zecatId: String(listItem.id), active: true },
+          data: { active: false },
+        });
+        if (paused.count > 0) {
+          console.warn(
+            `[zecat-sync] Producto ${listItem.id} PAUSADO: existia con el costo viejo y no se pudo recalcular.`
+          );
+        }
+      }
     }
   }
 

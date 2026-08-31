@@ -74,9 +74,19 @@ API), CDO (vía la suya), carga manual, y futuros proveedores.
   corresponde a lo que eligió.
 - El conector guarda el precio del proveedor como COSTO base. Ese valor es nuestro
   costo, NO el precio de venta.
-  - **Zecat:** `price` / `unit_price`. (Validado: es el candidato correcto; NO usar
-    `total_price` ni nada pegado a los campos `*_profit_percentage`, que ya traen
-    margen de Zecat.)
+  - **Zecat — CORREGIDO el 2026-08-31:** el costo es
+    **`price × (1 − discount_partner/100)`**, con `discount_partner` (en %) a
+    nivel VARIANTE. `price`/`unit_price` a secas es el **precio sugerido de
+    venta al público** (= `final_consumer_price_wepod`) — usarlo como costo
+    cobraba un ~43% de más. Verificado al centavo contra el backoffice
+    (Bolso Championship 5515: 37311.99 × 0.70 = 26118.39). La "validación"
+    anterior comparaba contra un precio de venta de la web vieja, o sea que
+    probaba lo contrario de lo que concluía. **Sin fallback**: si
+    `discount_partner` no viene o no es válido, el producto NO se importa
+    (se loguea, y si existía se pausa) — jamás caer a `price` pelado.
+    NO usar `total_price`: es el costo del tramo más profundo de la escala
+    de volumen (cobraría de menos en pedidos chicos). `discount_price` y
+    `net_price` figuran en la doc pero NO vienen en la respuesta real.
   - **CDO:** `net_price` (no `list_price`).
 - El precio de venta se CALCULA al leer: `costPrice × (1 + defaultMarginPercent/100)`,
   convirtiendo antes a pesos si hace falta. Nunca se persiste un precio de venta.

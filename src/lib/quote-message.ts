@@ -1,13 +1,8 @@
-import { randomBytes, randomInt } from "crypto";
+import { randomInt } from "crypto";
 
-/// Genera los dos identificadores de una cotizacion y arma el mensaje de
-/// WhatsApp. Solo server-side: el formato, el escape y el armado del link
-/// viven en un unico lugar.
-
-/// Token secreto de la URL publica. 32 hex chars.
-export function generatePublicToken(): string {
-  return randomBytes(16).toString("hex");
-}
+/// Genera el codigo corto de una cotizacion y arma el mensaje de WhatsApp.
+/// Solo server-side: el formato, el escape y el armado del link viven en un
+/// unico lugar.
 
 /// Charset sin ambiguos: sin O/0/I/1/L, que se confunden dictados por
 /// telefono o leidos en una pantalla chica. 31 chars -> 31^6 combinaciones.
@@ -42,7 +37,11 @@ export interface QuoteMessageLine {
 
 export interface QuoteMessageInput {
   shortCode: string;
-  publicToken: string;
+  /// URL completa del detalle. Apunta al PANEL (/admin/cotizaciones/[id]):
+  /// el mensaje lo escribe el cliente pero lo recibe el vendedor, y el
+  /// destinatario util del link es el vendedor — el cliente acaba de armar
+  /// la cotizacion y ya ve el detalle en el propio mensaje.
+  detailUrl: string;
   customerName: string;
   companyName: string | null;
   customerEmail: string;
@@ -50,7 +49,6 @@ export interface QuoteMessageInput {
   /// Suma de (unitPrice congelado x quantity). SIN IVA: se menciona aparte.
   total: number;
   formatPrice: (value: number) => string;
-  siteUrl: string;
 }
 
 /// Tope del TEXTO plano (antes de encodear). Las URLs de wa.me muy largas
@@ -62,8 +60,6 @@ const MAX_MESSAGE_CHARS = 1500;
 /// items ("...y N productos mas"); el encabezado, el total y el link no se
 /// truncan nunca — el link es el respaldo si el texto no alcanza.
 export function buildQuoteMessage(input: QuoteMessageInput): string {
-  const detailUrl = `${input.siteUrl}/cotizacion/${input.publicToken}`;
-
   const quien = [
     sanitizeForWhatsapp(input.customerName),
     input.companyName ? sanitizeForWhatsapp(input.companyName) : null,
@@ -89,7 +85,7 @@ export function buildQuoteMessage(input: QuoteMessageInput): string {
     "",
     `Total estimado: ${input.formatPrice(input.total)} + IVA`,
     "",
-    `Ver detalle: ${detailUrl}`,
+    `Ver detalle: ${input.detailUrl}`,
   ].join("\n");
 
   const itemLines = input.lines.map((line) => {

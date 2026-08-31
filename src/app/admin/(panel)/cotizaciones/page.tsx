@@ -23,16 +23,18 @@ export default async function CotizacionesPage({
 
   const params = await searchParams;
   const status = STATUS_OPTIONS.find((s) => s.value === params.status)?.value;
-  const email = params.email?.trim() || undefined;
+  // El param sigue llamandose "email" por compatibilidad con URLs guardadas,
+  // pero busca email O shortCode (ver getQuotes).
+  const search = params.email?.trim() || undefined;
 
-  const quotes = await getQuotes({ email, status });
+  const quotes = await getQuotes({ search, status });
 
   return (
     <div>
       <h1 className="text-2xl font-medium text-foreground">Cotizaciones</h1>
 
       <QuoteFilters
-        initialEmail={email}
+        initialEmail={search}
         initialStatus={status}
         statusOptions={STATUS_OPTIONS}
       />

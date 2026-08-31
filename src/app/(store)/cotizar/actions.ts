@@ -13,7 +13,6 @@ import {
 import {
   buildQuoteMessage,
   buildWaUrl,
-  generatePublicToken,
   generateShortCode,
   type QuoteMessageLine,
 } from "@/lib/quote-message";
@@ -220,7 +219,6 @@ export interface SubmitQuoteResult {
   /// WhatsApp cargado en la config. Es un EXTRA: la cotizacion ya esta
   /// guardada cuando esto se arma, y si WhatsApp falla no se pierde nada.
   waUrl?: string | null;
-  publicToken?: string;
   shortCode?: string;
 }
 
@@ -402,14 +400,12 @@ export async function submitQuote(
   // shortCode con retry: 31^6 combinaciones hacen el choque rarisimo, pero
   // "rarisimo" con clientes reales es "algun dia". Ante P2002 se regenera y
   // se reintenta; cualquier otro error sube normal.
-  let quote: { id: string; publicToken: string; shortCode: string } | null =
-    null;
+  let quote: { id: string; shortCode: string } | null = null;
   for (let intento = 0; intento < 5 && !quote; intento++) {
     try {
       quote = await prisma.quote.create({
         data: {
           status: QuoteStatus.SUBMITTED,
-          publicToken: generatePublicToken(),
           shortCode: generateShortCode(),
           customerName,
           customerEmail,
@@ -419,7 +415,7 @@ export async function submitQuote(
           notes,
           items: { create: quoteItemsData },
         },
-        select: { id: true, publicToken: true, shortCode: true },
+        select: { id: true, shortCode: true },
       });
     } catch (error) {
       const esColision =
@@ -450,14 +446,17 @@ export async function submitQuote(
     const total = messageLines.reduce((sum, l) => sum + l.subtotal, 0);
     const message = buildQuoteMessage({
       shortCode: quote.shortCode,
-      publicToken: quote.publicToken,
+      // Al PANEL, no a una vista publica: el mensaje lo escribe el cliente
+      // pero lo recibe el vendedor, y el destinatario util del link es el
+      // vendedor (historial, logo, estados). El cliente ya ve su pedido en
+      // el propio mensaje.
+      detailUrl: `${siteUrl}/admin/cotizaciones/${quote.id}`,
       customerName,
       companyName,
       customerEmail,
       lines: messageLines,
       total,
       formatPrice: (v) => formatPriceArs(v),
-      siteUrl,
     });
     waUrl = buildWaUrl(waDigits, message);
   }
@@ -467,7 +466,6 @@ export async function submitQuote(
     quoteId: quote.id,
     omittedProducts,
     waUrl,
-    publicToken: quote.publicToken,
     shortCode: quote.shortCode,
   };
 }

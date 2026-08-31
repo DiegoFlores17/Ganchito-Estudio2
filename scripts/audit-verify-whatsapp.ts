@@ -36,7 +36,6 @@ async function main() {
     const r = await submitQuote(fd);
 
     console.log("[submit] success:", r.success, "| shortCode:", r.shortCode);
-    console.log("[submit] token largo 32:", r.publicToken?.length === 32);
     console.log("[submit] shortCode valido:", /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/.test(r.shortCode ?? ""));
 
     // La Quote existe en la base (guardada ANTES de armar el link).
@@ -50,7 +49,7 @@ async function main() {
     console.log("[wa] sin doble encoding:", !texto.includes("%0A") && texto.includes("\n"));
     console.log("[wa] escape de estrellas: nombre sin * :", !texto.includes("*Negrita*"));
     console.log("[wa] shortCode presente:", texto.includes(`#${r.shortCode}`));
-    console.log("[wa] link al detalle:", texto.includes(`/cotizacion/${r.publicToken}`));
+    console.log("[wa] link al PANEL:", texto.includes(`/admin/cotizaciones/${r.quoteId}`));
     // formatPriceArs separa el $ con un NBSP ( ) de Intl.NumberFormat,
     // no con un espacio comun — \s matchea los dos.
     console.log("[wa] total + IVA:", /Total estimado: \$\s?[\d.,]+ \+ IVA/.test(texto));
@@ -59,7 +58,7 @@ async function main() {
     // Truncado: 40 lineas largas tienen que resumirse y el link sobrevivir.
     const largo = buildQuoteMessage({
       shortCode: "TEST99",
-      publicToken: "x".repeat(32),
+      detailUrl: "https://ganchitoestudio.com/admin/cotizaciones/xyz",
       customerName: "Cliente",
       companyName: null,
       customerEmail: "a@b.co",
@@ -72,11 +71,10 @@ async function main() {
       })),
       total: 40000,
       formatPrice: (v) => `$${v}`,
-      siteUrl: "https://ganchitoestudio.com",
     });
     console.log("[trunc] largo total:", largo.length, "<= 1500:", largo.length <= 1500);
     console.log("[trunc] tiene resumen:", /\.\.\.y \d+ productos? más/.test(largo));
-    console.log("[trunc] link sobrevive:", largo.includes("/cotizacion/"));
+    console.log("[trunc] link sobrevive:", largo.includes("/admin/cotizaciones/"));
 
     // Limpieza.
     await prisma.quote.delete({ where: { id: r.quoteId! } });

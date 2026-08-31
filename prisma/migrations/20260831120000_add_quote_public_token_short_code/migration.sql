@@ -1,24 +1,22 @@
--- Quote.publicToken + Quote.shortCode, con backfill para las filas
--- existentes. Escrita a mano (Prisma generaria ADD COLUMN NOT NULL sin
--- default, que falla con filas existentes; el precedente es la migracion de
--- costPrice). Todo en una sola migracion a proposito: el DDL de Postgres es
--- transaccional, asi que ADD -> backfill -> SET NOT NULL queda atomico y no
--- hay ventana con la tabla a medias.
+-- Quote.shortCode, con backfill para las filas existentes. Escrita a mano
+-- (Prisma generaria ADD COLUMN NOT NULL sin default, que falla con filas
+-- existentes; el precedente es la migracion de costPrice). Todo en una sola
+-- migracion a proposito: el DDL de Postgres es transaccional, asi que
+-- ADD -> backfill -> SET NOT NULL queda atomico y no hay ventana con la
+-- tabla a medias.
+--
+-- Nota de historia: esta migracion agregaba tambien un publicToken para una
+-- pagina publica de la cotizacion. Se elimino ANTES de llegar a produccion
+-- (el link del mensaje de WhatsApp apunta al panel, no a una vista publica),
+-- asi que se edito la migracion en vez de encadenar otra que borre lo que
+-- esta creaba. Si algun dia hace falta la vista publica, el patron con
+-- backfill esta en la historia de git.
 
--- 1. Columnas nullables.
-ALTER TABLE "quotes" ADD COLUMN "publicToken" TEXT;
+-- 1. Columna nullable.
 ALTER TABLE "quotes" ADD COLUMN "shortCode" TEXT;
 
--- 2. Backfill.
--- publicToken: 32 hex chars, mismo largo que crypto.randomBytes(16) en hex.
--- md5(random...) y no gen_random_bytes: no depende de la extension pgcrypto,
--- que no esta garantizada en todos los entornos.
-UPDATE "quotes"
-SET "publicToken" = md5(random()::text || clock_timestamp()::text || id)
-WHERE "publicToken" IS NULL;
-
--- shortCode: 6 chars del charset sin ambiguos (sin O/0/I/1/L), igual que el
--- generador de la app. Loop por fila para que cada una tire sus propios
+-- 2. Backfill: 6 chars del charset sin ambiguos (sin O/0/I/1/L), igual que
+-- el generador de la app. Loop por fila para que cada una tire sus propios
 -- random(); un UPDATE masivo con la misma expresion puede evaluarla una vez.
 DO $$
 DECLARE
@@ -42,8 +40,6 @@ END $$;
 
 -- 3. NOT NULL + UNIQUE. Si el backfill dejo algo sin cubrir, esto falla
 -- ruidoso y la transaccion entera se revierte — la red de seguridad.
-ALTER TABLE "quotes" ALTER COLUMN "publicToken" SET NOT NULL;
 ALTER TABLE "quotes" ALTER COLUMN "shortCode" SET NOT NULL;
 
-CREATE UNIQUE INDEX "quotes_publicToken_key" ON "quotes"("publicToken");
 CREATE UNIQUE INDEX "quotes_shortCode_key" ON "quotes"("shortCode");

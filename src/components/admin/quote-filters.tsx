@@ -62,14 +62,14 @@ export function QuoteFilters({
     >
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-foreground/60">
-          Buscar por email del cliente
+          Buscar por email o código
         </label>
         <input
           type="text"
           name="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="cliente@empresa.com"
+          placeholder="cliente@empresa.com o #A7F3C2"
           className="w-64 rounded-lg border border-foreground/15 px-3 py-2 text-sm outline-none focus:border-primary"
         />
       </div>

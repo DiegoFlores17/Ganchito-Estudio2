@@ -2,15 +2,27 @@ import { prisma } from "@/lib/prisma";
 import type { QuoteStatus } from "@prisma/client";
 
 export async function getQuotes({
-  email,
+  search,
   status,
 }: {
-  email?: string;
+  /// Email del cliente O shortCode ("#A7F3C2" o "A7F3C2"). Un solo campo de
+  /// busqueda para los dos: el vendedor pega lo que tenga a mano — el email
+  /// del mail, o el codigo que el cliente menciono por WhatsApp/telefono.
+  search?: string;
   status?: QuoteStatus;
 } = {}) {
+  // El "#" con el que se muestra el codigo no es parte del dato.
+  const term = search?.trim().replace(/^#/, "");
   return prisma.quote.findMany({
     where: {
-      ...(email ? { customerEmail: { equals: email, mode: "insensitive" } } : {}),
+      ...(term
+        ? {
+            OR: [
+              { customerEmail: { equals: term, mode: "insensitive" } },
+              { shortCode: { equals: term, mode: "insensitive" } },
+            ],
+          }
+        : {}),
       ...(status ? { status } : {}),
     },
     orderBy: { createdAt: "desc" },

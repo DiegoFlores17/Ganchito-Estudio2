@@ -1,4 +1,4 @@
-import { Currency, ProductOrigin, type Prisma } from "@prisma/client";
+import { Currency, Prisma, ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fetchGenericProductDetail, iterateAllGenericProducts } from "./client";
 import {
@@ -25,29 +25,70 @@ export interface SyncSummary {
   errors: Array<{ zecatId: string | number; message: string }>;
 }
 
-type Tx = Prisma.TransactionClient;
-
 async function resolveCategoryId(
-  tx: Tx,
   family: ZecatFamily | undefined
 ): Promise<string | null> {
   if (!family) return null;
 
-  const category = await tx.category.upsert({
-    where: { zecatFamilyId: String(family.id) },
-    update: {
-      name: family.description,
-      iconUrl: family.icon_url ?? null,
-    },
-    create: {
-      zecatFamilyId: String(family.id),
-      name: family.description,
-      slug: slugifyFamily(family),
-      iconUrl: family.icon_url ?? null,
-    },
-  });
+  // El slug es unico GLOBAL y los dos proveedores traen campañas homonimas
+  // ("Dia de la Madre" la tienen Zecat Y CDO): si la familia es nueva y su
+  // slug ya esta tomado por una categoria de otro origen, el create choca.
+  // Paso al descubierto el 2026-08-31: Zecat le cambio las familias al 5206
+  // EN MEDIO del sync de produccion y el choque revirtio la transaccion del
+  // producto entero, que quedo con el costo viejo.
+  //
+  // Se captura la violacion y se reintenta con sufijo, NO se consulta antes
+  // de crear: entre el "¿existe?" y el create hay ventana de carrera. El
+  // slug con sufijo es interno — el filtro publico lo maneja la categoria
+  // canonica del panel, asi que el sufijo no le llega al cliente.
+  //
+  // IMPORTANTE: esta funcion corre FUERA de la transaccion del producto.
+  // En Postgres, una violacion de constraint ABORTA la transaccion entera
+  // (25P02: los comandos siguientes fallan hasta el rollback), asi que el
+  // catch-y-reintento solo funciona con upserts independientes. El upsert
+  // de categoria es idempotente: si la transaccion del producto despues
+  // falla, queda una categoria de mas, que es inocuo.
+  try {
+    const category = await prisma.category.upsert({
+      where: { zecatFamilyId: String(family.id) },
+      update: {
+        name: family.description,
+        iconUrl: family.icon_url ?? null,
+      },
+      create: {
+        zecatFamilyId: String(family.id),
+        name: family.description,
+        slug: slugifyFamily(family),
+        iconUrl: family.icon_url ?? null,
+      },
+    });
+    return category.id;
+  } catch (error) {
+    const esColisionDeSlug =
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002";
+    if (!esColisionDeSlug) throw error;
 
-  return category.id;
+    const category = await prisma.category.upsert({
+      where: { zecatFamilyId: String(family.id) },
+      update: {
+        name: family.description,
+        iconUrl: family.icon_url ?? null,
+      },
+      create: {
+        zecatFamilyId: String(family.id),
+        name: family.description,
+        // Sufijo con el id de la familia: unico por construccion (el
+        // zecatFamilyId ya es unique), y deja rastro de donde salio.
+        slug: `${slugifyFamily(family)}-zecat-${family.id}`,
+        iconUrl: family.icon_url ?? null,
+      },
+    });
+    console.warn(
+      `[zecat-sync] Slug en colision para la familia ${family.id} ("${family.description}"): creada como "${category.slug}".`
+    );
+    return category.id;
+  }
 }
 
 /// Sincroniza un solo producto (detalle completo) contra la base.
@@ -70,8 +111,10 @@ export async function syncProduct(
     costBySku.set(variant.sku, extractCostPrice(detail, variant));
   }
 
+  // Fuera de la transaccion a proposito — ver el comentario de la funcion.
+  const categoryId = await resolveCategoryId(detail.families?.[0]);
+
   return prisma.$transaction(async (tx) => {
-    const categoryId = await resolveCategoryId(tx, detail.families?.[0]);
 
     const productData = {
       origin: ProductOrigin.ZECAT,

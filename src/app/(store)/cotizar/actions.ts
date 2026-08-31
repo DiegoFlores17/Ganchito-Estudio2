@@ -6,6 +6,19 @@ import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
 import { getVariantAvailableStock } from "@/lib/product";
 import {
+  getSiteConfig,
+  normalizeWhatsappNumber,
+  whatsappUrl,
+} from "@/lib/site-config";
+import {
+  buildQuoteMessage,
+  buildWaUrl,
+  generatePublicToken,
+  generateShortCode,
+  type QuoteMessageLine,
+} from "@/lib/quote-message";
+import { Prisma } from "@prisma/client";
+import {
   QUOTE_LOGO_EXTENSIONS,
   saveUploadedFile,
   UploadValidationError,
@@ -95,6 +108,10 @@ export interface QuoteSummaryResult {
   /// pantalla los muestra; descartarlos en silencio haria pensar al cliente
   /// que se olvido de agregarlos.
   unavailableNames: string[];
+  /// Si hay numero de WhatsApp cargado en la config. La pagina lo necesita
+  /// ANTES del submit: la ventana de WhatsApp se abre en el gesto del click
+  /// (si no, Safari iOS la bloquea), y sin numero no hay que abrir nada.
+  whatsappAvailable: boolean;
 }
 
 /// Resumen de los items del borrador para mostrar en /cotizar. Recalcula
@@ -103,7 +120,11 @@ export async function getQuoteItemsSummary(
   rawItems: QuoteCartItemInput[]
 ): Promise<QuoteSummaryResult> {
   const items = sanitizeItems(rawItems) ?? [];
-  if (items.length === 0) return { items: [], unavailableNames: [] };
+  const siteConfig = await getSiteConfig();
+  const whatsappAvailable = whatsappUrl(siteConfig.whatsappNumber) !== null;
+  if (items.length === 0) {
+    return { items: [], unavailableNames: [], whatsappAvailable };
+  }
 
   const pricingConfig = await getPricingConfig();
   const productIds = [...new Set(items.map((i) => i.productId))];
@@ -183,6 +204,7 @@ export async function getQuoteItemsSummary(
   return {
     items: summaries,
     unavailableNames: await getUnavailableNames([...unavailableIds]),
+    whatsappAvailable,
   };
 }
 
@@ -194,6 +216,12 @@ export interface SubmitQuoteResult {
   /// eliminados entre que el cliente armo el pedido y lo envio). La
   /// pantalla de confirmacion los muestra.
   omittedProducts?: string[];
+  /// Link wa.me con el pedido pre-armado, o null si no hay numero de
+  /// WhatsApp cargado en la config. Es un EXTRA: la cotizacion ya esta
+  /// guardada cuando esto se arma, y si WhatsApp falla no se pierde nada.
+  waUrl?: string | null;
+  publicToken?: string;
+  shortCode?: string;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -285,14 +313,20 @@ export async function submitQuote(
     where: { id: { in: productIds }, active: true, deletedAt: null },
     select: {
       id: true,
+      // name y los labels de variante son para el MENSAJE de WhatsApp, no
+      // para el precio.
+      name: true,
       currency: true,
-      variants: { select: { sku: true, costPrice: true } },
+      variants: {
+        select: { sku: true, costPrice: true, colorName: true, sizeName: true },
+      },
     },
   });
 
   const productoPorId = new Map(products.map((p) => [p.id, p]));
 
   const quoteItemsData = [];
+  const messageLines: QuoteMessageLine[] = [];
   const omitidos: string[] = [];
   const omitidosIds = new Set<string>();
   for (const item of items) {
@@ -317,15 +351,32 @@ export async function submitQuote(
       continue;
     }
 
+    const unitPrice = computeSellPrice(
+      variant.costPrice,
+      product.currency,
+      pricingConfig
+    );
+
     quoteItemsData.push({
       productId: item.productId,
       variantSku: item.variantSku ?? null,
       quantity: item.quantity,
-      unitPrice: computeSellPrice(
-        variant.costPrice,
-        product.currency,
-        pricingConfig
-      ),
+      unitPrice,
+    });
+
+    // La linea del mensaje de WhatsApp se arma ACA, con los mismos valores
+    // que se congelan — no se recalcula nada al armar el texto.
+    messageLines.push({
+      productName: product.name,
+      variantLabel:
+        [variant.colorName, variant.sizeName].filter(Boolean).join(" / ") ||
+        null,
+      // printingType existe en el schema pero el flujo actual nunca lo
+      // carga (el panel de compra no pide tecnica). Si algun dia se carga,
+      // el mensaje ya lo muestra.
+      printingType: null,
+      quantity: item.quantity,
+      subtotal: Number(unitPrice) * item.quantity,
     });
   }
 
@@ -348,18 +399,75 @@ export async function submitQuote(
 
   const omittedProducts = await getUnavailableNames([...omitidosIds]);
 
-  const quote = await prisma.quote.create({
-    data: {
-      status: QuoteStatus.SUBMITTED,
-      customerName,
-      customerEmail,
-      customerPhone,
-      companyName,
-      logoUrl,
-      notes,
-      items: { create: quoteItemsData },
-    },
-  });
+  // shortCode con retry: 31^6 combinaciones hacen el choque rarisimo, pero
+  // "rarisimo" con clientes reales es "algun dia". Ante P2002 se regenera y
+  // se reintenta; cualquier otro error sube normal.
+  let quote: { id: string; publicToken: string; shortCode: string } | null =
+    null;
+  for (let intento = 0; intento < 5 && !quote; intento++) {
+    try {
+      quote = await prisma.quote.create({
+        data: {
+          status: QuoteStatus.SUBMITTED,
+          publicToken: generatePublicToken(),
+          shortCode: generateShortCode(),
+          customerName,
+          customerEmail,
+          customerPhone,
+          companyName,
+          logoUrl,
+          notes,
+          items: { create: quoteItemsData },
+        },
+        select: { id: true, publicToken: true, shortCode: true },
+      });
+    } catch (error) {
+      const esColision =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002";
+      if (!esColision || intento === 4) throw error;
+    }
+  }
+  if (!quote) {
+    // Inalcanzable (el loop tira o asigna), pero TypeScript no lo sabe.
+    throw new Error("No se pudo crear la cotización.");
+  }
 
-  return { success: true, quoteId: quote.id, omittedProducts };
+  // El link de WhatsApp se arma DESPUES de guardar: es un extra para
+  // acelerar el contacto, no un punto de falla del flujo. Si no hay numero
+  // cargado, waUrl queda null y la pantalla muestra la confirmacion normal.
+  //
+  // El total es SIEMPRE la suma de (unitPrice congelado x cantidad) de las
+  // lineas que ENTRARON — las omitidas no se cobran ni se suman.
+  let waUrl: string | null = null;
+  const siteConfig = await getSiteConfig();
+  const waDigits = siteConfig.whatsappNumber
+    ? normalizeWhatsappNumber(siteConfig.whatsappNumber)
+    : "";
+  if (waDigits) {
+    const siteUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+    const total = messageLines.reduce((sum, l) => sum + l.subtotal, 0);
+    const message = buildQuoteMessage({
+      shortCode: quote.shortCode,
+      publicToken: quote.publicToken,
+      customerName,
+      companyName,
+      customerEmail,
+      lines: messageLines,
+      total,
+      formatPrice: (v) => formatPriceArs(v),
+      siteUrl,
+    });
+    waUrl = buildWaUrl(waDigits, message);
+  }
+
+  return {
+    success: true,
+    quoteId: quote.id,
+    omittedProducts,
+    waUrl,
+    publicToken: quote.publicToken,
+    shortCode: quote.shortCode,
+  };
 }

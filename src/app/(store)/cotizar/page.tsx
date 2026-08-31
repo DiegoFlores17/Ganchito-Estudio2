@@ -33,12 +33,20 @@ export default function CotizarPage() {
   // a pensar que se olvido de agregarlo.
   const [unavailable, setUnavailable] = useState<string[]>([]);
   const [omittedOnSubmit, setOmittedOnSubmit] = useState<string[]>([]);
+  // Para abrir el chat de WhatsApp con el pedido. waUrl llega del servidor
+  // al enviar; whatsappAvailable llega ANTES (con el resumen) porque la
+  // ventana tiene que abrirse en el gesto del click o Safari iOS la bloquea
+  // — y sin numero configurado no hay que abrir ninguna.
+  const [whatsappAvailable, setWhatsappAvailable] = useState(false);
+  const [waUrl, setWaUrl] = useState<string | null>(null);
+  const [shortCode, setShortCode] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     const cart = getQuoteCart();
     getQuoteItemsSummary(cart).then((summary) => {
       setItems(summary.items);
+      setWhatsappAvailable(summary.whatsappAvailable);
       if (summary.unavailableNames.length > 0) {
         setUnavailable(summary.unavailableNames);
         // Podar el carrito guardado para que quede IGUAL al resumen: el
@@ -82,16 +90,46 @@ export default function CotizarPage() {
       )
     );
 
+    // La ventana de WhatsApp se abre ACA, en el gesto del click, y VACIA:
+    // abrirla despues del await es exactamente lo que Safari iOS bloquea.
+    // Cuando el servidor responde, se le asigna la URL real; si algo falla
+    // o no hay numero, se cierra. Solo se abre si hay numero configurado.
+    const waWindow = whatsappAvailable ? window.open("", "_blank") : null;
+
     startTransition(async () => {
-      const result = await submitQuote(formData);
+      let result: Awaited<ReturnType<typeof submitQuote>>;
+      try {
+        result = await submitQuote(formData);
+      } catch (e) {
+        waWindow?.close();
+        setError("No se pudo enviar la cotización. Probá de nuevo.");
+        throw e;
+      }
       if (!result.success) {
+        waWindow?.close();
         setError(result.error ?? "No se pudo enviar la cotización.");
         return;
       }
+
+      // La cotizacion YA esta guardada: lo de WhatsApp es un extra y ningun
+      // fallo de aca en adelante la pierde.
+      if (result.waUrl) {
+        if (waWindow) {
+          waWindow.location.href = result.waUrl;
+        } else {
+          // El popup fue bloqueado igual (o no habia numero al cargar pero
+          // si al enviar): la confirmacion muestra el boton como via segura.
+        }
+      } else {
+        waWindow?.close();
+      }
+
       clearQuoteCart();
       // Carrera rara pero posible: un producto pausado/eliminado entre que
       // se cargo la pagina y se envio. La confirmacion lo dice.
       setOmittedOnSubmit(result.omittedProducts ?? []);
+      setWaUrl(result.waUrl ?? null);
+      setShortCode(result.shortCode ?? null);
       setSubmitted(true);
     });
   }
@@ -131,6 +169,26 @@ export default function CotizarPage() {
         <p className="mt-4 text-foreground/70">
           Te contactamos a la brevedad para avanzar con tu cotización.
         </p>
+        {shortCode && (
+          <p className="mt-3 text-sm text-foreground/60">
+            Tu número de cotización es{" "}
+            <strong className="text-foreground">#{shortCode}</strong> —
+            mencionalo si nos escribís.
+          </p>
+        )}
+        {/* Boton SIEMPRE visible cuando hay link: la apertura automatica
+            puede haber sido bloqueada por el navegador, y un click del
+            usuario nunca se bloquea. */}
+        {waUrl && (
+          <a
+            href={waUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-6 inline-block rounded-full bg-primary px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
+          >
+            Enviar mi pedido por WhatsApp
+          </a>
+        )}
         {omittedOnSubmit.length > 0 && (
           <p className="mx-auto mt-6 max-w-md rounded-lg bg-accent/15 px-4 py-3 text-sm text-foreground/80">
             Ojo: {omittedOnSubmit.length === 1 ? "este producto dejó" : "estos productos dejaron"}{" "}

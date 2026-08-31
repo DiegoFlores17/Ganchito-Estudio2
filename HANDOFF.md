@@ -146,6 +146,28 @@ no hay forma de recalcularles el costo, y probablemente Zecat los
 discontinuó. Ninguno está en los destacados de la home (verificado contra
 `HOME_CATEGORY_PICKS`).
 
+### Por qué un re-import de Zecat es seguro (escribirlo, no recordarlo)
+
+**Los productos ZECAT son de SOLO LECTURA desde el panel.** Las tres acciones
+de escritura (`saveProduct`, `toggleProductActive`, `deleteProduct`) pasan por
+`findManualProductForWrite`, que filtra `origin: MANUAL` — no existe camino en
+la UI para editar nombre, descripción, categoría o imágenes de un producto de
+Zecat. No es que "no se editaron": **no se podían editar.** Por eso un sync
+que sobrescribe todos esos campos no puede pisar trabajo manual.
+
+**El trabajo del cliente vive en `Category`** (`visible`, `canonicalId`, las
+categorías propias) — y el sync de productos **no toca esa tabla**: escribe
+`categoryId` en `Product`, nunca filas de `Category` más allá del upsert por
+id de proveedor. La unificación y visibilidad sobreviven a cualquier corrida.
+
+**Reglas para snapshots pre-operación (aprendidas el 2026-08-31):**
+1. **Capturar TODOS los campos**, no solo los del fix en curso. El snapshot
+   del fix de precios no guardó descripción ni imágenes, y cuando hizo falta
+   responder "¿se pisó algo?", no servía como prueba.
+2. **Sacarlo DEL entorno que se va a modificar.** Un snapshot de local no
+   prueba nada sobre producción. Para producción, el backup es una branch de
+   Neon o un dump de esa base, nunca un espejo local.
+
 **Efecto visible del fix**: los precios del catálogo bajan ~30%. Con el
 margen del 45% sobre el costo real, el precio final queda ≈ el precio
 sugerido de Zecat (+1.5%) — coherente, antes quedaba un 45% arriba del

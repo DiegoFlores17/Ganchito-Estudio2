@@ -146,6 +146,30 @@ no hay forma de recalcularles el costo, y probablemente Zecat los
 discontinuó. Ninguno está en los destacados de la home (verificado contra
 `HOME_CATEGORY_PICKS`).
 
+### Fase 2 (producción) cerrada — y el bug de colisión de slugs
+
+Re-import de producción: 545 procesados, 538 actualizados, 6 creados,
+**1 fallido (5206) ya resuelto**. Verificación por equivalencia: de 1712
+variantes, 1711 con costo **idéntico byte a byte** al de local — transfiere
+toda la verificación local a producción. Zombies: 14 pausados (el 4792 no
+existe en prod). Cotizaciones de prueba: borradas las 3, quedan 0.
+
+**El fallido destapó un bug latente del conector** (`8a1c3ee`): el slug de
+`Category` es único GLOBAL y los dos proveedores traen campañas homónimas.
+Zecat le puso "2026 Día de la madre" como `families[0]` al 5206 **en medio
+del sync de producción** (local pasó limpio por minutos); el create de esa
+categoría chocó contra el slug de la campaña de CDO y la transacción del
+producto se revirtió, dejándolo con el costo viejo. El fix: capturar la
+P2002 y reintentar con sufijo `{slug}-zecat-{familyId}` — capturar y NO
+consultar-antes-de-crear (ventana de carrera), y con `resolveCategoryId`
+**fuera de la transacción del producto**, porque en Postgres una violación
+de constraint aborta la transacción entera (25P02) y el retry adentro falla.
+El 5206 quedó re-sincronizado en prod: costo 1910.99, activo.
+
+> Ojo secundario: el 5206 ahora cuelga de la categoría de campaña
+> "2026 Día de la madre" (visible por defecto). El ruido de campañas se
+> maneja desde el panel de categorías, como siempre.
+
 ### Por qué un re-import de Zecat es seguro (escribirlo, no recordarlo)
 
 **Los productos ZECAT son de SOLO LECTURA desde el panel.** Las tres acciones

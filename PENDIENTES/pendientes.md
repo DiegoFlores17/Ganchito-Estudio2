@@ -42,8 +42,19 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       (0 salteados, 0 pausados). Antes: branch en Neon (la saca el usuario).
       Después: decidir las cotizaciones existentes (pruebas → borrar;
       reales → dejar).
-- [ ] **Los 15 productos zombie**: en la base, ausentes de la API, activos
-      con el costo viejo inflado. Recomendación: pausarlos. Ids en HANDOFF.
+- [x] **Los 15 productos zombie**: pausados en producción (14 — el 4792 no
+      existía allá). Siguen pausados en local también.
+- [ ] **Las campañas homónimas de los dos proveedores son trabajo manual
+      RECURRENTE del cliente.** Cada campaña nueva de cada proveedor ("Día de
+      la Madre" la traen Zecat Y CDO) aparece como categoría visible y el
+      cliente tiene que ocultarla o unificarla a mano, campaña por campaña,
+      temporada tras temporada. El fix de colisión de slugs evita que el sync
+      explote, pero no resuelve esto. Idea a evaluar (decisión de producto):
+      que las categorías NUEVAS de proveedor nazcan con `visible: false` y el
+      panel muestre una cola de "categorías sin revisar" — invierte el
+      default: el ruido no llega al cliente hasta que alguien lo apruebe.
+      Matcheo automático por nombre sigue descartado (filosofía del
+      proyecto).
 
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 

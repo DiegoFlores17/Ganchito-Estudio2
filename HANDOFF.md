@@ -3,7 +3,7 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-27 — auditoría pre-entrega
+**Última actualización:** 2026-08-31 — envío de cotización por WhatsApp
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -20,6 +20,11 @@ CREAR una cotización.
 devolvió **200** con `User Agent: vercel-cron/1.0` — o sea que la disparó
 Vercel, no una prueba a mano. Nadie del equipo tiene que apretar nada.
 
+**Lo último construido: envío de la cotización por WhatsApp** (deep link
+`wa.me`, sin Cloud API) + página pública `/cotizacion/[token]`. En la rama,
+verificado en local, **trae migración** — ver la sección "Cotización por
+WhatsApp" y el orden de deploy antes de mergear.
+
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
 > **La tanda 6 está verificada en un teléfono real** y pasó a "Terminado y
@@ -29,6 +34,76 @@ Vercel, no una prueba a mano. Nadie del equipo tiene que apretar nada.
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
 > `PENDIENTES/pendientes.md`.
+
+---
+
+## Cotización por WhatsApp (2026-08-31, en la rama de auditoría)
+
+Al enviar la cotización se abre WhatsApp con el pedido pre-armado. **La Quote
+se guarda SIEMPRE antes de armar el link**: WhatsApp es un extra para
+acelerar el contacto, no un punto de falla — si el cliente no envía el
+mensaje, la cotización igual está en el panel.
+
+### Las piezas
+
+| Pieza | Dónde |
+|---|---|
+| Tokens + mensaje + link | `src/lib/quote-message.ts` |
+| Generación y retorno (`waUrl`, `publicToken`, `shortCode`) | `submitQuote` en `cotizar/actions.ts` |
+| Apertura de la ventana | `cotizar/page.tsx` |
+| Página pública | `src/app/(store)/cotizacion/[token]/page.tsx` |
+| Migración | `20260831120000_add_quote_public_token_short_code` |
+
+**Dos identificadores nuevos en `Quote`, distintos a propósito:**
+`publicToken` (32 hex, SECRETO, va en la URL pública — el cuid del id no
+está diseñado como capacidad de acceso) y `shortCode` (6 chars legibles sin
+`O/0/I/1/L`, PÚBLICO, para mencionar por teléfono: "cotización A7F3C2"). El
+shortCode se muestra en la confirmación, en la página pública y en el
+detalle del panel — esa es la referencia para cruzar.
+
+### Decisiones que conviene no deshacer
+
+- **La migración es UNA sola con el backfill adentro** (nullable → backfill
+  → NOT NULL + UNIQUE): el DDL de Postgres es transaccional, así que queda
+  atómico y no hay ventana con la tabla a medias. El backfill usa
+  `md5(random()…)` y no `gen_random_bytes` para **no depender de pgcrypto**.
+- **La ventana se abre EN el gesto del click, vacía**, y recién después del
+  await se le asigna la URL (`win.location.href`). Abrirla después del await
+  es exactamente lo que Safari iOS bloquea. La confirmación muestra además
+  un botón "Enviar mi pedido por WhatsApp" **siempre** que haya link — el
+  click del usuario nunca se bloquea, es la vía garantizada.
+- **`whatsappAvailable` viaja en el resumen** (antes del submit) para no
+  abrir una ventana en blanco cuando no hay número configurado. Sin número:
+  confirmación normal, cero WhatsApp.
+- **El mensaje se arma server-side con los valores congelados**: total =
+  Σ (unitPrice × cantidad) de las líneas que ENTRARON. Nada se recalcula.
+  Nombres sanitizados (`*`/`_` rompen el formato de WhatsApp y no hay
+  sintaxis de escape — se quitan). `encodeURIComponent` UNA vez. Tope de
+  1500 chars truncando ítems ("...y N más"); header, total y link no se
+  truncan nunca.
+- **`NEXT_PUBLIC_SITE_URL`** es la base del link del mensaje y el
+  `metadataBase` de Next. Es el dominio propio, NO el `.vercel.app` — por
+  eso no sale de `VERCEL_PROJECT_PRODUCTION_URL`. La carga el usuario en
+  Vercel.
+- **La página pública no indexa** (`robots: noindex, nofollow`; sitemap no
+  hay, verificado) y su `select` es explícito: `costPrice` no puede entrar.
+  Los precios que muestra son los congelados. La variante se traduce a
+  "Azul / M" si el sku todavía existe; si no, se muestra el sku tal cual —
+  es lo que se cotizó.
+- `printingType` existe en el schema y el mensaje/página lo muestran **si
+  está**, pero el flujo actual nunca lo carga (el panel de compra no pide
+  técnica). No se inventó el dato.
+
+### Orden de deploy (cuando se mergee esta rama)
+
+1. **Branch en Neon** (lo hace el usuario, como dijo).
+2. `DATABASE_URL='<neon>' npx prisma migrate deploy` — aplica la migración
+   con el backfill de las filas existentes de producción.
+3. Verificar: `npx prisma migrate status` limpio, y que las quotes de
+   producción tengan `shortCode`/`publicToken`.
+4. Cargar `NEXT_PUBLIC_SITE_URL=https://ganchitoestudio.com` en Vercel.
+5. Recién ahí, push/merge del código. **Nunca al revés**: el código lee las
+   columnas nuevas.
 
 ---
 

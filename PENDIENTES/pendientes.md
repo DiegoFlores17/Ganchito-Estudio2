@@ -5,6 +5,23 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ---
 
+## Flujo de cotización
+
+- [ ] **Notificación por email a Ganchito cuando entra una cotización.** Quedó
+      planificada y sin construir (se priorizó el WhatsApp). El plan acordado:
+      **Resend** (free tier sobra), `RESEND_API_KEY` en Vercel + redeploy,
+      destino = `SiteConfig.contactEmail` (cero migración), remitente
+      `onboarding@resend.dev` hasta que haya dominio verificado en Resend —
+      **ojo: `vercel.app` no se puede verificar; ahora que existe
+      `ganchitoestudio.com`, se puede verificar ese y usar un remitente
+      propio**. Si el envío falla: log y nada más, la cotización ya está
+      guardada. Link del aviso a `/admin/cotizaciones/{id}` con
+      `NEXT_PUBLIC_SITE_URL` de base.
+- [ ] **`printingType` nunca se carga.** El campo existe en `QuoteItem`, y el
+      mensaje de WhatsApp y la página pública ya lo muestran si está — pero el
+      panel de compra no pide técnica de impresión, así que siempre va null.
+      Decidir si el cliente debe elegirla al cotizar o si se borra el campo.
+
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 
 Los hallazgos 1, 3, 4 y 6 se atacaron en la rama de la auditoría. Estos

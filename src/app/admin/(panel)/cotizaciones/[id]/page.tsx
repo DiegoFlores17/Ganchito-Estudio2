@@ -47,7 +47,10 @@ export default async function CotizacionDetallePage({
             {quote.customerName}
           </h1>
           <p className="text-sm text-foreground/50">
-            {quote.createdAt.toLocaleString("es-AR")}
+            {/* El shortCode es el mismo que ve el cliente en su mensaje de
+                WhatsApp — es la referencia para cruzar cuando escribe. */}
+            <strong className="text-foreground/70">#{quote.shortCode}</strong>{" "}
+            · {quote.createdAt.toLocaleString("es-AR")}
           </p>
         </div>
         <QuoteStatusSelect quoteId={quote.id} initialStatus={quote.status} />

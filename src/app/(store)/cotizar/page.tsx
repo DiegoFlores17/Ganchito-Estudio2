@@ -17,6 +17,7 @@ import {
   removeFromQuoteCart,
   replaceQuoteCart,
 } from "@/lib/quote-cart";
+import { isOptimizableImage } from "@/lib/product-image";
 import {
   getQuoteItemsSummary,
   submitQuote,
@@ -280,6 +281,7 @@ export default function CotizarPage() {
                   alt={item.productName}
                   fill
                   sizes="80px"
+                  unoptimized={!isOptimizableImage(item.imageUrl)}
                   className="object-cover"
                 />
               )}

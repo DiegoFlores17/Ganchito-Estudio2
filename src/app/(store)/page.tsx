@@ -7,6 +7,7 @@ import { getFeaturedProducts, hasAvailableStock } from "@/lib/catalog";
 import { buildContactView, getSiteConfig } from "@/lib/site-config";
 import { getHomeCategoryShowcase, HOME_CATEGORY_COUNT } from "@/lib/home";
 import { computePriceRange, getPricingConfig } from "@/lib/pricing";
+import { isOptimizableImage } from "@/lib/product-image";
 
 /// La home se sirve cacheada, pero NO indefinidamente.
 ///
@@ -205,6 +206,7 @@ async function CategoryShowcase() {
                 alt={category.name}
                 fill
                 sizes="(min-width: 1024px) 30vw, (min-width: 640px) 45vw, 90vw"
+                unoptimized={!isOptimizableImage(category.imageUrl)}
                 className="object-cover transition-transform duration-300 group-hover:scale-[1.04]"
               />
             )}

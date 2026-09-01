@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { isOptimizableImage } from "@/lib/product-image";
 
 export function Gallery({
   images,
@@ -23,6 +24,7 @@ export function Gallery({
             fill
             sizes="(min-width: 1024px) 45vw, 90vw"
             className="object-cover"
+            unoptimized={!isOptimizableImage(active.url)}
             priority
           />
         ) : null}
@@ -48,6 +50,7 @@ export function Gallery({
                 fill
                 sizes="64px"
                 className="object-cover"
+                unoptimized={!isOptimizableImage(image.url)}
               />
             </button>
           ))}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { isOptimizableImage } from "@/lib/product-image";
 
 /// Foto de producto con shimmer mientras carga.
 ///
@@ -77,6 +78,9 @@ export function ProductCardImage({
         alt={alt}
         fill
         sizes={sizes}
+        // Las imagenes de proveedor van directas desde su CDN, sin pasar
+        // por el optimizador de Vercel — ver lib/product-image.ts.
+        unoptimized={!isOptimizableImage(src)}
         onLoad={(e) => marcarCargada(e.currentTarget)}
         // Inline y no una clase: object-cover viene en el className que manda
         // la card, y entre dos utilidades de Tailwind gana la que este despues

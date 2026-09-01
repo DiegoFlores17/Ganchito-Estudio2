@@ -146,6 +146,34 @@ no hay forma de recalcularles el costo, y probablemente Zecat los
 discontinuó. Ninguno está en los destacados de la home (verificado contra
 `HOME_CATEGORY_PICKS`).
 
+### Auditoría de imágenes (2026-09-01): el problema NO es el import
+
+Síntoma reportado: productos de Zecat sin imagen en la tienda tras el
+re-import. **Las tres capas de datos están limpias** (verificado contra
+producción): 0 productos sin registros de imagen, 0 sin `isMain`, y las
+**13.637 URLs responden 200** (hosts: solo `images-cdn.zecat.com` y
+`d1yq3fbd6icaus.cloudfront.net`, ambos en `remotePatterns`).
+
+**La causa es la cuota de Image Optimization de Vercel (Hobby), agotada.**
+El optimizador devuelve **402** con
+`x-vercel-error: OPTIMIZED_IMAGE_REQUEST_PAYMENT_REQUIRED` para TODA
+transformación nueva — verificado contra producción con imágenes nuevas y
+viejas en cinco tamaños. Por qué "los nuevos sin imagen y los viejos con":
+los viejos sirven desde el caché edge del optimizador (los HIT no consumen
+cuota); los nuevos no tienen ninguna variante cacheada → 402 siempre. **Va a
+empeorar solo**: a medida que expiren cachés, productos viejos también van a
+ir cayendo.
+
+Dimensión del problema: 5K transformaciones/mes de Hobby contra un catálogo
+de 13.6K imágenes donde cada `<Image>` genera varios anchos (srcset) — una
+sola pasada de un crawler puede quemar la cuota del mes.
+
+Sin tocar: es una auditoría. Opciones en el informe de la conversación del
+2026-09-01. Ningún fix requiere schema ni re-import.
+
+Anomalía menor anotada: 561 imágenes `isMain` para 559 productos — dos
+productos tienen main duplicada (benigno: las consultas usan `take: 1`).
+
 ### Fase 2 (producción) cerrada — y el bug de colisión de slugs
 
 Re-import de producción: 545 procesados, 538 actualizados, 6 creados,

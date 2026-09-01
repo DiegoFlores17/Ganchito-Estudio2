@@ -56,6 +56,30 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       Matcheo automático por nombre sigue descartado (filosofía del
       proyecto).
 
+## Vercel Pro: dos razones convergentes (en gestión con el cliente)
+
+- [ ] **Contratar Vercel Pro.** Dos problemas distintos lo piden a la vez:
+      1. **El cron del sync de productos** (analizado 2026-08-21): Hobby tiene
+         300s de tope no extensible contra 282s medidos de Zecat y 597s de
+         CDO producción. Sin Pro no hay sync automático.
+      2. **Image Optimization** (incidente 2026-09-01): la cuota de Hobby son
+         **5K transformaciones/mes contra 13.6K imágenes** del catálogo, con
+         varios anchos por `<Image>` (srcset) — una pasada de un crawler
+         quema el mes y el optimizador pasa a devolver 402. Ya pasó: la
+         tienda mostró productos sin imagen.
+
+      **En Pro no hay tope duro**: pasa a tarifa por uso
+      ($0.05–$0.08 por 1K transformaciones, cache writes $4–6.4/M). Para este
+      catálogo, el peor mes realista (crawl completo con el optimizador
+      re-activado) son ~30–40K transformaciones ≈ **$2–7/mes** — Pro NO queda
+      corto, verificado contra la doc oficial el 2026-09-01.
+- [ ] **Con Pro activo: evaluar revertir el `unoptimized` de las imágenes de
+      proveedor** (`src/lib/product-image.ts`, commit `1c6e82a` en main). Es
+      un PUENTE: hoy las imágenes de Zecat/CDO van directas desde su CDN (sin
+      srcset — mobile baja la imagen entera). Revertirlo recupera el resize
+      por dispositivo a cambio de los ~$2–7/mes de arriba. Las imágenes
+      propias (Blob) nunca dejaron de optimizarse.
+
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 
 Los hallazgos 1, 3, 4 y 6 se atacaron en la rama de la auditoría. Estos

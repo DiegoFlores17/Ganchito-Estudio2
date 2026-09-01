@@ -168,8 +168,15 @@ Dimensión del problema: 5K transformaciones/mes de Hobby contra un catálogo
 de 13.6K imágenes donde cada `<Image>` genera varios anchos (srcset) — una
 sola pasada de un crawler puede quemar la cuota del mes.
 
-Sin tocar: es una auditoría. Opciones en el informe de la conversación del
-2026-09-01. Ningún fix requiere schema ni re-import.
+**Resuelto el 2026-09-01 con la opción B** (commit `1c6e82a`, en `main` y
+deployado): las imágenes de proveedor van directas desde su CDN con
+`unoptimized` (`src/lib/product-image.ts` decide por host — solo Blob se
+optimiza). Verificado en producción: los 6 productos nuevos sirven URLs
+directas del CDN (200), el catálogo también, y no queda ninguna imagen
+pasando por el optimizador (producción no tiene productos manuales con
+foto). Es un PUENTE hasta el Pro — ver PENDIENTES. Los otros dos hallazgos
+(descarte silencioso de imágenes y main duplicada) quedaron arreglados en
+la rama (`ad4c45c`) y los datos corregidos en local y producción.
 
 Anomalía menor anotada: 561 imágenes `isMain` para 559 productos — dos
 productos tienen main duplicada (benigno: las consultas usan `take: 1`).

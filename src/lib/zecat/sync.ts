@@ -196,7 +196,9 @@ export async function syncProduct(
     const variantIdBySku = new Map(dbVariants.map((v) => [v.sku, v.id]));
 
     const productImages = (detail.images ?? [])
-      .map((image, index) => toImageCreateInput(image, index, product.id, null))
+      .map((image, index) =>
+        toImageCreateInput(image, index, product.id, null, detail.id)
+      )
       .filter((image): image is NonNullable<typeof image> => image !== null);
 
     const variantImages = variants.flatMap((variant) =>
@@ -206,16 +208,27 @@ export async function syncProduct(
             image,
             index,
             product.id,
-            variantIdBySku.get(variant.sku) ?? null
+            variantIdBySku.get(variant.sku) ?? null,
+            detail.id
           )
         )
         .filter((image): image is NonNullable<typeof image> => image !== null)
     );
 
-    if (productImages.length || variantImages.length) {
-      await tx.productImage.createMany({
-        data: [...productImages, ...variantImages],
-      });
+    // Zecat a veces manda MAS de una imagen con main:true (visto en los
+    // productos 5156 y 4137: dos imagenes de producto marcadas main). Como
+    // el catalogo hace take:1 sin orderBy, cual se muestra queda al azar.
+    // Gana la primera en orden de aparicion; el resto se degrada.
+    const allImages = [...productImages, ...variantImages];
+    let mainVisto = false;
+    for (const image of allImages) {
+      if (!image.isMain) continue;
+      if (mainVisto) image.isMain = false;
+      mainVisto = true;
+    }
+
+    if (allImages.length) {
+      await tx.productImage.createMany({ data: allImages });
     }
 
     if (detail.printing_areas?.length) {
@@ -257,10 +270,20 @@ function toImageCreateInput(
   image: ZecatImage,
   index: number,
   productId: string,
-  variantId: string | null
+  variantId: string | null,
+  zecatId: string | number
 ) {
   const url = resolveImageUrl(image);
-  if (!url) return null;
+  // Sin URL no hay nada que guardar, pero el descarte se LOGUEA, no se
+  // traga: si Zecat renombra el campo de la URL, esto es lo unico que
+  // separa "productos sin imagen y nadie se entero" de un aviso a tiempo.
+  // Mismo criterio que discount_partner: fallar visible.
+  if (!url) {
+    console.warn(
+      `[zecat-sync] Imagen descartada del producto ${zecatId}: sin image_url/imageUrl (indice ${index}${variantId ? ", variante" : ""}).`
+    );
+    return null;
+  }
 
   return {
     productId,

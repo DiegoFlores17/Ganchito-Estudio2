@@ -43,27 +43,50 @@ export default function CotizarPage() {
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Carga del resumen, con las DOS salidas de fallo que antes no existian:
+  // .catch (la action rechazo) y timeout (la promesa nunca respondio — paso
+  // en produccion: el skeleton quedaba para siempre, sin error ni salida).
+  // `intento` en las deps permite el boton "Reintentar".
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [intento, setIntento] = useState(0);
   useEffect(() => {
+    let cancelado = false;
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), 10_000)
+    );
+
     const cart = getQuoteCart();
-    getQuoteItemsSummary(cart).then((summary) => {
-      setItems(summary.items);
-      setWhatsappAvailable(summary.whatsappAvailable);
-      if (summary.unavailableNames.length > 0) {
-        setUnavailable(summary.unavailableNames);
-        // Podar el carrito guardado para que quede IGUAL al resumen: el
-        // "Quitar" de cada linea borra por indice, y con el carrito mas
-        // largo que el resumen los indices se corren y borra otra linea.
-        replaceQuoteCart(
-          summary.items.map((item) => ({
-            productId: item.productId,
-            variantSku: item.variantSku,
-            quantity: item.quantity,
-          }))
-        );
-      }
-      setLoadingItems(false);
-    });
-  }, []);
+    Promise.race([getQuoteItemsSummary(cart), timeout])
+      .then((summary) => {
+        if (cancelado) return;
+        setItems(summary.items);
+        setWhatsappAvailable(summary.whatsappAvailable);
+        if (summary.unavailableNames.length > 0) {
+          setUnavailable(summary.unavailableNames);
+          // Podar el carrito guardado para que quede IGUAL al resumen: el
+          // "Quitar" de cada linea borra por indice, y con el carrito mas
+          // largo que el resumen los indices se corren y borra otra linea.
+          replaceQuoteCart(
+            summary.items.map((item) => ({
+              productId: item.productId,
+              variantSku: item.variantSku,
+              quantity: item.quantity,
+            }))
+          );
+        }
+        setLoadingItems(false);
+      })
+      .catch(() => {
+        if (cancelado) return;
+        setLoadFailed(true);
+        setLoadingItems(false);
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [intento]);
 
   function handleRemove(index: number) {
     removeFromQuoteCart(index);
@@ -210,6 +233,42 @@ export default function CotizarPage() {
 
   if (loadingItems) {
     return <QuoteSkeleton />;
+  }
+
+  // La carga fallo o nunca respondio: error CON salida, nunca un skeleton
+  // eterno. El pedido no se pierde — vive en localStorage.
+  if (loadFailed) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-24 text-center">
+        <h1 className="text-3xl font-black tracking-tight text-foreground">
+          No pudimos cargar tu cotización
+        </h1>
+        <p className="mt-4 text-foreground/70">
+          Tu pedido está guardado en este navegador — no se perdió nada.
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <button
+            type="button"
+            // Los resets van ACA y no dentro del efecto (setState sincrono
+            // en un effect dispara renders en cascada y el lint lo marca).
+            onClick={() => {
+              setLoadFailed(false);
+              setLoadingItems(true);
+              setIntento((n) => n + 1);
+            }}
+            className="rounded-full bg-accent px-6 py-3 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
+          >
+            Reintentar
+          </button>
+          <Link
+            href="/catalogo"
+            className="rounded-full border border-foreground/15 px-6 py-3 text-sm font-medium text-foreground/70 transition-colors hover:border-primary hover:text-primary"
+          >
+            Volver al catálogo
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   if (items.length === 0) {

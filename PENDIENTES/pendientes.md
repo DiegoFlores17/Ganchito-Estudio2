@@ -80,6 +80,16 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       por dispositivo a cambio de los ~$2–7/mes de arriba. Las imágenes
       propias (Blob) nunca dejaron de optimizarse.
 
+## Panel
+
+- [ ] **El label "Margen global (%)" miente: es MARKUP sobre costo, no margen.**
+      Con 45% cargado, el margen real sobre el precio de venta es 31%
+      (45/145). Para quien piensa en margen comercial, el número del panel
+      dice otra cosa que la que hace. Arreglo mínimo: renombrar el label y la
+      ayuda a "Markup sobre costo (%)" con la aclaración "equivale a un
+      margen del X% sobre venta" calculado en vivo. No tocar el modelo de
+      datos: `defaultMarginPercent` funciona bien, es solo el nombre visible.
+
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 
 Los hallazgos 1, 3, 4 y 6 se atacaron en la rama de la auditoría. Estos

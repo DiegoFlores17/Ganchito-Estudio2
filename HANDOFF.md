@@ -3,7 +3,7 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-08-31 — fix de precios de Zecat (re-import local)
+**Última actualización:** 2026-09-04 — botón de sync de proveedores
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -111,6 +111,42 @@ por email).
    columnas nuevas.
 
 ---
+
+## Botón de sync de proveedores (2026-09-04)
+
+Pantalla **`/admin/proveedores`** (cualquier admin, no solo super — sincronizar
+aplica la verdad del proveedor y es reversible; mismo criterio que
+Categorías). v1 corre solo Zecat, pero tabla, lock y UI son agnósticos.
+
+**Arquitectura**: batching encadenado conducido por el navegador — una
+server action procesa **una página de 10 productos** por invocación
+(`maxDuration: 120` explícito en el segmento; un archivo `"use server"` no
+puede exportar config) y el cliente la llama en loop. Obligatorio en Hobby:
+el sync entero (~390s solo Zecat) no entra en una invocación.
+
+**`SyncRun`** es lock + progreso + historial:
+- **Lock por índice único parcial** (una sola RUNNING por proveedor, en la
+  migración a mano — Prisma no lo expresa). El acquire es "insertar y que
+  la base decida". **La consola lo respeta**: `npm run sync:zecat` usa el
+  mismo camino de batches; verificado en vivo — el segundo en llegar recibe
+  "ya hay una sincronización corriendo, la inició consola hace 0 min".
+- **Retome**: RUNNING sin latido por 5 min está muerta y el próximo click
+  la retoma desde su cursor con contadores conservados. Verificado:
+  interrumpida en página 5 con 50 procesados → retomó en página 6 con los
+  contadores siguiendo desde 50.
+- **Ausentes**: al completar se comparan los ids vistos contra los activos
+  de la base — el mecanismo que habría detectado a los zombies. Primera
+  corrida real: detectó los 15 conocidos **y 3 nuevos** (4663 Mochila
+  Blatt, 5912 Botella Artemisa, 5188 Bolso Header — Zecat los sacó esta
+  semana). v1 informa; pausar automáticamente queda para después.
+
+**Dato de la primera corrida completa** (consola, 2026-09-04): la API de
+Zecat creció de 545 a **638 productos** — 96 creados con el costo de partner
+correcto. 0 pausados, 0 fallidos, 389s.
+
+**Historial sin límite a propósito** (~365 filas/año) — decisión explícita,
+ver CLAUDE.md. `seenExternalIds` se reescribe por batch (~6-8 KB); con miles
+de productos pasar a tabla hija (PENDIENTES).
 
 ## Fix de precios de Zecat: el costo era el precio publico (2026-08-31)
 

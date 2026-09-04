@@ -65,11 +65,68 @@ enum UsdRateMode {
   MANUAL
 }
 
+/// Estado de una corrida de sincronización de proveedor.
+enum SyncRunStatus {
+  RUNNING
+  DONE
+  FAILED
+}
+
 /// SUPER_ADMIN: configuración de negocio (margen, IVA, gestión de equipo).
 /// ADMIN: operación del día a día (cotizaciones). No ve equipo ni configuración.
 enum AdminRole {
   SUPER_ADMIN
   ADMIN
+}
+
+// ----------------------------------------------------------------------------
+//  SINCRONIZACIÓN DE PROVEEDORES
+// ----------------------------------------------------------------------------
+
+/// Una corrida de sincronización de un proveedor. Cumple tres roles:
+/// LOCK (una sola RUNNING por proveedor — índice único PARCIAL creado a mano
+/// en la migración, Prisma no lo puede expresar), PROGRESO retomable
+/// (cursor + contadores + ids vistos), y OBSERVABILIDAD (historial que los
+/// logs de Vercel no dan). El historial se conserva SIN límite a propósito
+/// — ver CLAUDE.md.
+model SyncRun {
+  id          String        @id @default(cuid())
+  /// Agnóstico de proveedor: v1 solo corre ZECAT, pero tabla/lock/UI no lo saben.
+  provider    ProductOrigin
+  status      SyncRunStatus @default(RUNNING)
+  /// Email del admin que la inició, o "consola" para los scripts.
+  startedBy   String
+  startedAt   DateTime      @default(now())
+  finishedAt  DateTime?
+  /// Cada batch lo actualiza. RUNNING sin latido por 5 min = corrida muerta:
+  /// no se pisa, se RETOMA desde `cursor`.
+  heartbeatAt DateTime      @default(now())
+
+  /// Última página del proveedor COMPLETADA (null = ninguna). Retomar =
+  /// arrancar de cursor + 1.
+  cursor      Int?
+  /// Total de productos que reporta el proveedor (se sabe en la página 1).
+  totalRemote Int?
+
+  created     Int @default(0)
+  updated     Int @default(0)
+  /// Pausados por ZecatPricingError (sin costo calculable).
+  paused      Int @default(0)
+  failed      Int @default(0)
+  usdWarnings Int @default(0)
+
+  /// Ids EXTERNOS vistos en esta corrida. Al completar la última página se
+  /// comparan contra los activos de la base: la diferencia son los AUSENTES
+  /// (candidatos a zombie). Se reescribe entero por batch — con miles de
+  /// productos pasar a tabla hija (ver PENDIENTES).
+  seenExternalIds    Json @default("[]")
+  /// [{ externalId, message }] de los fallidos.
+  errors             Json @default("[]")
+  /// Activos nuestros que el proveedor ya no devolvió. v1: solo se muestran.
+  missingExternalIds Json @default("[]")
+
+  @@index([provider, status])
+  @@map("sync_runs")
 }
 
 // ----------------------------------------------------------------------------

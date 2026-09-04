@@ -1,6 +1,6 @@
 import { Currency, Prisma, ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { fetchGenericProductDetail, iterateAllGenericProducts } from "./client";
+import { fetchGenericProductDetail, fetchGenericProductPage } from "./client";
 import {
   extractCostPrice,
   ZecatPricingError,
@@ -12,18 +12,6 @@ import {
   toDecimalOrNull,
 } from "./normalize";
 import type { ZecatFamily, ZecatGenericProduct, ZecatImage } from "./types";
-
-export interface SyncSummary {
-  total: number;
-  created: number;
-  updated: number;
-  failed: number;
-  /// Productos donde Zecat mandó currency:"USD". Es un dato sucio conocido
-  /// (los valores siguen viniendo en magnitud ARS): no se convierte nada,
-  /// solo se loguea para revisar caso por caso.
-  usdWarnings: Array<{ zecatId: string | number; name: string }>;
-  errors: Array<{ zecatId: string | number; message: string }>;
-}
 
 async function resolveCategoryId(
   family: ZecatFamily | undefined
@@ -294,57 +282,80 @@ function toImageCreateInput(
   };
 }
 
-export async function syncZecatCatalog(): Promise<SyncSummary> {
-  const summary: SyncSummary = {
-    total: 0,
-    created: 0,
-    updated: 0,
-    failed: 0,
-    usdWarnings: [],
+/// Resultado de sincronizar UNA pagina del listado de Zecat. Es la unidad
+/// de trabajo del boton del panel (batches chicos, cada invocacion lejos
+/// del limite de duracion de Vercel) y tambien del script de consola, que
+/// corre el mismo loop — un solo camino de codigo, un solo lock.
+export interface ZecatBatchResult {
+  counters: {
+    created: number;
+    updated: number;
+    paused: number;
+    failed: number;
+    usdWarnings: number;
+  };
+  seenExternalIds: string[];
+  errors: Array<{ externalId: string; message: string }>;
+  /// Total de productos y paginas que reporta la API (con este limit).
+  totalRemote: number;
+  totalPages: number;
+  /// true si esta era la ultima pagina.
+  isLast: boolean;
+}
+
+export async function syncZecatBatch(
+  page: number,
+  limit: number
+): Promise<ZecatBatchResult> {
+  const lista = await fetchGenericProductPage(page, limit);
+
+  const result: ZecatBatchResult = {
+    counters: { created: 0, updated: 0, paused: 0, failed: 0, usdWarnings: 0 },
+    seenExternalIds: [],
     errors: [],
+    totalRemote: lista.count ?? lista.generic_products.length,
+    totalPages: lista.total_pages ?? page,
+    isLast: page >= (lista.total_pages ?? page),
   };
 
-  for await (const listItem of iterateAllGenericProducts()) {
-    summary.total++;
-
+  for (const listItem of lista.generic_products) {
+    result.seenExternalIds.push(String(listItem.id));
     try {
       const detail = await fetchGenericProductDetail(listItem.id);
 
       if (detail.currency === "USD") {
-        summary.usdWarnings.push({ zecatId: detail.id, name: detail.name });
+        result.counters.usdWarnings++;
         console.warn(
           `[zecat-sync] currency="USD" sospechoso en producto ${detail.id} (${detail.name}) — se guarda como ARS sin convertir.`
         );
       }
 
-      const result = await syncProduct(detail);
-      if (result === "created") summary.created++;
-      else summary.updated++;
+      const outcome = await syncProduct(detail);
+      if (outcome === "created") result.counters.created++;
+      else result.counters.updated++;
     } catch (error) {
-      summary.failed++;
-      summary.errors.push({
-        zecatId: listItem.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
+      const message = error instanceof Error ? error.message : String(error);
+      result.errors.push({ externalId: String(listItem.id), message });
 
       // Sin costo calculable NO puede quedar a la venta el precio viejo:
-      // si el producto ya existia (importado cuando costPrice guardaba el
-      // precio PUBLICO, inflado un ~43%), se pausa. "Un producto faltante y
-      // visible en el log es preferible a uno con precio inflado que nadie
-      // detecta." Si no existia, no hay nada que pausar.
+      // si el producto ya existia, se pausa. "Un producto faltante y
+      // visible es preferible a uno con precio inflado que nadie detecta."
       if (error instanceof ZecatPricingError) {
         const paused = await prisma.product.updateMany({
           where: { zecatId: String(listItem.id), active: true },
           data: { active: false },
         });
         if (paused.count > 0) {
+          result.counters.paused++;
           console.warn(
             `[zecat-sync] Producto ${listItem.id} PAUSADO: existia con el costo viejo y no se pudo recalcular.`
           );
+          continue;
         }
       }
+      result.counters.failed++;
     }
   }
 
-  return summary;
+  return result;
 }

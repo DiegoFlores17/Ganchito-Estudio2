@@ -54,10 +54,13 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 export async function fetchGenericProductPage(
-  page: number
+  page: number,
+  // El sync por batches del panel usa paginas mas chicas (10) para que cada
+  // invocacion quede lejos del limite de duracion de Vercel.
+  limit: number = PAGE_LIMIT
 ): Promise<ZecatGenericProductListResponse> {
   return fetchJson<ZecatGenericProductListResponse>(
-    `/generic_product?page=${page}&limit=${PAGE_LIMIT}`
+    `/generic_product?page=${page}&limit=${limit}`
   );
 }
 

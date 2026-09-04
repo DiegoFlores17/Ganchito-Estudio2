@@ -24,6 +24,9 @@ export default async function AdminPanelLayout({
     { label: "Cotizaciones", href: "/admin/cotizaciones" },
     { label: "Productos", href: "/admin/productos" },
     { label: "Categorías", href: "/admin/categorias" },
+    // Sincronizar es operacion del dia a dia (aplica la verdad del
+    // proveedor, reversible), no configuracion de negocio: cualquier admin.
+    { label: "Proveedores", href: "/admin/proveedores" },
     ...(isSuperAdmin
       ? [
           { label: "Equipo", href: "/admin/equipo" },

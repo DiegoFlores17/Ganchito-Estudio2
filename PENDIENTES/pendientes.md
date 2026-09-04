@@ -90,6 +90,14 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       margen del X% sobre venta" calculado en vivo. No tocar el modelo de
       datos: `defaultMarginPercent` funciona bien, es solo el nombre visible.
 
+## Sync de proveedores (botón del panel)
+
+- [ ] **`SyncRun.seenExternalIds` se reescribe entero en cada batch.** Con 553
+      productos son ~6-8 KB por update — hoy irrelevante. Es el primer punto
+      que se pone incómodo si un proveedor trae miles de productos: en ese
+      momento, mover los ids vistos a una tabla hija con append en vez de
+      reescribir el Json.
+
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 
 Los hallazgos 1, 3, 4 y 6 se atacaron en la rama de la auditoría. Estos

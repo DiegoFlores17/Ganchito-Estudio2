@@ -264,6 +264,19 @@ en silencio.
   - Isotipo: el clip ("ganchito"). Logo y colores reales en la carpeta de marca del proyecto.
   - Hero grande e impactante. NO clonar el blanco y negro de la referencia.
 
+### Sincronización de proveedores (panel + consola)
+
+- La tabla `SyncRun` es lock + progreso retomable + observabilidad de cada
+  corrida. **El historial se conserva a propósito, sin límite ni limpieza**:
+  con un sync diario son ~365 filas/año, chicas, y el historial sirve para
+  diagnóstico. Es una decisión explícita, no un olvido — si algún día
+  molesta, se agrega retención, no se borra callado.
+- El lock es un índice único parcial en la base (una sola RUNNING por
+  proveedor): el "acquire" es insertar y que la base decida, nunca
+  consultar-y-crear. Lo respetan el botón del panel Y los scripts de consola.
+- Una RUNNING sin heartbeat por 5 minutos está muerta: se RETOMA desde su
+  cursor, no se pisa ni se arranca de cero.
+
 ## Seguridad (siempre)
 
 - `.env` y `.env.local` van en `.gitignore`. Nunca commitear los tokens de proveedor

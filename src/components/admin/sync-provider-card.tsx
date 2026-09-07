@@ -126,20 +126,33 @@ export function SyncProviderCard({
             )}
             {resultado.failed > 0 && <> · {resultado.failed} fallidos</>}
           </p>
-          {((resultado.missingExternalIds?.length ?? 0) > 0 ||
-            (resultado.alreadyPausedMissing ?? 0) > 0) && (
-            <p className="mt-1 text-primary-dark">
-              {resultado.missingExternalIds?.length ?? 0} ausente(s) nuevo(s)
-              {(resultado.alreadyPausedMissing ?? 0) > 0 && (
-                <>
-                  {" "}
-                  · {resultado.alreadyPausedMissing} ya pausados siguen fuera
-                  de la API
-                </>
-              )}{" "}
-              — el detalle está en el historial de abajo.
+          {resultado.autoPauseSkipped && (
+            <p className="mt-1 font-medium text-primary-dark">
+              ⚠ {resultado.missingExternalIds?.length} productos dejaron de
+              venir en la API de golpe — supera el umbral de seguridad, así
+              que NO se pausó ninguno. Revisalos en el historial.
             </p>
           )}
+          {((resultado.missingExternalIds?.length ?? 0) > 0 ||
+            (resultado.alreadyPausedMissing ?? 0) > 0) &&
+            !resultado.autoPauseSkipped && (
+              <p className="mt-1 text-primary-dark">
+                {(resultado.autoPaused ?? 0) > 0 && (
+                  <>
+                    {resultado.autoPaused} pausado(s) automáticamente — el
+                    proveedor ya no los ofrece
+                  </>
+                )}
+                {(resultado.alreadyPausedMissing ?? 0) > 0 && (
+                  <>
+                    {(resultado.autoPaused ?? 0) > 0 && " · "}
+                    {resultado.alreadyPausedMissing} ya pausados siguen fuera
+                    de la API
+                  </>
+                )}{" "}
+                — el detalle está en el historial de abajo.
+              </p>
+            )}
           {resultado.usdWarnings > 0 && (
             <p className="mt-1 text-xs text-foreground/50">
               {resultado.usdWarnings} productos con moneda mal informada por el

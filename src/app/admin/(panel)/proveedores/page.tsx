@@ -99,6 +99,8 @@ export default async function ProveedoresPage() {
                     )
                     .map((pz) => ({ id: pz.zecatId!, nombre: pz.name }))
                 : [],
+            autoPausedIds: r.autoPausedExternalIds as string[],
+            autoPauseSkipped: r.autoPauseSkipped,
             errors: r.errors as Array<{ externalId: string; message: string }>,
           }))}
         />

@@ -32,6 +32,9 @@ export interface SyncProgress {
   /// (accionables) y ya-pausados que siguen fuera de la API (informativo).
   missingExternalIds?: string[];
   alreadyPausedMissing?: number;
+  /// Cuantos pauso automaticamente esta corrida, y si el umbral lo freno.
+  autoPaused?: number;
+  autoPauseSkipped?: boolean;
   errors: Array<{ externalId: string; message: string }>;
 }
 
@@ -98,7 +101,13 @@ export async function advanceSync(
     });
 
     if (batch.isLast) {
-      const { run: done, pausedMissingExternalIds } = await finishSyncRun(runId);
+      const fin = await finishSyncRun(runId);
+      if (fin.aborted) {
+        throw new Error(
+          "La sincronización se abortó: el proveedor devolvió una respuesta anómala (muy pocos productos). No se pausó nada — reintentá más tarde."
+        );
+      }
+      const { run: done, pausedMissingExternalIds } = fin;
       // Los costos pueden haber cambiado: el catalogo publico se refresca.
       revalidatePath("/catalogo");
       revalidatePath("/");
@@ -115,6 +124,8 @@ export async function advanceSync(
         usdWarnings: done.usdWarnings,
         missingExternalIds: done.missingExternalIds as string[],
         alreadyPausedMissing: pausedMissingExternalIds.length,
+        autoPaused: (done.autoPausedExternalIds as string[]).length,
+        autoPauseSkipped: done.autoPauseSkipped,
         errors: done.errors as Array<{ externalId: string; message: string }>,
       };
     }

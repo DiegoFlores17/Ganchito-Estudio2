@@ -65,7 +65,13 @@ async function main() {
     return;
   }
 
-  const { run: done, pausedMissingExternalIds } = await finishSyncRun(run.id);
+  const fin = await finishSyncRun(run.id);
+  if (fin.aborted) {
+    console.error("\nCorrida ABORTADA: respuesta anomala del proveedor (ver SyncRun.errors). No se pauso nada.");
+    process.exitCode = 1;
+    return;
+  }
+  const { run: done, pausedMissingExternalIds } = fin;
   const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
 
   console.log("\nResumen de la sincronizacion:");
@@ -79,10 +85,14 @@ async function main() {
 
   const missing = done.missingExternalIds as string[];
   if (missing.length) {
-    console.log(
-      `\nAUSENTES: ${missing.length} producto(s) activos que la API ya no devuelve (candidatos a zombie):`
-    );
-    for (const id of missing) console.log(`  - ${id}`);
+    const auto = done.autoPausedExternalIds as string[];
+    console.log(`\nAUSENTES: ${missing.length} producto(s) que la API ya no devuelve:`);
+    for (const id of missing) console.log(`  - ${id}${auto.includes(id) ? " (pausado automaticamente)" : ""}`);
+    if (done.autoPauseSkipped) {
+      console.log(
+        `UMBRAL DE SEGURIDAD: ${missing.length} ausentes superan el limite — NO se pauso ninguno. Revisar manualmente.`
+      );
+    }
   }
   if (pausedMissingExternalIds.length) {
     console.log(

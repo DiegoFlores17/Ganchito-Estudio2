@@ -14,6 +14,8 @@ interface RunView {
   failed: number;
   usdWarnings: number;
   missing: Array<{ id: string; nombre: string; activo: boolean }>;
+  autoPausedIds: string[];
+  autoPauseSkipped: boolean;
   /// Ya pausados que siguen fuera de la API (informativo, calculado al
   /// renderizar contra el estado actual).
   pausedMissing: Array<{ id: string; nombre: string }>;
@@ -76,12 +78,28 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
                 <> · {run.paused} pausados por falta de precio del proveedor</>
               )}
               {run.failed > 0 && <> · {run.failed} fallidos</>}
-              {run.missing.length > 0 && (
+              {run.autoPausedIds.length > 0 && (
                 <span className="text-primary-dark">
                   {" "}
-                  · {run.missing.length} ausentes nuevos
+                  · {run.autoPausedIds.length} pausados automáticamente (el
+                  proveedor ya no los ofrece)
                 </span>
               )}
+              {run.autoPauseSkipped && (
+                <span className="font-medium text-primary-dark">
+                  {" "}
+                  · ⚠ {run.missing.length} ausentes de golpe: umbral de
+                  seguridad, no se pausó ninguno
+                </span>
+              )}
+              {run.missing.length > 0 &&
+                run.autoPausedIds.length === 0 &&
+                !run.autoPauseSkipped && (
+                  <span className="text-primary-dark">
+                    {" "}
+                    · {run.missing.length} ausentes nuevos
+                  </span>
+                )}
               {run.pausedMissing.length > 0 && (
                 <> · {run.pausedMissing.length} ya pausados siguen fuera de la API</>
               )}
@@ -100,12 +118,16 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
                 {run.missing.length > 0 && (
                   <div>
                     <p className="font-medium text-foreground/70">
-                      Activos que el proveedor ya no devuelve:
+                      El proveedor ya no los devuelve:
                     </p>
                     {run.missing.map((m) => (
                       <p key={m.id} className="text-foreground/60">
                         [{m.id}] {m.nombre}
-                        {!m.activo && " (ya pausado)"}
+                        {run.autoPausedIds.includes(m.id)
+                          ? " — pausado automáticamente"
+                          : m.activo
+                            ? " — SIGUE A LA VENTA, revisar"
+                            : " — ya pausado"}
                       </p>
                     ))}
                   </div>

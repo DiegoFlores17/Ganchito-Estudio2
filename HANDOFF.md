@@ -112,6 +112,37 @@ por email).
 
 ---
 
+## Auto-pausado de ausentes (2026-09-07)
+
+La prudencia de v1 (solo informar) cumplió su función: el mecanismo corrió
+dos veces detectando bien, y pausar es reversible (si el producto vuelve a
+la API, el próximo sync lo reactiva vía `published`). Ahora `finishSyncRun`
+pausa solo, con **dos guardas en cascada**:
+
+1. **Cordura**: vistos < 50% de los activos → corrida FAILED sin calcular
+   ausencia ("respuesta anómala del proveedor"). Un estornudo de Zecat no
+   puede pausar el catálogo.
+2. **Umbral**: se auto-pausa solo si ausentes ≤ max(10, X% de activos), con
+   X **configurable por proveedor** en `Supplier.autoPauseMaxPercent`
+   (default 5) — **primer uso real de la tabla Supplier**, fila creada
+   on-demand, editable sin deploy. Por encima: no se pausa NINGUNO,
+   `autoPauseSkipped` y advertencia ⚠ prominente. Razonamiento del umbral
+   generoso (decisión del usuario): pausar de más se revierte solo; frenar
+   de más deja fantasmas a la venta — y el fin de una campaña puede sacar
+   15-20 productos legítimamente.
+
+Lo pausado queda en `SyncRun.autoPausedExternalIds` (reversible por corrida)
+y visible: "N pausados automáticamente (el proveedor ya no los ofrece)".
+Migración `20260907150000_add_auto_pause`, aditiva. Verificado con la
+batería de `scripts/audit-verify-syncrun.ts`: cordura aborta, umbral frena
+sin pausar, auto-pausado pausa y registra, Supplier on-demand.
+
+**🔴 BLOQUEANTE del cron**: el ⚠ del umbral solo se ve en pantalla — antes
+de habilitar el cron hace falta el mail (ver PENDIENTES).
+
+Los 3 ausentes de la primera corrida (4663, 5188, 5912) se pausaron a mano
+en producción: **prod quedó 638 activos = exactamente la oferta de la API**.
+
 ## Botón de sync: el primer click en producción murió por región (2026-09-07)
 
 El primer `advanceSync` en producción dio **504 — Vercel Runtime Timeout**

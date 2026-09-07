@@ -94,6 +94,14 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Sync de proveedores (botón del panel)
 
+- [ ] **BLOQUEANTE del cron de productos: el aviso del umbral tiene que salir
+      del panel.** Cuando el auto-pausado se frena por umbral (`⚠ N ausentes
+      de golpe`) hoy solo se ve en la pantalla — con el cron nadie va a estar
+      mirando. Antes de habilitar el cron: mail vía Resend a
+      `SiteConfig.contactEmail` cuando `autoPauseSkipped` o cuando una
+      corrida termina FAILED. No es adorno: es la diferencia entre enterarse
+      y no enterarse.
+
 - [ ] **`syncProduct` hace 13+ awaits de base POR producto (uno más por
       variante).** Con `gru1` es tolerable (~2ms/roundtrip), pero esa es la
       fragilidad de fondo — fue lo que mató el primer sync de producción

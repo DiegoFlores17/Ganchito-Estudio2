@@ -124,6 +124,14 @@ model SyncRun {
   errors             Json @default("[]")
   /// Activos nuestros que el proveedor ya no devolvió. v1: solo se muestran.
   missingExternalIds Json @default("[]")
+  /// Los que ESTA corrida pausó automáticamente (subconjunto de missing).
+  /// Registrado para poder revertir una corrida puntual; la reversión
+  /// principal es automática igual (si el producto vuelve a la API, el
+  /// próximo sync lo reactiva via `published`).
+  autoPausedExternalIds Json @default("[]")
+  /// true si el umbral de seguridad FRENÓ el auto-pausado (demasiados
+  /// ausentes de golpe). La UI lo muestra como advertencia prominente.
+  autoPauseSkipped Boolean @default(false)
 
   @@index([provider, status])
   @@map("sync_runs")
@@ -593,9 +601,19 @@ model QuoteItem {
 model Supplier {
   id        String   @id @default(cuid())
   name      String
+  /// A que ProductOrigin corresponde. Primer uso real de esta tabla: la
+  /// config de sync por proveedor. La fila se crea on-demand al sincronizar.
+  origin    ProductOrigin? @unique
   apiKey    String?
   apiUrl    String?
   active    Boolean  @default(true)
+
+  /// Umbral del auto-pausado de ausentes, en % de los productos activos
+  /// (piso absoluto de 10, constante en lib/sync-run.ts). Si una corrida
+  /// detecta MAS ausentes que max(10, este %), no pausa NINGUNO y avisa:
+  /// una caida masiva es casi seguro un error del proveedor, no cien
+  /// discontinuaciones juntas. Editable sin deploy (UPDATE a esta fila).
+  autoPauseMaxPercent Decimal @default(5) @db.Decimal(5, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

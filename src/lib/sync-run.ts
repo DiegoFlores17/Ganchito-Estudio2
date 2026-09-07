@@ -126,6 +126,17 @@ export async function recordBatch(
 /// del proveedor en NUESTRA base que el proveedor no devolvió en toda la
 /// corrida — los candidatos a zombie que en su momento nadie detectó. v1
 /// solo los informa; pausarlos automáticamente queda para después.
+/// Piso absoluto del umbral de auto-pausado: por debajo de esta cantidad de
+/// ausentes se pausa siempre, sin importar el porcentaje (protege catalogos
+/// chicos, donde 5% seria 1 o 2 productos). El porcentaje es configurable
+/// por proveedor en Supplier.autoPauseMaxPercent.
+export const AUTO_PAUSE_FLOOR = 10;
+
+/// Guarda de cordura: si el proveedor devolvio menos de esta fraccion de
+/// nuestros activos, la respuesta es anomala (pagina vacia, total_pages
+/// mentiroso) y la corrida se marca FAILED sin calcular ausencia siquiera.
+const SANITY_MIN_SEEN_RATIO = 0.5;
+
 export async function finishSyncRun(runId: string) {
   const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
   const seen = new Set(run.seenExternalIds as string[]);
@@ -136,12 +147,25 @@ export async function finishSyncRun(runId: string) {
   });
   const externalId = (p: { zecatId: string | null; cdoId: string | null }) =>
     run.provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId;
+  const activos = nuestros.filter((p) => p.active).length;
+
+  // Guarda de cordura ANTES de cualquier calculo: una respuesta vacia o a
+  // mitad no es informacion sobre ausencias, es un error del proveedor.
+  // Sin esta guarda, un estornudo de la API pausaria el catalogo entero.
+  if (activos > 0 && seen.size < activos * SANITY_MIN_SEEN_RATIO) {
+    const motivo = `Respuesta anómala del proveedor: devolvió ${seen.size} productos contra ${activos} activos nuestros. No se calculó ausencia ni se pausó nada.`;
+    const aborted = await failSyncRun(runId, motivo);
+    return {
+      run: aborted,
+      pausedMissingExternalIds: [] as string[],
+      aborted: true as const,
+    };
+  }
 
   // Dos conjuntos, porque juntos confunden: `missing` son ACTIVOS que el
-  // proveedor ya no devuelve (accionables — candidatos a pausar);
-  // `pausedMissing` son los YA pausados que siguen fuera de la API
-  // (informativos — sin ellos, "3 ausentes" y "17 fuera de la API" parecen
-  // contradecirse, y ya nos costo una vuelta de diagnostico entenderlo).
+  // proveedor ya no devuelve (accionables); `pausedMissing` son los YA
+  // pausados que siguen fuera de la API (informativos — sin ellos, "3
+  // ausentes" y "17 fuera de la API" parecen contradecirse).
   const missing: string[] = [];
   const pausedMissing: string[] = [];
   for (const p of nuestros) {
@@ -150,17 +174,61 @@ export async function finishSyncRun(runId: string) {
     (p.active ? missing : pausedMissing).push(id);
   }
 
+  // Auto-pausado con umbral: un producto que el proveedor no ofrece no se
+  // puede vender, y pausar es reversible (si vuelve a la API, el proximo
+  // sync lo reactiva via `published`). Pero una caida MASIVA de golpe es
+  // casi seguro un error del proveedor: por encima de max(FLOOR, X% de los
+  // activos) no se pausa NINGUNO y se deja la decision al humano. La
+  // asimetria justifica el umbral generoso: pausar de mas se revierte solo;
+  // frenar de mas deja productos fantasma a la venta.
+  const supplier = await prisma.supplier.upsert({
+    where: { origin: run.provider },
+    update: {},
+    create: {
+      origin: run.provider,
+      name: run.provider === ProductOrigin.ZECAT ? "Zecat" : run.provider,
+    },
+  });
+  const umbral = Math.max(
+    AUTO_PAUSE_FLOOR,
+    Math.floor((activos * Number(supplier.autoPauseMaxPercent)) / 100)
+  );
+
+  let autoPaused: string[] = [];
+  let autoPauseSkipped = false;
+  if (missing.length > 0 && missing.length <= umbral) {
+    const idField =
+      run.provider === ProductOrigin.ZECAT ? "zecatId" : "cdoId";
+    await prisma.product.updateMany({
+      where: {
+        origin: run.provider,
+        [idField]: { in: missing },
+        active: true,
+      },
+      data: { active: false },
+    });
+    autoPaused = missing;
+  } else if (missing.length > umbral) {
+    autoPauseSkipped = true;
+  }
+
   const updated = await prisma.syncRun.update({
     where: { id: runId },
     data: {
       status: SyncRunStatus.DONE,
       finishedAt: new Date(),
       missingExternalIds: missing,
+      autoPausedExternalIds: autoPaused,
+      autoPauseSkipped,
     },
   });
-  // pausedMissing no se persiste (es derivable en cualquier momento del
-  // estado actual); se devuelve para que el resumen inmediato lo muestre.
-  return { run: updated, pausedMissingExternalIds: pausedMissing };
+  // pausedMissing no se persiste (es derivable del estado actual); se
+  // devuelve para el resumen inmediato.
+  return {
+    run: updated,
+    pausedMissingExternalIds: pausedMissing,
+    aborted: false as const,
+  };
 }
 
 /// Marca la corrida como fallida (error no recuperable del loop, no de un

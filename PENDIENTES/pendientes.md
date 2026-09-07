@@ -43,7 +43,9 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       Después: decidir las cotizaciones existentes (pruebas → borrar;
       reales → dejar).
 - [x] **Los 15 productos zombie**: pausados en producción (14 — el 4792 no
-      existía allá). Siguen pausados en local también.
+      existía allá). **En local NUNCA se pausaron** (verificado el 2026-09-07:
+      la pausa fue solo contra Neon) — por eso local muestra 656 ZECAT
+      activos y producción 641. Inocuo: local es entorno de trabajo.
 - [ ] **Las campañas homónimas de los dos proveedores son trabajo manual
       RECURRENTE del cliente.** Cada campaña nueva de cada proveedor ("Día de
       la Madre" la traen Zecat Y CDO) aparece como categoría visible y el

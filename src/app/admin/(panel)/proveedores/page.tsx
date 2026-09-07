@@ -42,6 +42,15 @@ export default async function ProveedoresPage() {
     missingProducts.map((p) => [p.zecatId!, { name: p.name, active: p.active }])
   );
 
+  // Ya-pausados que siguen fuera de la API, POR corrida, calculado contra
+  // el estado actual (no se persiste: es derivable). Sin esta linea, "3
+  // ausentes" y "17 fuera de la API" parecen contradecirse — ya nos costo
+  // una vuelta de diagnostico.
+  const pausados = await prisma.product.findMany({
+    where: { origin: ProductOrigin.ZECAT, active: false, deletedAt: null },
+    select: { zecatId: true, name: true },
+  });
+
   return (
     <div>
       <h1 className="text-2xl font-medium text-foreground">Proveedores</h1>
@@ -80,6 +89,16 @@ export default async function ProveedoresPage() {
               nombre: missingNameById.get(id)?.name ?? id,
               activo: missingNameById.get(id)?.active ?? false,
             })),
+            pausedMissing:
+              r.status === "DONE"
+                ? pausados
+                    .filter(
+                      (pz) =>
+                        pz.zecatId !== null &&
+                        !(r.seenExternalIds as string[]).includes(pz.zecatId)
+                    )
+                    .map((pz) => ({ id: pz.zecatId!, nombre: pz.name }))
+                : [],
             errors: r.errors as Array<{ externalId: string; message: string }>,
           }))}
         />

@@ -65,7 +65,7 @@ async function main() {
     return;
   }
 
-  const done = await finishSyncRun(run.id);
+  const { run: done, pausedMissingExternalIds } = await finishSyncRun(run.id);
   const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
 
   console.log("\nResumen de la sincronizacion:");
@@ -83,6 +83,11 @@ async function main() {
       `\nAUSENTES: ${missing.length} producto(s) activos que la API ya no devuelve (candidatos a zombie):`
     );
     for (const id of missing) console.log(`  - ${id}`);
+  }
+  if (pausedMissingExternalIds.length) {
+    console.log(
+      `Ya pausados que siguen fuera de la API: ${pausedMissingExternalIds.length} (${pausedMissingExternalIds.join(", ")})`
+    );
   }
 
   const errors = done.errors as Array<{ externalId: string; message: string }>;

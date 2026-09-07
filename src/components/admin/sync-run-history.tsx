@@ -14,6 +14,9 @@ interface RunView {
   failed: number;
   usdWarnings: number;
   missing: Array<{ id: string; nombre: string; activo: boolean }>;
+  /// Ya pausados que siguen fuera de la API (informativo, calculado al
+  /// renderizar contra el estado actual).
+  pausedMissing: Array<{ id: string; nombre: string }>;
   errors: Array<{ externalId: string; message: string }>;
 }
 
@@ -40,7 +43,11 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
   return (
     <div className="mt-3 flex flex-col gap-2">
       {runs.map((run) => {
-        const tieneDetalle = run.missing.length > 0 || run.errors.length > 0;
+        const tieneDetalle =
+          run.missing.length > 0 ||
+          run.pausedMissing.length > 0 ||
+          run.errors.length > 0 ||
+          run.usdWarnings > 0;
         const expandida = abierta === run.id;
         return (
           <div
@@ -64,14 +71,19 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
               </span>
             </div>
             <p className="mt-1 text-xs text-foreground/60">
-              {run.created} creados · {run.updated} actualizados · {run.paused}{" "}
-              pausados · {run.failed} fallidos
-              {run.usdWarnings > 0 && <> · {run.usdWarnings} USD</>}
+              {run.created} creados · {run.updated} actualizados
+              {run.paused > 0 && (
+                <> · {run.paused} pausados por falta de precio del proveedor</>
+              )}
+              {run.failed > 0 && <> · {run.failed} fallidos</>}
               {run.missing.length > 0 && (
                 <span className="text-primary-dark">
                   {" "}
-                  · {run.missing.length} ausentes
+                  · {run.missing.length} ausentes nuevos
                 </span>
+              )}
+              {run.pausedMissing.length > 0 && (
+                <> · {run.pausedMissing.length} ya pausados siguen fuera de la API</>
               )}
             </p>
             {tieneDetalle && (
@@ -97,6 +109,25 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
                       </p>
                     ))}
                   </div>
+                )}
+                {run.pausedMissing.length > 0 && (
+                  <div>
+                    <p className="font-medium text-foreground/70">
+                      Ya pausados que siguen fuera de la API:
+                    </p>
+                    {run.pausedMissing.map((m) => (
+                      <p key={m.id} className="text-foreground/60">
+                        [{m.id}] {m.nombre}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {run.usdWarnings > 0 && (
+                  <p className="text-foreground/60">
+                    {run.usdWarnings} productos con moneda mal informada por el
+                    proveedor — se ignora y se toman como pesos (dato sucio
+                    conocido de Zecat).
+                  </p>
                 )}
                 {run.errors.length > 0 && (
                   <div>

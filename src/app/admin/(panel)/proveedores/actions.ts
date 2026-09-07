@@ -28,8 +28,10 @@ export interface SyncProgress {
   paused: number;
   failed: number;
   usdWarnings: number;
-  /// Solo cuando done: activos nuestros que el proveedor no devolvio.
+  /// Solo cuando done: activos nuestros que el proveedor no devolvio
+  /// (accionables) y ya-pausados que siguen fuera de la API (informativo).
   missingExternalIds?: string[];
+  alreadyPausedMissing?: number;
   errors: Array<{ externalId: string; message: string }>;
 }
 
@@ -96,7 +98,7 @@ export async function advanceSync(
     });
 
     if (batch.isLast) {
-      const done = await finishSyncRun(runId);
+      const { run: done, pausedMissingExternalIds } = await finishSyncRun(runId);
       // Los costos pueden haber cambiado: el catalogo publico se refresca.
       revalidatePath("/catalogo");
       revalidatePath("/");
@@ -112,6 +114,7 @@ export async function advanceSync(
         failed: done.failed,
         usdWarnings: done.usdWarnings,
         missingExternalIds: done.missingExternalIds as string[],
+        alreadyPausedMissing: pausedMissingExternalIds.length,
         errors: done.errors as Array<{ externalId: string; message: string }>,
       };
     }

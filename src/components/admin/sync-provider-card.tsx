@@ -120,16 +120,30 @@ export function SyncProviderCard({
             Sincronización completa
           </p>
           <p className="mt-1">
-            {resultado.created} creados · {resultado.updated} actualizados ·{" "}
-            {resultado.paused} pausados · {resultado.failed} fallidos
-            {resultado.usdWarnings > 0 && (
-              <> · {resultado.usdWarnings} con currency USD (ignorada)</>
+            {resultado.created} creados · {resultado.updated} actualizados
+            {resultado.paused > 0 && (
+              <> · {resultado.paused} pausados por falta de precio del proveedor</>
             )}
+            {resultado.failed > 0 && <> · {resultado.failed} fallidos</>}
           </p>
-          {(resultado.missingExternalIds?.length ?? 0) > 0 && (
+          {((resultado.missingExternalIds?.length ?? 0) > 0 ||
+            (resultado.alreadyPausedMissing ?? 0) > 0) && (
             <p className="mt-1 text-primary-dark">
-              {resultado.missingExternalIds!.length} producto(s) activos que el
-              proveedor ya no devuelve — revisalos en el historial de abajo.
+              {resultado.missingExternalIds?.length ?? 0} ausente(s) nuevo(s)
+              {(resultado.alreadyPausedMissing ?? 0) > 0 && (
+                <>
+                  {" "}
+                  · {resultado.alreadyPausedMissing} ya pausados siguen fuera
+                  de la API
+                </>
+              )}{" "}
+              — el detalle está en el historial de abajo.
+            </p>
+          )}
+          {resultado.usdWarnings > 0 && (
+            <p className="mt-1 text-xs text-foreground/50">
+              {resultado.usdWarnings} productos con moneda mal informada por el
+              proveedor (se ignora y se toman como pesos).
             </p>
           )}
         </div>

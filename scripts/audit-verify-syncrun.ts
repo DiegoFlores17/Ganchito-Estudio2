@@ -33,7 +33,7 @@ async function main() {
 
   // 5. Finish calcula ausentes: ids vistos a/b/c no matchean ningun zecatId
   //    real, asi que TODOS los activos deberian aparecer como ausentes.
-  const done = await finishSyncRun(run.id);
+  const { run: done } = await finishSyncRun(run.id);
   const activos = await prisma.product.count({ where: { origin: "ZECAT", active: true, deletedAt: null } });
   console.log("[ausentes] detectados:", (done.missingExternalIds as string[]).length, "| activos en base:", activos, "| coinciden:", (done.missingExternalIds as string[]).length === activos);
 

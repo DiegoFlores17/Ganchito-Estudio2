@@ -130,17 +130,27 @@ export async function finishSyncRun(runId: string) {
   const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
   const seen = new Set(run.seenExternalIds as string[]);
 
-  const activos = await prisma.product.findMany({
-    where: { origin: run.provider, active: true, deletedAt: null },
-    select: { zecatId: true, cdoId: true },
+  const nuestros = await prisma.product.findMany({
+    where: { origin: run.provider, deletedAt: null },
+    select: { zecatId: true, cdoId: true, active: true },
   });
   const externalId = (p: { zecatId: string | null; cdoId: string | null }) =>
     run.provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId;
-  const missing = activos
-    .map(externalId)
-    .filter((id): id is string => id !== null && !seen.has(id));
 
-  return prisma.syncRun.update({
+  // Dos conjuntos, porque juntos confunden: `missing` son ACTIVOS que el
+  // proveedor ya no devuelve (accionables — candidatos a pausar);
+  // `pausedMissing` son los YA pausados que siguen fuera de la API
+  // (informativos — sin ellos, "3 ausentes" y "17 fuera de la API" parecen
+  // contradecirse, y ya nos costo una vuelta de diagnostico entenderlo).
+  const missing: string[] = [];
+  const pausedMissing: string[] = [];
+  for (const p of nuestros) {
+    const id = externalId(p);
+    if (id === null || seen.has(id)) continue;
+    (p.active ? missing : pausedMissing).push(id);
+  }
+
+  const updated = await prisma.syncRun.update({
     where: { id: runId },
     data: {
       status: SyncRunStatus.DONE,
@@ -148,6 +158,9 @@ export async function finishSyncRun(runId: string) {
       missingExternalIds: missing,
     },
   });
+  // pausedMissing no se persiste (es derivable en cualquier momento del
+  // estado actual); se devuelve para que el resumen inmediato lo muestre.
+  return { run: updated, pausedMissingExternalIds: pausedMissing };
 }
 
 /// Marca la corrida como fallida (error no recuperable del loop, no de un

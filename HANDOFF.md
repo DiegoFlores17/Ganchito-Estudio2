@@ -3,7 +3,7 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-09-04 — botón de sync de proveedores
+**Última actualización:** 2026-09-07 — funciones a gru1 (fix del sync en prod)
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -111,6 +111,32 @@ por email).
    columnas nuevas.
 
 ---
+
+## Botón de sync: el primer click en producción murió por región (2026-09-07)
+
+El primer `advanceSync` en producción dio **504 — Vercel Runtime Timeout**
+(evidencia capturada de los logs antes de que vencieran) y la corrida quedó
+RUNNING con todo en 0: la función fue matada ANTES de llegar a su catch.
+
+**La causa estaba escrita en nuestros PENDIENTES** (ítem del cron): las
+funciones corren en `iad1` por defecto y Neon está en `sa-east-1` —
+`syncProduct` hace 13+ roundtrips por producto (uno más por variante; hay
+productos con 59), así que un batch de 10 son 150-700 roundtrips × ~140ms =
+20-90s solo de latencia. La calibración del batch ("1.6s/producto") se midió
+desde Argentina (~30ms a Neon), no desde iad1 — el entorno equivocado.
+
+**Fix: `"regions": ["gru1"]` GLOBAL en vercel.json** — no solo para el sync:
+todas las pages/actions leen Neon y el cron pega a dolarapi (Argentina).
+Esto probablemente explica también los 3,4s del catálogo que la auditoría
+atribuyó a "Neon frío". El batch queda en 10 (post-gru1 el patológico de 59
+variantes cuesta ~0,2s de base; la palanca real a futuro es batchear
+escrituras — ver PENDIENTES). La corrida zombie del 4/9 quedó marcada
+FAILED. La card ahora muestra el total de la última corrida (`totalRemote`)
+en vez de un número hardcodeado.
+
+**No quedó trabado nada**: una RUNNING con latido muerto se retoma sola al
+click siguiente (verificado en local) — cada reintento moría igual hasta
+este fix, nada más.
 
 ## Botón de sync de proveedores (2026-09-04)
 

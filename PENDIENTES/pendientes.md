@@ -92,6 +92,14 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Sync de proveedores (botón del panel)
 
+- [ ] **`syncProduct` hace 13+ awaits de base POR producto (uno más por
+      variante).** Con `gru1` es tolerable (~2ms/roundtrip), pero esa es la
+      fragilidad de fondo — fue lo que mató el primer sync de producción
+      desde `iad1` (504 por timeout: 150-700 roundtrips × ~140ms por batch).
+      El fix robusto ante CUALQUIER latencia: batchear las escrituras de
+      variantes (upserts uno a uno → `createMany`/`updateMany` o una sola
+      query con `unnest`), y lo mismo para imágenes/áreas/técnicas. Hacerlo
+      junto con la unificación de conectores del cron.
 - [ ] **`SyncRun.seenExternalIds` se reescribe entero en cada batch.** Con 553
       productos son ~6-8 KB por update — hoy irrelevante. Es el primer punto
       que se pone incómodo si un proveedor trae miles de productos: en ese

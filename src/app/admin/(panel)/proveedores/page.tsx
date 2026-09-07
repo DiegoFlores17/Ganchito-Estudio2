@@ -22,6 +22,11 @@ export default async function ProveedoresPage() {
     take: 5,
   });
 
+  // El conteo de la card sale de la ultima corrida que llego a saberlo (la
+  // API lo reporta en la pagina 1), no de un numero hardcodeado que
+  // envejece: el catalogo de Zecat crecio de 545 a 638 en cuatro dias.
+  const ultimoTotal = runs.find((r) => r.totalRemote !== null)?.totalRemote;
+
   // Nombres de los productos ausentes, para que el resumen diga algo util
   // ("Mate Zaino") y no un id pelado.
   const missingIds = [
@@ -50,7 +55,7 @@ export default async function ProveedoresPage() {
         <SyncProviderCard
           provider={ProductOrigin.ZECAT}
           nombre="Zecat"
-          descripcion="API oficial · ~550 productos · 5-10 minutos con la pestaña abierta"
+          descripcion={`API oficial${ultimoTotal ? ` · ${ultimoTotal} productos` : ""} · 5-10 minutos con la pestaña abierta`}
         />
       </div>
 

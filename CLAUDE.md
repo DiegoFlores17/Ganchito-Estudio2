@@ -288,6 +288,12 @@ en silencio.
   explícitamente. Antes de cualquier escritura, verificar el destino **en el mismo
   comando** que la escritura, con una guarda que aborte — no confiando en un chequeo
   anterior. El detalle está en `HANDOFF.md`, sección "Regla de entornos".
+- **La contracara de esa regla: por defecto se LEE local.** Una query rápida sin
+  `DATABASE_URL=` adelante corre contra local, y local diverge de producción
+  (datos de prueba, estados que solo se aplicaron en un entorno). Ya costó una
+  conclusión equivocada: un conteo dio 656 contra los 641 de producción porque
+  los zombies solo se pausaron en Neon. **La primera pregunta ante cualquier
+  query —propia o de un diagnóstico ajeno— es contra qué base corrió.**
 - **Vercel NO aplica migraciones.** Neon se migra a mano, y siempre ANTES de pushear
   código que lea columnas nuevas.
 

@@ -1,6 +1,7 @@
 import { ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
+import { formatDateTime } from "@/lib/format";
 import { SyncProviderCard } from "@/components/admin/sync-provider-card";
 import { SyncRunHistory } from "@/components/admin/sync-run-history";
 
@@ -77,8 +78,8 @@ export default async function ProveedoresPage() {
             id: r.id,
             status: r.status,
             startedBy: r.startedBy,
-            startedAt: r.startedAt.toLocaleString("es-AR"),
-            finishedAt: r.finishedAt?.toLocaleString("es-AR") ?? null,
+            startedAt: formatDateTime(r.startedAt),
+            finishedAt: r.finishedAt ? formatDateTime(r.finishedAt) : null,
             created: r.created,
             updated: r.updated,
             paused: r.paused,

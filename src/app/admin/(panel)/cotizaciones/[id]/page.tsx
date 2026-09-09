@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { formatPriceArs } from "@/lib/format";
+import { formatDateTime, formatPriceArs } from "@/lib/format";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
@@ -50,7 +50,7 @@ export default async function CotizacionDetallePage({
             {/* El shortCode es el mismo que ve el cliente en su mensaje de
                 WhatsApp — es la referencia para cruzar cuando escribe. */}
             <strong className="text-foreground/70">#{quote.shortCode}</strong>{" "}
-            · {quote.createdAt.toLocaleString("es-AR")}
+            · {formatDateTime(quote.createdAt)}
           </p>
         </div>
         <QuoteStatusSelect quoteId={quote.id} initialStatus={quote.status} />

@@ -15,6 +15,29 @@ export function formatPriceArs(value: Prisma.Decimal | number): string {
   return currencyFormatter.format(Number(value));
 }
 
+/// Fecha y hora para el panel. Existe por una sola razon: `hour12: false`.
+///
+/// `toLocaleString("es-AR")` a secas devuelve formato de 12 horas SIN AM/PM,
+/// asi que una corrida de las 16:15 se muestra como "04:15" y una de las
+/// 00:30 como "12:30" — el segundo caso es peor, porque una sincronizacion de
+/// medianoche aparece como si hubiera sido al mediodia. Ya nos costo una
+/// vuelta de diagnostico creyendo que `lastSyncedAt` no se actualizaba.
+///
+/// Cualquier fecha CON HORA que vea una persona pasa por aca. Las que son
+/// solo fecha (`toLocaleDateString`) no tienen el problema.
+const dateTimeFormatter = new Intl.DateTimeFormat("es-AR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+export function formatDateTime(value: Date): string {
+  return dateTimeFormatter.format(value);
+}
+
 /// Siglas y marcas que se escriben en mayuscula SIEMPRE. Sin esta lista,
 /// "BPA FREE" quedaria como "Bpa Free" y "RPET" como "Rpet".
 const SIGLAS = new Set([

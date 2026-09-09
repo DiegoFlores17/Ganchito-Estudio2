@@ -287,6 +287,34 @@ caído: es la mitigación. Los chequeos de producción van por navegador real
 (las herramientas de Chrome), y para "¿ya deployó?" sirve comparar la huella
 de los chunks servidos, que sí responde.
 
+### Pero el navegador también miente: de un entorno roto no se concluye nada
+
+Ya pasó dos veces que la herramienta de verificación indujo un diagnóstico
+falso. Una extensión que bloqueaba scripts inline hizo reportar un flujo de
+cotización "caído en producción" que en un Chromium limpio andaba perfecto. Y
+en otra tanda **todos los elementos de la página pasaron a medir 0×0**: los
+clicks por coordenadas dejaron de aterrizar y parecía que los botones no
+respondían.
+
+El patrón es siempre el mismo: **un entorno roto se ve igual que un bug de la
+aplicación**. Antes de reportar "esto no anda", verificar que la herramienta
+esté sana — medir un elemento conocido con `getBoundingClientRect`, o
+reproducir en un navegador distinto.
+
+Un test sintético es un entorno más, con las mismas trampas: React delega
+`onBlur` en `focusout`, así que un `dispatchEvent(new Event("blur"))` no
+ejecuta el handler y hace parecer roto un input que está bien.
+
+### Recorrer la tienda como cliente encuentra lo que leer el código no
+
+El bug del mínimo de compra —que dejó 95 productos con stock imposibles de
+cotizar— **no lo encontró un test ni la auditoría pre-entrega**: apareció
+navegando una ficha como usuario, al ver un "Llevás 2 de 165 unidades
+mínimas" con un botón de +1 al lado. El código hacía exactamente lo que decía
+hacer; lo que estaba mal era la premisa, y una premisa falsa no se ve
+leyendo la función que la usa. Conviene entrar a la tienda y usarla cada
+tanto, sin buscar nada en particular.
+
 ## Seguridad (siempre)
 
 - `.env` y `.env.local` van en `.gitignore`. Nunca commitear los tokens de proveedor

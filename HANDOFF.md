@@ -3,7 +3,8 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-09-09 — notificaciones por mail (Resend)
+**Última actualización:** 2026-09-09 — el mínimo de compra salía del campo
+equivocado (deployado y re-sincronizado en producción)
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -35,6 +36,103 @@ antes de mergear.
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
 > `PENDIENTES/pendientes.md`.
+
+---
+
+## El mínimo de compra salía del campo equivocado (2026-09-09) — cerrado
+
+**Deployado y re-sincronizado en producción.** El mínimo de compra se tomaba
+de `minimum_order_quantity` de Zecat. No es un mínimo de venta: es un umbral
+logístico de reposición/importación del proveedor. El mínimo REAL es
+`minimum_application_quantity` — lo que el backoffice de Zecat muestra como
+"Bonificación del costo por debajo del mínimo desde: N un.".
+
+### Cómo apareció: navegando la tienda, no revisando código
+
+Vale anotarlo porque cambia dónde conviene buscar. Este bug **no lo encontró
+un test, ni la auditoría pre-entrega, ni una lectura del conector**. Apareció
+usando el producto: al mirar una ficha como cliente saltó un
+`Llevás 2 de 165 unidades mínimas` con un botón de +1 al lado. Dos cosas mal a
+la vez, y ninguna de las dos rompe nada — el código hacía exactamente lo que
+decía hacer, con el campo que le habían dicho que usara.
+
+Nada de lo que teníamos podía verlo: los tests no cuestionan de qué campo sale
+el número, y la auditoría revisó seguridad, calidad y rendimiento, no si el
+catálogo se podía comprar. **Recorrer el flujo como usuario encuentra cosas
+que leer el código no**, porque el código no tiene forma de saber que su
+premisa es falsa.
+
+### El daño que estaba haciendo
+
+**138 productos activos eran imposibles de cotizar** — el 21% del catálogo de
+Zecat pedía un mínimo mayor a su propio stock. De esos, **95 tenían stock
+real** y estaban bloqueados solo por el campo equivocado. El Bolígrafo PONTI
+pedía 4.786 unidades; la Bolsa M1 30x30x10 pedía 645 con 520 en stock.
+
+La evidencia que lo cerró salió del backoffice del proveedor, no de la API:
+los Auriculares Clean (`minimum_order_quantity` 9) se compran desde 1 unidad y
+el resumen de compra no cobra ningún recargo, y la Bolsa M1 (645, stock 520)
+también vende desde 1 y anuncia "REINGRESO 12 OCT — 3.500 un. en camino". Ese
+número es de reposición.
+
+### Antes y después, medido en producción
+
+| | Antes | Después |
+|---|---|---|
+| Activos de Zecat | 638 | 641 |
+| Mínimo 1 | 2 | 624 |
+| Entre 2 y 20 | 245 | 12 |
+| Entre 21 y 100 | 270 | 5 |
+| Más de 100 | 121 | **0** |
+| Imposibles de cotizar | 138 | **34** |
+| — por stock 0 | 43 | 34 |
+| — bloqueados por el mínimo | **95** | **0** |
+
+Los 34 restantes son todos stock 0, que es otro problema y ya se maneja con
+"Consultar disponibilidad". El re-sync corrió limpio: 8 creados, 633
+actualizados, 0 fallidos, 12 ausentes auto-pausados.
+
+### Lo que se construyó alrededor
+
+- **`supplierMinOrderQuantity`** guarda el `minimum_order_quantity` crudo.
+  Nombre deliberadamente literal: sabemos que NO es un mínimo de venta, pero
+  no confirmamos con Zecat qué ES, así que la columna no afirma lo que no
+  verificamos. Migración aditiva, aplicada en Neon antes del push.
+- **El campo de cantidad se escribe.** Con botones de +1, un producto de
+  mínimo 165 pedía 164 clicks. El texto del input va SEPARADO del número: al
+  escribir "165" el valor pasa por "1" y por "16", y validar en cada tecla
+  pisaría lo que se está tipeando. Se valida al salir del campo y vuelve al
+  último valor válido si quedó vacío, en cero o con letras.
+- **El aviso de mínimo dejó de mostrarse cuando el mínimo es 1** (`e09ab79`).
+  Con 624 de 641 en 1, el cartel llenaba el catálogo diciendo "agregá 1 más" y
+  le quitaba peso al caso donde sí importa.
+
+### Un antecedente de herramientas: el navegador se degradó a 0×0
+
+Durante la verificación, **todos los elementos de la página pasaron a medir
+0×0** (`getBoundingClientRect` devolvía ceros en x, y, ancho y alto), en local
+y en producción, en pestañas nuevas y viejas. Consecuencia: los clicks por
+coordenadas no aterrizaban en ningún lado y una llamada a `Runtime.evaluate`
+terminó colgando el renderer 45s.
+
+Visto desde adentro **eso se parece muchísimo a un bug de la aplicación**: se
+hace click en "Agregar combinación" y no pasa nada. Estuve a punto de reportar
+que el flujo de cotización estaba roto. Lo que lo desarmó fue medir el botón
+en vez de mirarlo: un elemento de 0×0 no es un handler que falla, es una
+página que no tiene layout.
+
+**La regla, entonces: de un entorno roto no se sacan conclusiones sobre el
+código.** Antes de reportar "esto no anda", verificar que la herramienta esté
+sana — medir un elemento conocido, o reproducir en un navegador distinto. Es
+la segunda vez en el proyecto que el navegador induce un diagnóstico falso: ya
+había pasado con una extensión que bloqueaba scripts inline y me hizo reportar
+un flujo caído en producción que en un Chromium limpio andaba perfecto.
+
+Corolario del mismo caso: **un test sintético también es un entorno**. Un
+`dispatchEvent(new Event("blur"))` no ejecuta el `onBlur` de React (React
+delega en `focusout`), así que el input "no corregía" valores inválidos
+cuando en realidad el handler nunca corría. El código estaba bien; la prueba,
+no.
 
 ---
 

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
 import { getVariantAvailableStock } from "@/lib/product";
+import { sendQuoteNotification } from "@/lib/email";
 import {
   getSiteConfig,
   normalizeWhatsappNumber,
@@ -435,8 +436,11 @@ export async function submitQuote(
   //
   // El total es SIEMPRE la suma de (unitPrice congelado x cantidad) de las
   // lineas que ENTRARON — las omitidas no se cobran ni se suman.
-  let waUrl: string | null = null;
+  // Una sola lectura para los dos usos que vienen: el link de WhatsApp y
+  // el destino del aviso por mail.
   const siteConfig = await getSiteConfig();
+
+  let waUrl: string | null = null;
   const waDigits = siteConfig.whatsappNumber
     ? normalizeWhatsappNumber(siteConfig.whatsappNumber)
     : "";
@@ -459,6 +463,43 @@ export async function submitQuote(
       formatPrice: (v) => formatPriceArs(v),
     });
     waUrl = buildWaUrl(waDigits, message);
+  }
+
+  // Aviso al equipo. Va DESPUES de guardar y con await —para que el server
+  // no se apague antes de mandarlo, que en serverless pasa si se deja
+  // colgado— pero sendQuoteNotification NUNCA tira: si Resend falla, loguea
+  // y devuelve false. El cliente ya tiene su cotizacion guardada y no se
+  // entera de nada.
+  //
+  // Destino: SiteConfig.contactEmail, editable desde el panel — un aviso de
+  // cotizacion es negocio, no configuracion tecnica (las alertas del sync
+  // van a ALERT_EMAIL, que es otra cosa).
+  if (siteConfig.contactEmail) {
+    await sendQuoteNotification({
+      quoteId: quote.id,
+      shortCode: quote.shortCode,
+      customerName,
+      customerEmail,
+      customerPhone,
+      companyName,
+      notes,
+      logoUrl,
+      lines: messageLines.map((l) => ({
+        productName: l.productName,
+        variantLabel: l.variantLabel,
+        quantity: l.quantity,
+        unitPriceLabel: formatPriceArs(l.subtotal / l.quantity),
+        subtotalLabel: formatPriceArs(l.subtotal),
+      })),
+      totalLabel: formatPriceArs(
+        messageLines.reduce((sum, l) => sum + l.subtotal, 0)
+      ),
+      to: siteConfig.contactEmail,
+    });
+  } else {
+    console.warn(
+      `[cotizar] Cotización ${quote.shortCode} guardada pero SIN aviso por mail: no hay contactEmail cargado en el panel.`
+    );
   }
 
   return {

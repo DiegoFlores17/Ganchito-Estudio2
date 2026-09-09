@@ -1,5 +1,6 @@
 import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { sendSyncAlert } from "@/lib/email";
 
 /// Lock + progreso de las corridas de sincronización. Agnóstico de
 /// proveedor: lo usan el botón del panel Y los scripts de consola, así un
@@ -122,10 +123,6 @@ export async function recordBatch(
   });
 }
 
-/// Cierra la corrida. Al completar calcula los AUSENTES: productos activos
-/// del proveedor en NUESTRA base que el proveedor no devolvió en toda la
-/// corrida — los candidatos a zombie que en su momento nadie detectó. v1
-/// solo los informa; pausarlos automáticamente queda para después.
 /// Piso absoluto del umbral de auto-pausado: por debajo de esta cantidad de
 /// ausentes se pausa siempre, sin importar el porcentaje (protege catalogos
 /// chicos, donde 5% seria 1 o 2 productos). El porcentaje es configurable
@@ -137,6 +134,9 @@ export const AUTO_PAUSE_FLOOR = 10;
 /// mentiroso) y la corrida se marca FAILED sin calcular ausencia siquiera.
 const SANITY_MIN_SEEN_RATIO = 0.5;
 
+/// Cierra la corrida: calcula los AUSENTES (activos nuestros que el
+/// proveedor no devolvió), auto-pausa los que pasen el umbral, y avisa por
+/// mail cuando algo necesita ojo humano.
 export async function finishSyncRun(runId: string) {
   const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
   const seen = new Set(run.seenExternalIds as string[]);
@@ -155,6 +155,12 @@ export async function finishSyncRun(runId: string) {
   if (activos > 0 && seen.size < activos * SANITY_MIN_SEEN_RATIO) {
     const motivo = `Respuesta anómala del proveedor: devolvió ${seen.size} productos contra ${activos} activos nuestros. No se calculó ausencia ni se pausó nada.`;
     const aborted = await failSyncRun(runId, motivo);
+    await sendSyncAlert({
+      provider: run.provider,
+      motivo: "fallo",
+      detalle: motivo,
+      runId,
+    });
     return {
       run: aborted,
       pausedMissingExternalIds: [] as string[],
@@ -210,6 +216,18 @@ export async function finishSyncRun(runId: string) {
     autoPaused = missing;
   } else if (missing.length > umbral) {
     autoPauseSkipped = true;
+    // ESTE mail es lo que hace posible el cron: con corridas desatendidas,
+    // un umbral frenado no lo ve nadie hasta que alguien entra al panel de
+    // casualidad. Nunca tira (ver lib/email.ts).
+    await sendSyncAlert({
+      provider: run.provider,
+      motivo: "umbral",
+      detalle:
+        `${missing.length} productos activos dejaron de venir en la API de golpe, y el umbral de seguridad es ${umbral}. ` +
+        `NO se pausó ninguno: puede ser un problema del proveedor y no ${missing.length} discontinuaciones reales. ` +
+        `Ids: ${missing.slice(0, 30).join(", ")}${missing.length > 30 ? "…" : ""}`,
+      runId: runId,
+    });
   }
 
   const updated = await prisma.syncRun.update({
@@ -231,8 +249,9 @@ export async function finishSyncRun(runId: string) {
   };
 }
 
-/// Marca la corrida como fallida (error no recuperable del loop, no de un
-/// producto puntual — esos van a `errors` y la corrida sigue).
+/// Marca FAILED. NO manda alerta por si sola: quien la llama decide, porque
+/// finishSyncRun la usa para el aborto por cordura y ahi el mail lo manda
+/// con su propio detalle (si alertara aca tambien, saldrian dos).
 export async function failSyncRun(runId: string, message: string) {
   const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
   return prisma.syncRun.update({

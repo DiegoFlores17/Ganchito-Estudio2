@@ -12,6 +12,7 @@ import {
   recordBatch,
   SyncLockError,
 } from "@/lib/sync-run";
+import { sendSyncAlert } from "@/lib/email";
 
 /// Batch chico a proposito: cada invocacion tiene que quedar lejos del
 /// limite de duracion de Vercel. El navegador conduce el loop.
@@ -86,6 +87,7 @@ export async function advanceSync(
   await requireAdmin();
 
   const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
+  const provider = run.provider;
   if (run.status !== SyncRunStatus.RUNNING) {
     throw new Error("La corrida ya no está activa.");
   }
@@ -148,6 +150,15 @@ export async function advanceSync(
     // un producto puntual, esos ya quedaron en errors y la corrida siguio.
     const message = error instanceof Error ? error.message : String(error);
     await failSyncRun(runId, message);
+    // Con el boton hay alguien mirando la pantalla, pero el cron va a usar
+    // este mismo camino sin nadie delante: el mail es lo que hace que una
+    // corrida fallida no pase desapercibida.
+    await sendSyncAlert({
+      provider,
+      motivo: "fallo",
+      detalle: `La corrida se cortó con: ${message}`,
+      runId,
+    });
     throw new Error(`La sincronización falló: ${message}`);
   }
 }

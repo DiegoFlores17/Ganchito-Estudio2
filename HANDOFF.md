@@ -3,7 +3,7 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-09-07 — funciones a gru1 (fix del sync en prod)
+**Última actualización:** 2026-09-09 — notificaciones por mail (Resend)
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -111,6 +111,44 @@ por email).
    columnas nuevas.
 
 ---
+
+## Notificaciones por mail (2026-09-09)
+
+Dos avisos, una sola lib (`src/lib/email.ts`), Resend con **dominio propio
+verificado**: `send.ganchitoestudio.com` — un SUBdominio a propósito, aparte
+del correo humano de Workspace, para que la reputación del transaccional no
+contamine al corporativo. DKIM, los dos CNAME de envío y **DMARC en el
+apex** cargados en Squarespace; MX/SPF/DKIM de Google intactos. Eso cierra
+también el pendiente viejo de DMARC.
+
+| Aviso | Destino | Por qué ahí |
+|---|---|---|
+| Cotización nueva | `SiteConfig.contactEmail` (`consultas@ganchitoestudio.com`, verificado) | Es negocio: lo edita el cliente desde el panel |
+| Alertas del sync | `ALERT_EMAIL` (env de Vercel) | Es mantenimiento: lo define quien opera |
+
+**Reglas que no conviene deshacer:**
+- **Un mail que falla NUNCA rompe el flujo.** Cuando se envía, la cotización
+  ya está guardada y el sync ya escribió: el mail es un extra. `enviar()`
+  captura todo y solo loguea.
+- **Sin `RESEND_API_KEY` no se manda: se loguea el mail entero.** Permite
+  verificar contenido en local sin quemar cuota ni mandar correos de prueba
+  — y en producción, si falta la key, ese log es el aviso ruidoso.
+- **`replyTo` = email del CLIENTE.** El mail va del sistema al vendedor, y
+  al abrirlo lo natural es querer responderle al cliente: "Responder"
+  arranca esa conversación directo. El cuerpo lo dice explícito ("Respondé
+  este mail para escribirle directamente a Juan") para que nadie escriba sin
+  saber a dónde va.
+- **El logo va como link directo a Blob**, no como "subió un archivo": el
+  caso real es el vendedor abriendo el mail en el celular y queriendo ver el
+  arte sin entrar al panel.
+
+Las alertas del sync disparan en los tres casos que necesitan ojo humano:
+umbral que frena el auto-pausado, guarda de cordura que aborta, y corrida
+FAILED. **Ese era el último bloqueante técnico del cron de productos** — lo
+que falta para habilitarlo es el plan Pro.
+
+Verificado con `scripts/audit-verify-email.ts` (no envía nada): escapado de
+HTML, replyTo, link al logo, y que ninguna llamada tire.
 
 ## Auto-pausado de ausentes (2026-09-07)
 

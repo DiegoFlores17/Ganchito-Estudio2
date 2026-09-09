@@ -7,8 +7,9 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Flujo de cotización
 
-- [ ] **Notificación por email a Ganchito cuando entra una cotización.** Quedó
-      planificada y sin construir (se priorizó el WhatsApp). El plan acordado:
+- [x] **Notificación por email a Ganchito cuando entra una cotización.**
+      RESUELTA (2026-09-09) con Resend y dominio propio verificado. El plan
+      original decía (queda como registro):
       **Resend** (free tier sobra), `RESEND_API_KEY` en Vercel + redeploy,
       destino = `SiteConfig.contactEmail` (cero migración), remitente
       `onboarding@resend.dev` hasta que haya dominio verificado en Resend —
@@ -94,13 +95,12 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ## Sync de proveedores (botón del panel)
 
-- [ ] **BLOQUEANTE del cron de productos: el aviso del umbral tiene que salir
-      del panel.** Cuando el auto-pausado se frena por umbral (`⚠ N ausentes
-      de golpe`) hoy solo se ve en la pantalla — con el cron nadie va a estar
-      mirando. Antes de habilitar el cron: mail vía Resend a
-      `SiteConfig.contactEmail` cuando `autoPauseSkipped` o cuando una
-      corrida termina FAILED. No es adorno: es la diferencia entre enterarse
-      y no enterarse.
+- [x] **BLOQUEANTE del cron: el aviso del umbral sale del panel.** RESUELTO
+      (2026-09-09): mail vía Resend a `ALERT_EMAIL` cuando el umbral frena el
+      auto-pausado, cuando la guarda de cordura aborta, o cuando la corrida
+      falla. Ese era el último bloqueante técnico del cron de productos — lo
+      que queda para habilitarlo es el plan Pro (300s de Hobby contra 389s de
+      Zecat y 711s de CDO).
 
 - [ ] **`syncProduct` hace 13+ awaits de base POR producto (uno más por
       variante).** Con `gru1` es tolerable (~2ms/roundtrip), pero esa es la

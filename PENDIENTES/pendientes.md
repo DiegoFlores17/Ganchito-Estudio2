@@ -18,35 +18,83 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       propio**. Si el envío falla: log y nada más, la cotización ya está
       guardada. Link del aviso a `/admin/cotizaciones/{id}` con
       `NEXT_PUBLIC_SITE_URL` de base.
-- [ ] **Escala de descuento por volumen de Zecat (opción B del fix de
-      precios).** El costo importado es el del tramo base; la API trae además
-      `discountRangeProduct` por variante: 6 tramos acumulativos de 0.1%
-      (2 u.) a 5.1% (2700+ u.) de descuento adicional. Si algún día se quiere
-      precisión por cantidad: tabla de tramos por variante +
-      `computeSellPrice` por cantidad + congelar por tramo al cotizar + la
-      ficha mostrando precio por cantidad. No es chico.
+- [ ] **Segunda capa de descuento de Zecat: falta el cableado de la UI.**
+      Los DATOS ya están (`e929e28`, migración aplicada en Neon): cada
+      variante guarda `discountExternalId`, `discountName`, `discountPercent`
+      y `discountTiers` con la escala completa, y `computeVariantCost()` en
+      `src/lib/pricing.ts` calcula el costo con descuento.
 
-      **Evidencia nueva del 2026-09-10 que sube su prioridad:** Zecat muestra
-      la escala **de forma prominente en su ficha** (2 un. $22.358 /
-      15 un. $22.134 / 30 un. $21.911 en los Auriculares Clean) — para el
-      rubro es información central de cómo se comunica el precio, no un
-      detalle. Y los números de `discountRanges` de la API **coinciden al
-      centavo** con lo que muestra su backoffice.
+      **Lo que falta es que alguien la llame.** Hoy no la usa nadie: la ficha,
+      el carrito, el mensaje de WhatsApp y el mail siguen leyendo `costPrice`
+      directo, así que los precios en pantalla son los de siempre. Los cuatro
+      lugares tienen que pasarle el **total del producto en la cotización**
+      (sumando todas sus variantes), que es como Zecat elige el tramo —
+      verificado en su backoffice: 50 talle S + 50 talle M caen en el tramo de
+      100, no en el de 2.
 
-      **Lo que ya está bien y no hay que tocar:** la escala arranca en la
-      PRIMERA unidad, sin salto — 1 un. cuesta el costo base
-      (`price × (1 − discount_partner/100)` = $22.381,10, verificado en el
-      resumen de compra real) y 2 un. baja apenas 0,1%. O sea que nuestro
-      precio actual **es el de 1 unidad, el más alto de la escala**:
-      correcto y conservador. Implementar la escala solo mejora pedidos
-      grandes, nunca corrige un precio mal cobrado.
+      La card del catálogo **queda como está**, a propósito: no tiene noción
+      de cantidad y el descuento arranca en 2 unidades, así que muestra el
+      precio de 1 unidad, el más alto. Honesto y conservador.
 
-      > Al implementarla, ojo con `customization_under_minimum_extra_cost`
-      > ($95.000, idéntico en todos los productos): dedujimos que era un
-      > cargo por comprar bajo el mínimo, pero **una compra real de 1 unidad
-      > en el backoffice de Zecat NO lo cobró** (precio base − descuento de
-      > categoría − impuestos, sin extras). No modelarlo hasta entender qué
-      > es realmente.
+      **CORRECCIÓN de lo que decía esta nota hasta el 2026-09-11.** Acá
+      figuraba que implementar la escala "solo mejora pedidos grandes, nunca
+      corrige un precio mal cobrado". **Es falso**, y conviene saber por qué
+      se creyó: la muestra que se miró eran productos con la escala estándar
+      (0,1% a 5,1%), donde efectivamente el impacto es marginal. Pero **6
+      productos textiles tienen descuentos de 13% a 38% desde la SEGUNDA
+      unidad** — Remera Regent Mujer (5410) y Hombre (5413), Lincoln (5708),
+      Chomba Summer II (5412), Cutralco (5883) y Passion (5411). Eso no es
+      volumen: es precio de lista que estábamos ignorando, y son remeras y
+      chombas, de lo más pedido en merch corporativo. Un pedido de 100 remeras
+      Regent se cotizaba ~$435.000 de más.
+
+      **La escalera completa sigue pendiente** y ahora es barata: se guardó
+      `discountTiers` entero justamente para que sumarla sea cambiar
+      `computeVariantCost` y no re-importar los 641 productos. Hoy se aplica
+      solo el primer tramo (2-99 u.); el salto entre tramos es ~1 punto.
+
+      **El aviso de "próximo tramo"** (Zecat muestra "Faltan 13 unidades para
+      obtener un mejor precio") va con la escalera, no antes: es lo que
+      reemplaza la señal que se perdió al sacar el cartel del mínimo de los
+      624 productos que ahora tienen mínimo 1. Con una condición — mostrarlo
+      **solo cuando el tramo siguiente es alcanzable**. En la Bolsa M1 el
+      próximo está a 2.950 unidades: avisarlo ahí es exactamente el ruido que
+      acabamos de sacar del catálogo.
+
+      > Ojo con `customization_under_minimum_extra_cost` ($95.000, idéntico en
+      > todos los productos): dedujimos que era un cargo por comprar bajo el
+      > mínimo, pero **una compra real de 1 unidad en el backoffice de Zecat
+      > NO lo cobró**. No modelarlo hasta entender qué es realmente.
+
+- [ ] **Verificar el descuento 116 "Descuento por color" (50%) contra el
+      backoffice.** Es el único de los cinco descuentos de nivel producto con
+      alcance por VARIANTE en vez de por familia: toca 15 variantes sueltas de
+      11 productos (Bolígrafo Vento White, Cooler Clifton, Gorro ACE, Gorro
+      Santa Fe, Mochila BAVIERA, Jarro Branch y otros).
+
+      Importa por dos cosas. Es el que genera los **`discount_partner` mixtos
+      dentro de un mismo producto** (30 o 40 en unas variantes, 50 en otras),
+      y por eso rompe el campo `price` que la API trae ya calculado en
+      `discountRanges` — ese número usa un solo `dp` para todo el producto.
+      Por eso el conector calcula el costo por su cuenta con el `dp` de cada
+      variante, y por eso **el bug es preexistente y no lo introduce nada
+      nuestro**: la fórmula es correcta con independencia de si esas 41
+      variantes tienen el `dp` bien cargado del lado de Zecat.
+
+      La regla "`discount_partner` = el descuento de nivel producto" se
+      verificó en 16 productos sin excepciones, pero **ninguno de esos 11**.
+      Si ahí no se cumple, esas 41 variantes necesitan otro tratamiento.
+
+- [ ] **`GET /discounts` no está documentado y es la tabla maestra de
+      descuentos.** Devuelve los 5 descuentos de nivel producto con nombre,
+      porcentaje, `isCumulative`, vigencia y alcance. Sin él, un `discountId`
+      es un entero suelto: el 117 solo significa algo cuando sabés que es
+      "SALE SEASON" al 40%.
+
+      Hoy no lo usa el conector (no hace falta: `discount_partner` ya trae ese
+      descuento aplicado). Queda anotado porque es la única forma de auditar
+      de dónde sale un `dp`, y porque al no estar en la doc, nadie lo va a
+      encontrar buscando.
 - [ ] **`printingType` nunca se carga — y ahora sabemos dónde vive el costo.**
       El campo existe en `QuoteItem`, y el mensaje de WhatsApp lo muestra si
       está — pero el panel de compra no pide técnica, así que siempre va null.
@@ -131,6 +179,27 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       variantes (upserts uno a uno → `createMany`/`updateMany` o una sola
       query con `unnest`), y lo mismo para imágenes/áreas/técnicas. Hacerlo
       junto con la unificación de conectores del cron.
+
+      **Señal a vigilar (2026-09-11).** La corrida que cargó la segunda capa
+      de descuento tuvo **2 productos fallidos donde la anterior tuvo 0**:
+      3911 (Llavero K159) y 3965 (Cooler ARTIC), los dos por
+      `Transaction API error: expired transaction` — 5.000 ms de límite de
+      Prisma, 6.427 y 6.265 ms transcurridos. Se resolvieron re-sincronizando
+      esos dos productos puntualmente y quedaron con sus 4 variantes
+      pobladas.
+
+      **La duda honesta, anotada para no darla por cerrada:** ese cambio
+      agrega el JSON de `discountTiers` a cada upsert de variante. No agrega
+      awaits —es payload, no roundtrips— pero **no se puede descartar que
+      haya empujado dos transacciones que ya estaban al límite**. La otra
+      explicación, igual de plausible, es variabilidad de red contra
+      `sa-east-1`. Con dos corridas no alcanza para distinguirlas.
+
+      **Si vuelve a pasar en las próximas corridas, es señal** de que el
+      payload contribuye y este ítem sube de prioridad. Si no se repite, era
+      ruido. Vale mirar el conteo de `failed` en cada `SyncRun` como
+      termómetro barato — ya queda registrado ahí, no hay que instrumentar
+      nada.
 - [ ] **`SyncRun.seenExternalIds` se reescribe entero en cada batch.** Con 553
       productos son ~6-8 KB por update — hoy irrelevante. Es el primer punto
       que se pone incómodo si un proveedor trae miles de productos: en ese
@@ -213,9 +282,21 @@ cuatro quedaron a propósito, cada uno con su cuándo:
 
 ## Precios / catálogo
 
-- [ ] **236 productos con `currency: USD`** (dato sucio de Zecat, se tratan como ARS).
+- [ ] **~241 productos con `currency: USD`** (dato sucio de Zecat, se tratan como ARS).
       Lista logueada en el sync. Revisar en algún momento si alguno es un importado
       real en dólares.
+
+      **Ahora es más riesgoso que antes, y por eso hay un aviso en el conector
+      además de este ítem.** Los seis productos textiles con descuento de lista
+      (Regent 5410/5413, Lincoln 5708, Summer II 5412, Cutralco 5883, Passion
+      5411) están entre los marcados "USD" siendo pesos: la Regent trae
+      `price` 12893.99, que son $12.893 y no USD 12.893.
+
+      Antes, "arreglar" el campo confiando en él daba un precio 1.500 veces más
+      alto — absurdo, se ve de lejos. Con las dos capas de descuento encima, el
+      resultado queda en un orden de magnitud **creíble**, suficiente para pasar
+      una revisión por arriba. Si algún día se toca, hay que verificar producto
+      por producto contra el backoffice, no confiando en el campo.
 - [ ] **Productos en SALE:** el descuento ya viene en el `price` de Zecat. A futuro,
       si se quiere mostrar "precio tachado" original, resolverlo aparte.
 - [ ] **Índice de búsqueda:** la búsqueda del catálogo (`unaccent` + `ILIKE` vía

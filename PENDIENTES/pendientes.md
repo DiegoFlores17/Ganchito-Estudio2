@@ -140,10 +140,27 @@ cuatro quedaron a propósito, cada uno con su cuándo:
       `take: 200`. La paginación completa pide UI, no es una línea.
 - [ ] **(Hallazgo 9) Unificar el contrato de los dos conectores** — como
       **PRIMER paso del trabajo del cron de productos**, no antes. Zecat
-      (259 líneas) y CDO (366) comparten toda la forma sin compartir código:
-      el lock de concurrencia y la tabla `SyncRun` del cron habría que
-      escribirlos dos veces. Refactorizar justo antes de ese trabajo lo paga;
-      refactorizar antes de la entrega solo agrega riesgo.
+      (259 líneas) y CDO (366) comparten toda la forma sin compartir código.
+
+      **Lo que la auditoría de CDO (2026-09-09) dejó para esa unificación:**
+      - **Portar CDO a `SyncRun`**: hoy no tiene lock (dos syncs de CDO
+        simultáneos se pisarían), ni retome, ni detección de ausentes /
+        auto-pausado, ni historial en el panel. Es la brecha estructural
+        entre los dos conectores.
+      - **`resolveCategoryId` de CDO consulta-y-crea DENTRO de la
+        transacción** — el combo que voló el sync del 5206 en Zecat. Hoy
+        mitigado (ya desambigua, y el sync es secuencial por consola), pero
+        al portarlo al botón hay que sacarlo de la tx y capturar P2002.
+      - **14 awaits de base por producto** (misma fragilidad que Zecat) **y
+        la medición de imágenes en el camino del sync** (597s la corrida
+        completa): al portarlo al botón, batch más chico que 10 o las probes
+        fuera del camino crítico.
+
+      > **Revisar en las DOS direcciones, no asumir que Zecat es el
+      > modelo.** CDO ya desambiguaba slugs con `-cdo-{id}` desde el
+      > principio — anticipó el bug que a Zecat lo mordió meses después. Al
+      > unificar, cada decisión se compara: gana la mejor, venga de donde
+      > venga.
 
 ---
 

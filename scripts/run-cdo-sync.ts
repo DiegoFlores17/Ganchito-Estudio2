@@ -41,7 +41,19 @@ export async function runCdoSync(etiquetaEntorno: string) {
   console.log(`  Fallidos:           ${summary.failed}`);
   console.log(`  Inactivos sin foto: ${summary.sinImagen.length}`);
   console.log(`  SKU sintetico:      ${summary.skuSintetico}`);
+  console.log(`  Sin net_price:      ${summary.variantesSinPrecio.length}`);
   console.log(`  Tiempo:             ${elapsedSeconds}s`);
+
+  // Deberia ser SIEMPRE cero: si aparece, CDO cambio el contrato de precios
+  // y estamos perdiendo variantes en silencio.
+  if (summary.variantesSinPrecio.length) {
+    console.log(
+      `\nVARIANTES SIN net_price (salteadas — revisar, CDO pudo cambiar el contrato):`
+    );
+    for (const v of summary.variantesSinPrecio) {
+      console.log(`  - producto ${v.cdoId} (${v.name}), variante ${v.variantId}`);
+    }
+  }
 
   if (summary.sinImagen.length) {
     console.log(

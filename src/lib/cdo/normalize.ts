@@ -182,14 +182,19 @@ export function mapStock(variant: CdoVariant): {
 
 /// Costo de la variante, en DOLARES.
 ///
-/// Se usa net_price (el neto) y no list_price: es el que coincide con el
-/// precio en U$S del catalogo web de CDO. Verificado que net_price <=
-/// list_price siempre (326 menores, 85 iguales, 0 mayores).
+/// SOLO net_price. NUNCA caer a list_price: es el precio de LISTA, y usarlo
+/// como costo es exactamente el bug que tuvo Zecat durante semanas (guardaba
+/// el precio sugerido de venta y le aplicaba el margen encima, cobrando ~43%
+/// de mas). Hoy CDO manda net_price siempre y net <= list en el 100% de los
+/// casos medidos (326 menores, 85 iguales, 0 mayores), pero el dia que deje
+/// de mandarlo el fallback empezaria a guardar precio de lista como costo
+/// SIN QUE NADIE SE ENTERE. Mismo criterio que discount_partner en Zecat:
+/// fallar visible, no adivinar.
 ///
 /// La conversion a pesos NO se hace aca: se hace al leer, con
 /// PricingConfig.usdRate (ver lib/pricing.ts).
 export function extractCostPrice(variant: CdoVariant): Prisma.Decimal | null {
-  const raw = variant.net_price ?? variant.list_price;
+  const raw = variant.net_price;
   if (raw === null || raw === undefined) return null;
 
   const value = new Prisma.Decimal(String(raw).trim() || "0");

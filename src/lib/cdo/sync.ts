@@ -27,6 +27,9 @@ export interface CdoSyncSummary {
   sinImagen: Array<{ cdoId: number; name: string }>;
   /// Variantes cuyo sku venia vacio y se sintetizo desde el id.
   skuSintetico: number;
+  /// Variantes salteadas por no traer net_price. Deberia quedar vacio
+  /// siempre: si aparece algo, CDO cambio el contrato de precios.
+  variantesSinPrecio: Array<{ cdoId: number; name: string; variantId: number }>;
   /// Iconos que no se pudieron clasificar. NO se descartan en silencio: hay
   /// que mirarlos y resolverlos a mano.
   ///
@@ -157,9 +160,21 @@ export async function syncCdoProduct(
     // Variantes: upsert por sku, que es la clave real.
     for (const variant of variants) {
       const costPrice = extractCostPrice(variant);
-      // Sin precio no se puede vender: se saltea la variante en vez de
-      // inventar un costo.
-      if (!costPrice) continue;
+      // Sin net_price no se puede vender: se saltea la variante en vez de
+      // inventar un costo. Y se LOGUEA — un descarte mudo es como se pierden
+      // productos sin que nadie se entere (la leccion de las imagenes de
+      // Zecat). Si esto empieza a aparecer, CDO cambio algo.
+      if (!costPrice) {
+        summary.variantesSinPrecio.push({
+          cdoId: product.id,
+          name: product.name,
+          variantId: variant.id,
+        });
+        console.warn(
+          `[cdo-sync] Variante ${variant.id} del producto ${product.id} (${product.name}) SIN net_price: se saltea.`
+        );
+        continue;
+      }
 
       const sku = buildSku(product.id, variant);
       if (!(variant.sku ?? "").trim()) summary.skuSintetico++;
@@ -271,6 +286,7 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
     failed: 0,
     sinImagen: [],
     skuSintetico: 0,
+    variantesSinPrecio: [],
     iconosDesconocidos: [],
     portadas: { ok: 0, deformes: 0, chicas: 0, rotas: 0 },
     errors: [],

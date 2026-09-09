@@ -113,7 +113,15 @@ export async function syncProduct(
       // El campo currency de Zecat no es confiable (ver SyncSummary.usdWarnings):
       // por ahora asumimos ARS siempre y no convertimos nada.
       currency: Currency.ARS,
-      minOrderQuantity: detail.minimum_order_quantity ?? null,
+      // El minimo de compra sale de minimum_application_quantity, NO de
+      // minimum_order_quantity: ese ultimo es un umbral logistico del
+      // proveedor (Zecat vende desde 1 unidad aunque diga 4786) y usarlo
+      // como minimo de venta hacia incotizable al 21% del catalogo.
+      // Verificado contra su backoffice — ver el comentario del schema.
+      minOrderQuantity: detail.minimum_application_quantity ?? null,
+      // Se conserva crudo: no es un minimo de venta, pero es informacion
+      // del proveedor que puede servir despues.
+      supplierMinOrderQuantity: detail.minimum_order_quantity ?? null,
       heightCm: toDecimalOrNull(detail.dimensions?.height),
       widthCm: toDecimalOrNull(detail.dimensions?.width),
       lengthCm: toDecimalOrNull(detail.dimensions?.length),

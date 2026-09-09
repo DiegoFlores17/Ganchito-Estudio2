@@ -21,11 +21,32 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 - [ ] **Escala de descuento por volumen de Zecat (opción B del fix de
       precios).** El costo importado es el del tramo base; la API trae además
       `discountRangeProduct` por variante: 6 tramos acumulativos de 0.1%
-      (2 u.) a 5.1% (2700+ u.) de descuento adicional. Ignorarla juega a
-      favor (se cotiza apenas alto en pedidos enormes), por eso quedó afuera
-      del fix. Si algún día se quiere precisión por cantidad: tabla de tramos
-      por variante + `computeSellPrice` por cantidad + congelar por tramo al
-      cotizar + la ficha mostrando precio por cantidad. No es chico.
+      (2 u.) a 5.1% (2700+ u.) de descuento adicional. Si algún día se quiere
+      precisión por cantidad: tabla de tramos por variante +
+      `computeSellPrice` por cantidad + congelar por tramo al cotizar + la
+      ficha mostrando precio por cantidad. No es chico.
+
+      **Evidencia nueva del 2026-09-10 que sube su prioridad:** Zecat muestra
+      la escala **de forma prominente en su ficha** (2 un. $22.358 /
+      15 un. $22.134 / 30 un. $21.911 en los Auriculares Clean) — para el
+      rubro es información central de cómo se comunica el precio, no un
+      detalle. Y los números de `discountRanges` de la API **coinciden al
+      centavo** con lo que muestra su backoffice.
+
+      **Lo que ya está bien y no hay que tocar:** la escala arranca en la
+      PRIMERA unidad, sin salto — 1 un. cuesta el costo base
+      (`price × (1 − discount_partner/100)` = $22.381,10, verificado en el
+      resumen de compra real) y 2 un. baja apenas 0,1%. O sea que nuestro
+      precio actual **es el de 1 unidad, el más alto de la escala**:
+      correcto y conservador. Implementar la escala solo mejora pedidos
+      grandes, nunca corrige un precio mal cobrado.
+
+      > Al implementarla, ojo con `customization_under_minimum_extra_cost`
+      > ($95.000, idéntico en todos los productos): dedujimos que era un
+      > cargo por comprar bajo el mínimo, pero **una compra real de 1 unidad
+      > en el backoffice de Zecat NO lo cobró** (precio base − descuento de
+      > categoría − impuestos, sin extras). No modelarlo hasta entender qué
+      > es realmente.
 - [ ] **`printingType` nunca se carga — y ahora sabemos dónde vive el costo.**
       El campo existe en `QuoteItem`, y el mensaje de WhatsApp lo muestra si
       está — pero el panel de compra no pide técnica, así que siempre va null.

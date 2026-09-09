@@ -73,7 +73,13 @@ export interface ZecatGenericProduct {
   external_id?: string | null;
   name: string;
   description: string;
+  /// Umbral LOGISTICO del proveedor (reposicion/importacion), NO un minimo
+  /// de venta: Zecat vende desde 1 unidad aunque esto diga 4786. Se guarda
+  /// en Product.supplierMinOrderQuantity solo como referencia.
   minimum_order_quantity?: number | null;
+  /// El minimo REAL de compra. En el backoffice de Zecat aparece como
+  /// "Bonificacion del costo por debajo del minimo desde: N un.".
+  minimum_application_quantity?: number | null;
   currency?: "ARS" | "USD" | string;
   published?: boolean;
 

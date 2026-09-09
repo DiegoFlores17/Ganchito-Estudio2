@@ -110,6 +110,11 @@ export function PurchasePanel({
   const minQuantity = minOrderQuantity ?? 1;
   const lineFloor = hasVariantOptions ? 1 : minQuantity;
   const [quantity, setQuantity] = useState(lineFloor);
+  // El texto del input va SEPARADO del numero: mientras se escribe "165"
+  // el valor pasa por "1" y por "16", y validar en cada tecla le pisaria
+  // lo que esta tipeando (o lo clampearia al minimo). El numero se
+  // sincroniza al salir del campo o al usar los botones.
+  const [quantityText, setQuantityText] = useState(String(lineFloor));
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [addedToast, setAddedToast] = useState<string | null>(null);
@@ -138,6 +143,25 @@ export function PurchasePanel({
     return Math.min(Math.max(value, lineFloor), maxQuantity);
   }
 
+  /// Unico camino para mover la cantidad: mantiene numero y texto en sinc.
+  function aplicarCantidad(value: number) {
+    const n = clampQuantity(value);
+    setQuantity(n);
+    setQuantityText(String(n));
+  }
+
+  /// Al salir del campo se valida y se corrige, no antes. Si lo que quedo
+  /// no es un numero usable, se vuelve al ultimo valor valido en vez de
+  /// dejar el campo roto o vacio.
+  function confirmarCantidadEscrita() {
+    const n = parseInt(quantityText.replace(/\D/g, ""), 10);
+    if (Number.isNaN(n) || n < 1) {
+      aplicarCantidad(quantity);
+      return;
+    }
+    aplicarCantidad(n);
+  }
+
   function handleColorChange(color: string) {
     setSelectedColor(color);
     const sizesForColor = uniqueNonEmpty(
@@ -146,12 +170,12 @@ export function PurchasePanel({
         .map((v) => v.sizeName)
     );
     setSelectedSize(sizesForColor[0]);
-    setQuantity(lineFloor);
+    aplicarCantidad(lineFloor);
   }
 
   function handleSizeChange(size: string) {
     setSelectedSize(size);
-    setQuantity(lineFloor);
+    aplicarCantidad(lineFloor);
   }
 
   function handleAddLine() {
@@ -185,7 +209,7 @@ export function PurchasePanel({
       setNotice(null);
     }
 
-    setQuantity(lineFloor);
+    aplicarCantidad(lineFloor);
   }
 
   function handleRemoveLine(sku: string) {
@@ -219,7 +243,7 @@ export function PurchasePanel({
         quantity,
       });
       showAddedToast("Agregado a tu cotización.");
-      setQuantity(lineFloor);
+      aplicarCantidad(lineFloor);
     }
   }
 
@@ -275,19 +299,38 @@ export function PurchasePanel({
         <div className="mt-2 flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setQuantity((q) => clampQuantity(q - 1))}
+            onClick={() => aplicarCantidad(quantity - 1)}
             className="flex h-9 w-9 items-center justify-center rounded-full border border-foreground/15 text-foreground/70 hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
             disabled={quantity <= lineFloor}
             aria-label="Restar"
           >
             −
           </button>
-          <span className="w-10 text-center text-sm font-medium text-foreground">
-            {quantity}
-          </span>
+          {/* type="text" + inputMode numeric y NO type="number": este
+              muestra el teclado numerico en el celular igual, pero deja
+              controlar el texto intermedio y no arrastra los spinners ni
+              la rueda del mouse cambiando el valor sin querer.
+              Pegar un numero (el comprador corporativo lo tiene en un mail
+              o una planilla) funciona solo. */}
+          <input
+            type="text"
+            inputMode="numeric"
+            value={quantityText}
+            onChange={(e) => setQuantityText(e.target.value)}
+            onBlur={confirmarCantidadEscrita}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
+            maxLength={6}
+            aria-label="Cantidad"
+            className="w-20 rounded-lg border border-foreground/15 px-3 py-1.5 text-center text-sm font-medium text-foreground outline-none focus:border-primary"
+          />
           <button
             type="button"
-            onClick={() => setQuantity((q) => clampQuantity(q + 1))}
+            onClick={() => aplicarCantidad(quantity + 1)}
             className="flex h-9 w-9 items-center justify-center rounded-full border border-foreground/15 text-foreground/70 hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
             disabled={quantity >= maxQuantity}
             aria-label="Sumar"

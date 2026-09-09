@@ -346,9 +346,28 @@ model Product {
   /// La moneda sí es del producto: todas sus variantes comparten una.
   currency          Currency      @default(ARS)
 
-  /// Cantidad mínima para personalizar sin costo extra (minimum_order_quantity).
-  /// Por debajo de esto, Zecat aplica un recargo ("bonificación del costo").
+  /// Mínimo REAL de compra: `minimum_application_quantity` de Zecat, que en
+  /// su backoffice se muestra como "Bonificación del costo por debajo del
+  /// mínimo desde: N un.". Vale 1 en la enorme mayoría de los productos.
+  ///
+  /// NO confundir con `minimum_order_quantity` (guardado aparte en
+  /// `supplierMinOrderQuantity`): usar ESE como mínimo de venta hacía
+  /// incotizable al 21% del catálogo — 138 productos activos con stock
+  /// menor a su propio "mínimo". Verificado contra el backoffice de Zecat
+  /// el 2026-09-10: los Auriculares Clean (minimum_order_quantity 9) se
+  /// compran desde 1 unidad, sin recargo en el resumen de compra.
   minOrderQuantity  Int?
+
+  /// El `minimum_order_quantity` crudo de Zecat. NO es un mínimo de venta
+  /// —eso ya está probado— pero se guarda porque es información del
+  /// proveedor que puede servir después.
+  ///
+  /// Qué es exactamente: no confirmado con Zecat. La evidencia apunta a un
+  /// umbral logístico de reposición o importación — la Bolsa M1 tiene 645
+  /// con 520 de stock, escala de volumen 2/3.000/6.000 y la ficha anuncia
+  /// "REINGRESO 12 OCT — 3.500 un. en camino". El nombre de la columna es
+  /// deliberadamente literal para no afirmar lo que no verificamos.
+  supplierMinOrderQuantity Int?
 
   /// Dimensiones (objeto `dimensions` de la API). En cm y gramos.
   heightCm          Decimal?      @db.Decimal(8, 2)

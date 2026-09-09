@@ -463,6 +463,40 @@ model ProductVariant {
   /// cotización de PricingConfig. Ver la nota de usdRate.
   costPrice      Decimal  @db.Decimal(12, 2)
 
+  /// SEGUNDA CAPA de descuento del proveedor, por VARIANTE.
+  ///
+  /// `costPrice` de arriba es la PRIMERA capa: en Zecat, `price` menos
+  /// `discount_partner`. Verificado que `discount_partner` ES el descuento de
+  /// nivel producto ya aplicado (SALE SEASON = 40 y el producto trae dp 40;
+  /// "32.5 apparel" = 32,5 y trae 32,5; sin descuento de producto, trae el 30
+  /// base). O sea que esa capa NO se vuelve a aplicar.
+  ///
+  /// Encima va ESTA, que son los descuentos de RANGO (`isCumulative: true`),
+  /// asignados por variante y que se aplican sobre el resultado de la primera,
+  /// en cascada — nunca sumando los porcentajes. Verificado al centavo contra
+  /// el backoffice en las 1.599 variantes que la tienen.
+  ///
+  /// Se guarda por variante y no por producto porque DENTRO de un mismo
+  /// producto varía: en la Remera Regent, el Blanco talle S lleva 37,83% y el
+  /// Blanco 3XL lleva 14,82% (los talles grandes descuentan menos). Aplicarle
+  /// a un 3XL el descuento del S serían 23 puntos de más: cotizar por debajo
+  /// del costo, sin que nada falle.
+  ///
+  /// El id y el nombre son para AUDITAR: con ellos, `costPrice` y el
+  /// porcentaje, se reconstruye a mano de dónde salió cada número. Sin el
+  /// nombre, `discountExternalId` es un entero suelto — el `discountId` 73
+  /// solo significa algo si sabés que es "Regent blanca Xs a 2Xl".
+  discountExternalId String?
+  discountName       String?
+  /// El porcentaje del PRIMER tramo (2-99 unidades), que es el único que se
+  /// aplica hoy. El salto entre tramos es ~1 punto y no justifica arrastrar la
+  /// cantidad del pedido al costo guardado.
+  discountPercent    Decimal? @db.Decimal(6, 2)
+  /// La escala COMPLETA: [{ min, max, pct }]. Se guarda entera aunque hoy solo
+  /// se use el primer tramo, para que sumar la escalera más adelante sea
+  /// cambiar la lógica de lectura y no re-importar los 641 productos.
+  discountTiers      Json?
+
   active         Boolean  @default(true)
 
   images         ProductImage[]

@@ -30,10 +30,10 @@ export class ZecatPricingError extends Error {}
 /// visible en el log es preferible a uno con precio que nadie detecta.
 ///
 /// NO usar total_price: es el costo del tramo MAS PROFUNDO de la escala de
-/// volumen (2700+ unidades) — cobraria de menos en pedidos chicos. La
-/// escala completa (discountRangeProduct, 0.1% a 5.1% adicional) queda
-/// anotada en PENDIENTES como mejora; su ganancia maxima es 5.1% y juega a
-/// favor ignorarla (se cotiza apenas alto en pedidos enormes).
+/// volumen (2700+ unidades) — cobraria de menos en pedidos chicos.
+///
+/// Esto devuelve la PRIMERA capa. La segunda (los descuentos de rango por
+/// variante) sale de extractRangeDiscount() y se aplica al LEER, no acá.
 export function extractCostPrice(
   product: ZecatGenericProduct,
   variant: ZecatVariantRecord
@@ -61,6 +61,112 @@ export function extractCostPrice(
   }
 
   return publicPrice * (1 - discount / 100);
+}
+
+/// Un tramo de la escala: desde `min` unidades (hasta `max`, o sin tope) se
+/// descuenta `pct` por ciento sobre el costo que ya devolvio extractCostPrice.
+export interface RangeDiscountTier {
+  min: number;
+  max: number | null;
+  pct: number;
+}
+
+export interface RangeDiscount {
+  externalId: string;
+  name: string | null;
+  /// El porcentaje del tramo que aplica a 2 unidades: el unico que se usa hoy.
+  percent: number;
+  /// La escala entera, para poder sumar la escalera despues sin re-importar.
+  tiers: RangeDiscountTier[];
+}
+
+/// La cantidad a partir de la cual hay descuento. En Zecat la escala siempre
+/// arranca en 2: comprar 1 unidad paga el costo pelado.
+export const RANGE_DISCOUNT_MIN_QUANTITY = 2;
+
+/// SEGUNDA capa de descuento: los rangos asignados a la variante.
+///
+/// Solo lee `variant.discountRangeProduct`, que viene completo porque
+/// flattenVariants toma los records de `variants.colors` / `variants.sizes`.
+/// El array plano `products[]` de la respuesta trae unicamente el puntero
+/// { hasRangeDiscount, discountId }, sin tramos: si algun dia alguien cambia
+/// la fuente de las variantes a `products[]`, esto se queda en null y los
+/// precios vuelven silenciosamente a la primera capa.
+///
+/// NO se usa el campo `price` que la API trae ya calculado en
+/// `discountRanges` (nivel producto), aunque seria mas comodo: ese numero se
+/// calcula con UN SOLO discount_partner para todo el producto, y hay 11
+/// productos cuyas variantes tienen dp distintos entre si (los del descuento
+/// "Descuento por color", que apunta a variantes sueltas). Usarlo daria el
+/// costo equivocado en 24 variantes: 12 de mas y, peor, 12 de MENOS, o sea
+/// cotizando por debajo del costo real. La cuenta propia con el dp de cada
+/// variante cierra al centavo en las 1.599.
+///
+/// A diferencia de extractCostPrice(), esto NO tira ante datos raros: devuelve
+/// null y la variante se queda con su costo de primera capa. La asimetria es
+/// deliberada — alla el fallback inseguro era cobrar de mas y quedaba
+/// invisible; aca no aplicar el descuento cotiza mas caro, que es el lado
+/// conservador: nunca por debajo del costo.
+export function extractRangeDiscount(
+  variant: ZecatVariantRecord
+): RangeDiscount | null {
+  const filas = variant.discountRangeProduct;
+  if (!Array.isArray(filas) || filas.length === 0) return null;
+
+  let externalId: string | null = null;
+  let name: string | null = null;
+  const tiers: RangeDiscountTier[] = [];
+
+  for (const fila of filas) {
+    const rango = fila?.discountRange;
+    if (!rango) continue;
+
+    // Un descuento apagado del lado del proveedor no se aplica.
+    if (rango.discount?.enabled === false) return null;
+
+    const pct = toNumber(rango.discountPercentage);
+    const min = toNumber(rango.minQuantity);
+    // maxQuantity viene null en el ultimo tramo (withOutLimit): eso es "sin
+    // tope", no un dato faltante.
+    const rawMax = rango.maxQuantity;
+    const max = rawMax === null || rawMax === undefined ? null : toNumber(rawMax);
+
+    // Un porcentaje fuera de (0, 100) no es un descuento: 0 no hace nada y
+    // 100 o mas daria costo cero o negativo. Verificado que los 3.371 tramos
+    // del catalogo caen dentro del rango, asi que esto es una guarda contra
+    // cambios futuros, no contra los datos de hoy.
+    if (pct === null || pct <= 0 || pct >= 100) continue;
+    if (min === null || min < 1) continue;
+    if (max !== null && (max === null || max < min)) continue;
+
+    tiers.push({ min, max, pct });
+
+    const id = rango.discountId ?? rango.discount?.id;
+    if (externalId === null && id !== null && id !== undefined) {
+      externalId = String(id);
+    }
+    if (name === null && rango.discount?.name) name = rango.discount.name;
+  }
+
+  if (tiers.length === 0 || externalId === null) return null;
+  tiers.sort((a, b) => a.min - b.min);
+
+  // El tramo que le toca a 2 unidades. Se BUSCA en vez de exigir min === 2
+  // para no depender de que Zecat siga arrancando la escala ahi.
+  const inicial = tiers.find(
+    (t) =>
+      RANGE_DISCOUNT_MIN_QUANTITY >= t.min &&
+      (t.max === null || RANGE_DISCOUNT_MIN_QUANTITY <= t.max)
+  );
+  if (!inicial) return null;
+
+  return { externalId, name, percent: inicial.pct, tiers };
+}
+
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function parseStock(value: unknown): number {

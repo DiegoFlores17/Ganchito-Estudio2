@@ -48,7 +48,46 @@ export interface ZecatVariantRecord {
   /// Descuento de partner en PORCENTAJE (ej: 30). El costo real es
   /// price x (1 - discount_partner/100) — `price` a secas es el precio
   /// sugerido de venta al PUBLICO, no el costo. Ver extractCostPrice().
+  ///
+  /// Verificado que este numero ES el descuento de nivel producto ya
+  /// aplicado: los productos con "SALE SEASON" (40%) traen 40, los de
+  /// "32.5 apparel" traen 32,5, y los que no tienen descuento de producto
+  /// traen el 30 base. Por eso ese descuento NO se vuelve a aplicar encima.
   discount_partner?: number | string | null;
+  /// SEGUNDA capa: el descuento de RANGO asignado a ESTA variante. Solo
+  /// viene completo por la rama `variants.colors` / `variants.sizes`; el
+  /// array plano `products[]` trae unicamente el puntero
+  /// { hasRangeDiscount, discountId }, sin los tramos.
+  discountRangeProduct?: ZecatDiscountRangeProduct[] | null;
+}
+
+/// Fila que liga una variante con UN tramo de un descuento de rango. Una
+/// variante trae varias (una por tramo), todas del mismo `discount`.
+export interface ZecatDiscountRangeProduct {
+  discountRange?: ZecatDiscountRange | null;
+}
+
+export interface ZecatDiscountRange {
+  discountId?: string | number | null;
+  /// Porcentaje del tramo (ej: 37.83). Siempre entre 0 y 100: verificado
+  /// sobre los 3.371 tramos del catalogo, ninguno negativo ni >= 100.
+  discountPercentage?: number | string | null;
+  minQuantity?: number | string | null;
+  /// null cuando el tramo es el ultimo (con `withOutLimit: true`).
+  maxQuantity?: number | string | null;
+  discount?: ZecatDiscount | null;
+}
+
+export interface ZecatDiscount {
+  id?: string | number | null;
+  /// El nombre es lo que hace auditable el descuento: dice a que aplica
+  /// ("Regent blanca Xs a 2Xl"), cosa que el id suelto no.
+  name?: string | null;
+  enabled?: boolean | null;
+  /// true en los descuentos de RANGO: se acumulan sobre discount_partner.
+  /// Los de nivel producto (SALE SEASON, Liquidacion) lo traen en false y
+  /// ya vienen incluidos en discount_partner.
+  isCumulative?: boolean | null;
 }
 
 export interface ZecatVariantGroup {

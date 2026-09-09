@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchGenericProductDetail, fetchGenericProductPage } from "./client";
 import {
   extractCostPrice,
+  extractRangeDiscount,
   ZecatPricingError,
   flattenVariants,
   mapVariantAttributes,
@@ -99,6 +100,16 @@ export async function syncProduct(
     costBySku.set(variant.sku, extractCostPrice(detail, variant));
   }
 
+  // SEGUNDA capa: el descuento de rango de cada variante. No modifica el costo
+  // guardado — se persiste el porcentaje y se aplica al LEER, en funcion de la
+  // cantidad, porque la escala arranca en 2 unidades y hornearlo en costPrice
+  // cotizaria un pedido de 1 al precio de 2 (por debajo del costo real). Que
+  // devuelva null es normal: 250 de las 1.849 variantes no tienen descuento.
+  const discountBySku = new Map<string, ReturnType<typeof extractRangeDiscount>>();
+  for (const variant of variants) {
+    discountBySku.set(variant.sku, extractRangeDiscount(variant));
+  }
+
   // Fuera de la transaccion a proposito — ver el comentario de la funcion.
   const categoryId = await resolveCategoryId(detail.families?.[0]);
 
@@ -110,8 +121,24 @@ export async function syncProduct(
       name: detail.name,
       description: detail.description,
       // El costo NO va mas en el producto: vive en cada variante (abajo).
+      //
       // El campo currency de Zecat no es confiable (ver SyncSummary.usdWarnings):
       // por ahora asumimos ARS siempre y no convertimos nada.
+      //
+      // NO "ARREGLAR" ESTO LEYENDO detail.currency. Los seis productos
+      // textiles con descuento de lista (Remera Regent 5410/5413, Lincoln
+      // 5708, Chomba Summer II 5412, Cutralco 5883, Passion 5411) vienen
+      // marcados "USD" con precios que son claramente pesos: la Regent trae
+      // price 12893.99, que son $12.893 y no USD 12.893. Confiar en el campo
+      // multiplicaria esos precios por la cotizacion del dolar.
+      //
+      // Y ahora eso se AMPLIFICA: sobre ese costo inflado se aplicarian dos
+      // capas de descuento (discount_partner y el de rango), asi que el
+      // numero resultante quedaria en un orden de magnitud creible —
+      // suficiente para pasar una revision por arriba. Un precio 1.500 veces
+      // mas alto se ve; uno mal por dos descuentos sobre una base equivocada,
+      // no. Si alguna vez se toca esto, hay que verificarlo producto por
+      // producto contra el backoffice, no confiando en el campo.
       currency: Currency.ARS,
       // El minimo de compra sale de minimum_application_quantity, NO de
       // minimum_order_quantity: ese ultimo es un umbral logistico del
@@ -150,6 +177,23 @@ export async function syncProduct(
       // el discount_partner viene en cada una y puede variar.
       const costPrice = costBySku.get(variant.sku)!;
 
+      // Los cuatro campos van SIEMPRE, tambien cuando no hay descuento: si la
+      // variante deja de tenerlo del lado de Zecat, hay que borrar lo que
+      // quedo guardado. Omitirlos en ese caso dejaria aplicandose para siempre
+      // un descuento que el proveedor ya saco.
+      const discount = discountBySku.get(variant.sku) ?? null;
+      const discountData = {
+        discountExternalId: discount?.externalId ?? null,
+        discountName: discount?.name ?? null,
+        discountPercent: discount?.percent ?? null,
+        // El cast es por el tipo de las columnas Json de Prisma, que pide un
+        // InputJsonValue con index signature; RangeDiscountTier[] es
+        // estructuralmente valido pero no lo satisface.
+        discountTiers: discount
+          ? (discount.tiers as unknown as Prisma.InputJsonValue)
+          : Prisma.DbNull,
+      };
+
       await tx.productVariant.upsert({
         where: { sku: variant.sku },
         update: {
@@ -161,6 +205,7 @@ export async function syncProduct(
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,
           costPrice,
+          ...discountData,
         },
         create: {
           productId: product.id,
@@ -172,6 +217,7 @@ export async function syncProduct(
           reservedStock: parseStock(variant.reservedStock),
           active: variant.active ?? true,
           costPrice,
+          ...discountData,
         },
       });
     }

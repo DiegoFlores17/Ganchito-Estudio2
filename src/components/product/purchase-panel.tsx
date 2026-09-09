@@ -101,9 +101,11 @@ export function PurchasePanel({
   const precioMostrado =
     (selectedVariant && priceBySku[selectedVariant.sku]) ?? fallbackPriceLabel;
 
-  // minOrderQuantity es el minimo de PERSONALIZACION del proveedor a nivel
-  // PRODUCTO (minimum_order_quantity de Zecat) — no es un piso por cada
-  // combinacion. Con variantes, cada linea puede ser cualquier cantidad
+  // minOrderQuantity es el minimo REAL de compra a nivel PRODUCTO
+  // (minimum_application_quantity de Zecat, lo que su backoffice muestra
+  // como "Bonificacion del costo por debajo del minimo desde: N un.") — no
+  // es un piso por cada combinacion. Con variantes, cada linea puede ser
+  // cualquier cantidad
   // (piso 1) y el minimo se valida sobre la SUMA de todas las lineas. Sin
   // variantes hay una sola cantidad para todo el producto, asi que ahi si
   // es directamente el piso de esa cantidad.
@@ -338,9 +340,13 @@ export function PurchasePanel({
             +
           </button>
         </div>
-        {!hasVariantOptions && minOrderQuantity ? (
+        {/* Un minimo de 1 no es un minimo: no se avisa. Desde que el minimo
+            sale del campo correcto, 624 de los 641 productos de Zecat estan
+            en 1, y anunciarlo llenaba el catalogo de un cartel que no pide
+            nada. Ademas evita el "1 unidades". */}
+        {!hasVariantOptions && minQuantity > 1 ? (
           <p className="mt-2 text-xs text-foreground/50">
-            Cantidad mínima: {minOrderQuantity} unidades
+            Cantidad mínima: {minQuantity} unidades
           </p>
         ) : null}
       </div>
@@ -413,7 +419,11 @@ export function PurchasePanel({
             )}
           </div>
 
-          {minOrderQuantity ? (
+          {/* Mismo criterio que arriba: con minimo 1, "Llevás 0 de 1 unidades
+              mínimas" no informa nada que no digan ya el estado vacío de la
+              lista y el botón deshabilitado. El aviso queda para los pocos
+              productos donde el mínimo es una condición real. */}
+          {minQuantity > 1 ? (
             <p
               className={
                 "text-sm " +
@@ -422,9 +432,9 @@ export function PurchasePanel({
                   : "font-medium text-primary-dark")
               }
             >
-              Llevás {linesTotal} de {minOrderQuantity} unidades mínimas
+              Llevás {linesTotal} de {minQuantity} unidades mínimas
               {!minimumMet &&
-                ` — agregá ${minOrderQuantity - linesTotal} más para poder cotizar este producto`}
+                ` — agregá ${minQuantity - linesTotal} más para poder cotizar este producto`}
             </p>
           ) : null}
 

@@ -437,6 +437,13 @@ export default function CotizarPage() {
             <input
               type="tel"
               name="customerPhone"
+              // El autocompletado del navegador llego a concatenar digitos
+              // de otro campo y guardamos un telefono de 13 digitos. El
+              // servidor valida igual (esto es comodidad, no seguridad).
+              autoComplete="tel"
+              inputMode="tel"
+              maxLength={25}
+              placeholder="351 235-0995"
               className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary"
             />
           </Field>

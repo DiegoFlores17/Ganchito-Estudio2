@@ -37,11 +37,6 @@ export interface QuoteMessageLine {
 
 export interface QuoteMessageInput {
   shortCode: string;
-  /// URL completa del detalle. Apunta al PANEL (/admin/cotizaciones/[id]):
-  /// el mensaje lo escribe el cliente pero lo recibe el vendedor, y el
-  /// destinatario util del link es el vendedor — el cliente acaba de armar
-  /// la cotizacion y ya ve el detalle en el propio mensaje.
-  detailUrl: string;
   customerName: string;
   companyName: string | null;
   customerEmail: string;
@@ -57,8 +52,13 @@ export interface QuoteMessageInput {
 const MAX_MESSAGE_CHARS = 1500;
 
 /// Arma el texto del mensaje. Si el pedido es largo, trunca la lista de
-/// items ("...y N productos mas"); el encabezado, el total y el link no se
-/// truncan nunca — el link es el respaldo si el texto no alcanza.
+/// items ("...y N productos mas"); el encabezado y el total no se truncan
+/// nunca, y el #shortCode es la referencia para cruzar con el panel.
+///
+/// SIN link al panel (sacado el 2026-09-09): desde que el vendedor recibe
+/// el aviso por mail —con el mismo link y mas contexto— el del mensaje era
+/// redundante, alargaba el texto, y le ponia al CLIENTE un link que no
+/// puede usar (lleva a /admin, que le pide login).
 export function buildQuoteMessage(input: QuoteMessageInput): string {
   const quien = [
     sanitizeForWhatsapp(input.customerName),
@@ -84,8 +84,6 @@ export function buildQuoteMessage(input: QuoteMessageInput): string {
     "",
     "",
     `Total estimado: ${input.formatPrice(input.total)} + IVA`,
-    "",
-    `Ver detalle: ${input.detailUrl}`,
   ].join("\n");
 
   const itemLines = input.lines.map((line) => {
@@ -113,7 +111,7 @@ export function buildQuoteMessage(input: QuoteMessageInput): string {
     if (used + line.length + 1 + reserva > budget) {
       const restantes = itemLines.length - i;
       included.push(
-        `...y ${restantes} producto${restantes === 1 ? "" : "s"} más — ver detalle en el link`
+        `...y ${restantes} producto${restantes === 1 ? "" : "s"} más (ver el detalle completo con el código de arriba)`
       );
       break;
     }

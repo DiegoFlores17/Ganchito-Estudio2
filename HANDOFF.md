@@ -150,6 +150,47 @@ que falta para habilitarlo es el plan Pro.
 Verificado con `scripts/audit-verify-email.ts` (no envía nada): escapado de
 HTML, replyTo, link al logo, y que ninguna llamada tire.
 
+**Probado en producción el 2026-09-09**: cotización real `#2KZXGS`, el mail
+llegó a `consultas@` con la tabla bien formada y "Responder" abre el mail
+del cliente. ✅
+
+> **🔴 El primer intento falló con `403 - domain is not verified`, y NO era
+> el código.** El dominio en Resend había quedado en estado "Not Started":
+> los registros DNS estaban propagados desde las 11:42, pero la
+> **verificación no se dispara sola** — hay que apretarla a mano en el panel
+> de Resend. Con eso, el segundo intento salió. Si alguien ve ese 403 en los
+> logs sin este contexto, va a buscar el problema en el código y no está
+> ahí: **lo primero es mirar el estado del dominio en Resend.**
+
+### El teléfono de la cotización ahora se valida
+
+Esa misma prueba dejó un teléfono guardado como `3512350995083` — 13
+dígitos, cuando un celular de Córdoba son 10. No lo componía el código
+(se guardaba tal cual llegaba): fue el **autocompletado del navegador**
+concatenando. El campo no validaba nada.
+
+Ahora sí, y la regla tiene una historia que conviene no repetir:
+- Un **rango genérico 8..15 NO sirve**: el número roto y un internacional
+  válido (`+54 9 351 235-0995`) tienen los **mismos 13 dígitos**.
+- **Exigir prefijo de país con una lista tampoco**: el roto empieza con
+  `351`, que es un código real (Portugal), así que entraba igual.
+- La regla que **sí** separa: hasta 12 dígitos se acepta como nacional; de
+  13 a 15 **solo con `+` o `00` escritos por el cliente**. Nadie tipea un
+  internacional sin el `+`; el autocompletado, en cambio, pega dígitos
+  crudos.
+- Consecuencia asumida: `0351 15 235-0995` (0 **y** 15 juntos, 13 dígitos)
+  se rechaza. No es una forma correcta de marcar, y tiene exactamente el
+  mismo largo que el número roto — no hay forma de distinguirlos.
+
+12 casos verificados end-to-end contra `submitQuote`.
+
+### El link al panel salió del mensaje de WhatsApp
+
+Desde que el vendedor recibe el aviso por mail —con el mismo link y más
+contexto— el link del mensaje era redundante: alargaba el texto y le ponía
+al **cliente** un link que no puede usar (lleva a `/admin`, que le pide
+login). El `#shortCode` queda: es la referencia para cruzar con el panel.
+
 ## Auto-pausado de ausentes (2026-09-07)
 
 La prudencia de v1 (solo informar) cumplió su función: el mecanismo corrió

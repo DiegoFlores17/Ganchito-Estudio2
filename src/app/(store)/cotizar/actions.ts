@@ -225,6 +225,41 @@ export interface SubmitQuoteResult {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/// El telefono es OPCIONAL, pero si viene tiene que ser plausible: un
+/// numero mal cargado es peor que ninguno — Ganchito llama, no entra, y
+/// nadie se entera de por que. Caso real: el autocompletado de un navegador
+/// concateno digitos de otro campo y guardamos 3512350995083.
+///
+/// Se validan solo los DIGITOS (el cliente escribe como quiere: espacios,
+/// guiones, parentesis, +54).
+///
+/// LO QUE NO FUNCIONO, para que nadie lo reintente:
+/// - Un rango generico 8..15: 3512350995083 son 13 digitos y +54 9 351
+///   235-0995 tambien — el roto y el valido tienen el MISMO largo.
+/// - Exigir prefijo de pais con una lista: el numero roto empieza con
+///   "351", que es un codigo real (Portugal), asi que entraba igual. Peor:
+///   "123" pasaba por el "1" de Norteamerica.
+///
+/// La regla que SI separa los casos: los numeros de 12+ digitos solo son
+/// validos con el prefijo de pais ESCRITO EXPLICITAMENTE por el cliente
+/// (un "+" adelante, o "00"). Nadie tipea un internacional sin el "+"; el
+/// autocompletado, en cambio, pega digitos crudos. Un numero largo sin "+"
+/// es basura concatenada.
+// 10 digitos nacionales + UN prefijo: el 0 de larga distancia ("0351
+// 235-0995" = 11) o el 15 de celular ("351 15 235-0995" = 12). Los dos
+// juntos ("0351 15 235-0995" = 13) no es una forma correcta de marcar, y
+// justamente 13 es el largo del numero roto que motivo esto: no hay forma
+// de distinguirlos por largo, asi que el corte queda en 12.
+const MAX_DIGITOS_NACIONALES = 12;
+
+function telefonoPlausible(raw: string): boolean {
+  const digitos = raw.replace(/\D/g, "");
+  if (digitos.length < 8 || digitos.length > 15) return false;
+  if (digitos.length <= MAX_DIGITOS_NACIONALES) return true;
+  // 13 a 15 digitos: solo si el cliente escribio el prefijo internacional.
+  return /^\s*(\+|00)/.test(raw);
+}
+
 export async function submitQuote(
   formData: FormData
 ): Promise<SubmitQuoteResult> {
@@ -242,6 +277,13 @@ export async function submitQuote(
   }
   if (!customerEmail || !EMAIL_REGEX.test(customerEmail)) {
     return { success: false, error: "El email no es válido." };
+  }
+  if (customerPhone && !telefonoPlausible(customerPhone)) {
+    return {
+      success: false,
+      error:
+        "El teléfono no parece válido. Si es de Argentina, escribilo sin el código de país (ej: 351 235-0995); si es del exterior, empezá con + y el código.",
+    };
   }
 
   let parsed: unknown;
@@ -445,16 +487,9 @@ export async function submitQuote(
     ? normalizeWhatsappNumber(siteConfig.whatsappNumber)
     : "";
   if (waDigits) {
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
     const total = messageLines.reduce((sum, l) => sum + l.subtotal, 0);
     const message = buildQuoteMessage({
       shortCode: quote.shortCode,
-      // Al PANEL, no a una vista publica: el mensaje lo escribe el cliente
-      // pero lo recibe el vendedor, y el destinatario util del link es el
-      // vendedor (historial, logo, estados). El cliente ya ve su pedido en
-      // el propio mensaje.
-      detailUrl: `${siteUrl}/admin/cotizaciones/${quote.id}`,
       customerName,
       companyName,
       customerEmail,

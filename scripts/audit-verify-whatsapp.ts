@@ -49,7 +49,7 @@ async function main() {
     console.log("[wa] sin doble encoding:", !texto.includes("%0A") && texto.includes("\n"));
     console.log("[wa] escape de estrellas: nombre sin * :", !texto.includes("*Negrita*"));
     console.log("[wa] shortCode presente:", texto.includes(`#${r.shortCode}`));
-    console.log("[wa] link al PANEL:", texto.includes(`/admin/cotizaciones/${r.quoteId}`));
+    console.log("[wa] SIN link al panel (el vendedor lo recibe por mail):", !texto.includes("/admin/"));
     // formatPriceArs separa el $ con un NBSP ( ) de Intl.NumberFormat,
     // no con un espacio comun — \s matchea los dos.
     console.log("[wa] total + IVA:", /Total estimado: \$\s?[\d.,]+ \+ IVA/.test(texto));
@@ -58,7 +58,6 @@ async function main() {
     // Truncado: 40 lineas largas tienen que resumirse y el link sobrevivir.
     const largo = buildQuoteMessage({
       shortCode: "TEST99",
-      detailUrl: "https://ganchitoestudio.com/admin/cotizaciones/xyz",
       customerName: "Cliente",
       companyName: null,
       customerEmail: "a@b.co",
@@ -74,7 +73,7 @@ async function main() {
     });
     console.log("[trunc] largo total:", largo.length, "<= 1500:", largo.length <= 1500);
     console.log("[trunc] tiene resumen:", /\.\.\.y \d+ productos? más/.test(largo));
-    console.log("[trunc] link sobrevive:", largo.includes("/admin/cotizaciones/"));
+    console.log("[trunc] shortCode sobrevive:", largo.includes("#TEST99"));
 
     // Limpieza.
     await prisma.quote.delete({ where: { id: r.quoteId! } });

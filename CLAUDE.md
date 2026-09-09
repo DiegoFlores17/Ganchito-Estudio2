@@ -277,6 +277,16 @@ en silencio.
 - Una RUNNING sin heartbeat por 5 minutos está muerta: se RETOMA desde su
   cursor, no se pisa ni se arranca de cero.
 
+### Verificar producción: el navegador, no curl
+
+**`curl` ya NO sirve para monitorear producción** — ni las rutas del panel
+ni las públicas. El anti-bot de Vercel responde **403 con
+`x-vercel-mitigated: challenge`** a cualquier request sin navegador real
+(falsear el user-agent tampoco alcanza). Un 403 en un `curl` NO es un sitio
+caído: es la mitigación. Los chequeos de producción van por navegador real
+(las herramientas de Chrome), y para "¿ya deployó?" sirve comparar la huella
+de los chunks servidos, que sí responde.
+
 ## Seguridad (siempre)
 
 - `.env` y `.env.local` van en `.gitignore`. Nunca commitear los tokens de proveedor

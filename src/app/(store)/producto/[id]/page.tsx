@@ -8,9 +8,10 @@ import { PurchasePanel } from "@/components/product/purchase-panel";
 import { getProductById, getVariantAvailableStock } from "@/lib/product";
 import {
   computePriceRange,
-  computeSellPrice,
+  computeSellPriceForQuantity,
   getPricingConfig,
 } from "@/lib/pricing";
+import { RANGE_DISCOUNT_MIN_QUANTITY } from "@/lib/zecat/normalize";
 import { formatPriceArs } from "@/lib/format";
 
 export default async function ProductoPage({
@@ -32,10 +33,29 @@ export default async function ProductoPage({
 
   // El precio se calcula por variante y se manda ya formateado: PurchasePanel
   // es client component y los Decimal de Prisma no cruzan esa frontera.
+  //
+  // Van DOS mapas porque el precio depende de la cantidad: el descuento de
+  // rango del proveedor arranca en 2 unidades. El server calcula los dos
+  // valores posibles y el cliente elige cual mostrar segun lo que el cliente
+  // haya armado. Ninguna cuenta de dinero ocurre en el navegador — ademas de
+  // ser mas seguro, importar pricing.ts del lado del cliente arrastraria el
+  // cliente de Prisma entero al bundle (ver el comentario de lib/format.ts).
+  //
+  // Cuando se sume la escalera completa esto pasa a ser N mapas (uno por
+  // tramo) en vez de 2: mismo mecanismo, sin rediseño.
   const priceBySku: Record<string, string> = {};
+  const bulkPriceBySku: Record<string, string> = {};
   for (const v of product.variants) {
     priceBySku[v.sku] = formatPriceArs(
-      computeSellPrice(v.costPrice, product.currency, pricingConfig)
+      computeSellPriceForQuantity(v, product.currency, pricingConfig, 1)
+    );
+    bulkPriceBySku[v.sku] = formatPriceArs(
+      computeSellPriceForQuantity(
+        v,
+        product.currency,
+        pricingConfig,
+        RANGE_DISCOUNT_MIN_QUANTITY
+      )
     );
   }
 
@@ -104,6 +124,8 @@ export default async function ProductoPage({
             }))}
             minOrderQuantity={product.minOrderQuantity}
             priceBySku={priceBySku}
+            bulkPriceBySku={bulkPriceBySku}
+            bulkFromQuantity={RANGE_DISCOUNT_MIN_QUANTITY}
             fallbackPriceLabel={
               rango ? formatPriceArs(rango.min) : formatPriceArs(0)
             }

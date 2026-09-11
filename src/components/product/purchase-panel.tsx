@@ -43,6 +43,8 @@ export function PurchasePanel({
   variants,
   minOrderQuantity,
   priceBySku,
+  bulkPriceBySku,
+  bulkFromQuantity,
   fallbackPriceLabel,
 }: {
   productId: string;
@@ -51,7 +53,22 @@ export function PurchasePanel({
   /// Precio de venta ya formateado, por SKU de variante. Viene calculado del
   /// server: el costo ahora vive en la variante, asi que el precio cambia
   /// segun lo que elija el cliente.
+  ///
+  /// Este es el precio de UNA unidad.
   priceBySku: Record<string, string>;
+  /// El mismo precio, pero a partir de 2 unidades del producto, con el
+  /// descuento de rango del proveedor ya aplicado.
+  ///
+  /// Son dos mapas y no una funcion de calculo porque NINGUNA cuenta de dinero
+  /// ocurre en el navegador: el server manda los valores posibles y aca solo
+  /// se elige cual mostrar. Ademas de ser mas seguro, importar el modulo de
+  /// precios del lado del cliente arrastraria el cliente de Prisma entero al
+  /// bundle (ver el comentario de lib/format.ts).
+  bulkPriceBySku: Record<string, string>;
+  /// A partir de cuantas unidades del producto vale `bulkPriceBySku`. Viaja
+  /// como prop y no se importa la constante del conector: este componente es
+  /// de la tienda y no tiene por que saber que el umbral lo define Zecat.
+  bulkFromQuantity: number;
   /// Que mostrar mientras no hay variante resuelta (producto sin variantes
   /// activas, o un SKU que no figura en el mapa). Es el minimo del producto.
   fallbackPriceLabel: string;
@@ -95,11 +112,20 @@ export function PurchasePanel({
         (!sizes.length || v.sizeName === selectedSize)
     ) ?? activeVariants[0];
 
-  // El precio sigue a la variante elegida. Si el SKU no esta en el mapa (no
-  // deberia pasar: viene del mismo producto), cae al minimo en vez de mostrar
-  // un hueco.
-  const precioMostrado =
-    (selectedVariant && priceBySku[selectedVariant.sku]) ?? fallbackPriceLabel;
+  // Si dos variantes del mismo producto valen distinto EN CANTIDAD, hay que
+  // avisarlo: el cliente elige 3XL y el precio sube sin nada que lo explique.
+  // Pasa en los seis textiles de Zecat, donde el talle grande descuenta mucho
+  // menos (14,82% contra 37,83% en la Regent).
+  //
+  // Se compara sobre los precios ya formateados a proposito: es para decidir
+  // si mostrar una linea de texto, no para calcular dinero. Lo que importa es
+  // si el cliente VE numeros distintos.
+  const precioVariaPorVariante = useMemo(() => {
+    const distintos = new Set(
+      activeVariants.map((v) => bulkPriceBySku[v.sku] ?? "")
+    );
+    return distintos.size > 1;
+  }, [activeVariants, bulkPriceBySku]);
 
   // minOrderQuantity es el minimo REAL de compra a nivel PRODUCTO
   // (minimum_application_quantity de Zecat, lo que su backoffice muestra
@@ -164,6 +190,44 @@ export function PurchasePanel({
     aplicarCantidad(n);
   }
 
+  /// La variante que corresponde a un par (color, talle) concreto.
+  ///
+  /// Hace falta en los handlers de cambio porque ahi el estado TODAVIA no se
+  /// actualizo: `selectedVariant`, `available` y `maxQuantity` siguen siendo
+  /// los de la variante vieja, y clampear contra ese stock daria el tope
+  /// equivocado.
+  function variantePara(color?: string, size?: string) {
+    return (
+      activeVariants.find(
+        (v) =>
+          (!colors.length || v.colorName === color) &&
+          (!sizes.length || v.sizeName === size)
+      ) ?? activeVariants[0]
+    );
+  }
+
+  /// Al cambiar de variante se CONSERVA la cantidad, recortandola al stock de
+  /// la nueva si no entra.
+  ///
+  /// Antes volvia a 1, y con el precio dependiendo de la cantidad eso mentia:
+  /// la ficha invita a comparar talles ("El precio varía según el talle"), y
+  /// si al cambiar de talle la cantidad se reseteaba, el cliente comparaba el
+  /// precio con descuento de uno contra el precio de 1 unidad del otro. En la
+  /// Remera Regent eso mostraba $6.974 contra $11.218 cuando la diferencia
+  /// real es contra $9.555: una comparacion inflada, peor que no avisar nada.
+  ///
+  /// El tope por stock no cambia — solo se aplica sobre la cantidad que el
+  /// cliente ya habia elegido en vez de forzarla al piso.
+  function conservarCantidad(variant: VariantData | undefined) {
+    const disponible = variant ? variant.availableStock : 0;
+    // Mismo criterio que maxQuantity: sin stock no se cappea (se avisa y se
+    // deja pedir igual).
+    const tope = disponible <= 0 ? Infinity : disponible;
+    const n = Math.min(Math.max(quantity, lineFloor), tope);
+    setQuantity(n);
+    setQuantityText(String(n));
+  }
+
   function handleColorChange(color: string) {
     setSelectedColor(color);
     const sizesForColor = uniqueNonEmpty(
@@ -172,12 +236,12 @@ export function PurchasePanel({
         .map((v) => v.sizeName)
     );
     setSelectedSize(sizesForColor[0]);
-    aplicarCantidad(lineFloor);
+    conservarCantidad(variantePara(color, sizesForColor[0]));
   }
 
   function handleSizeChange(size: string) {
     setSelectedSize(size);
-    aplicarCantidad(lineFloor);
+    conservarCantidad(variantePara(selectedColor, size));
   }
 
   function handleAddLine() {
@@ -221,6 +285,27 @@ export function PurchasePanel({
   const linesTotal = lines.reduce((sum, line) => sum + line.quantity, 0);
   const minimumMet = !hasVariantOptions || linesTotal >= minQuantity;
 
+  // El total del PRODUCTO que define el tramo de descuento: lo ya agregado mas
+  // lo que hay en el selector. Verificado en el backoffice de Zecat que el
+  // tramo se elige por el total del producto sumando todas sus variantes — 50
+  // talle S + 50 talle M caen en el tramo de 100, no en el de 2.
+  //
+  // Se suma `quantity` (lo que todavia no se agrego) porque el precio tiene
+  // que responder a lo que el cliente esta armando AHORA: escribe 50 y el
+  // precio baja, sin tener que agregar la combinacion para enterarse. En un
+  // producto sin variantes no hay lineas, asi que el total es `quantity` a
+  // secas y la formula sirve igual.
+  const totalDelProducto = linesTotal + quantity;
+
+  // El precio sigue a la variante elegida Y a la cantidad. Si el SKU no esta
+  // en el mapa (no deberia pasar: viene del mismo producto), cae al minimo en
+  // vez de mostrar un hueco.
+  const mapaDePrecios =
+    totalDelProducto >= bulkFromQuantity ? bulkPriceBySku : priceBySku;
+  const precioMostrado =
+    (selectedVariant && mapaDePrecios[selectedVariant.sku]) ??
+    fallbackPriceLabel;
+
   function handleAddToQuote() {
     if (hasVariantOptions) {
       if (lines.length === 0 || !minimumMet) return;
@@ -253,10 +338,21 @@ export function PurchasePanel({
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-2xl text-foreground">
-        {precioMostrado}{" "}
-        <span className="text-base text-foreground/50">+ IVA</span>
-      </p>
+      <div>
+        <p className="text-2xl text-foreground">
+          {precioMostrado}{" "}
+          <span className="text-base text-foreground/50">+ IVA</span>
+        </p>
+        {/* Sobria a proposito: dice QUE el precio cambia, no por que ni
+            cuanto. El porcentaje del proveedor no se muestra — es su
+            estructura de costos, no información para el cliente. */}
+        {precioVariaPorVariante && (
+          <p className="mt-1 text-xs text-foreground/50">
+            El precio varía según {sizes.length > 0 ? "el talle" : "la opción"}{" "}
+            que elijas.
+          </p>
+        )}
+      </div>
 
       {hasVariantOptions && (
         <>

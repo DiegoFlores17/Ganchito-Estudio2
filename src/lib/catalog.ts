@@ -111,7 +111,17 @@ export async function getProducts({
         // costPrice va aca porque el precio ahora vive en la variante: la
         // card necesita todas para saber si muestra un precio exacto o un
         // "Desde" (ver computePriceRange).
-        variants: { select: { stock: true, reservedStock: true, costPrice: true } },
+        variants: {
+          select: {
+            stock: true,
+            reservedStock: true,
+            costPrice: true,
+            // Lo necesita computePriceRange para decidir "Desde $X": dos
+            // variantes con el mismo costo pueden valer distinto a partir
+            // de 2 unidades si descuentan distinto.
+            discountPercent: true,
+          },
+        },
       },
     }),
     prisma.product.count({ where }),
@@ -134,7 +144,17 @@ export async function getFeaturedProducts(take: number) {
     take,
     include: {
       images: { where: { isMain: true }, take: 1 },
-      variants: { select: { stock: true, reservedStock: true, costPrice: true } },
+      variants: {
+          select: {
+            stock: true,
+            reservedStock: true,
+            costPrice: true,
+            // Lo necesita computePriceRange para decidir "Desde $X": dos
+            // variantes con el mismo costo pueden valer distinto a partir
+            // de 2 unidades si descuentan distinto.
+            discountPercent: true,
+          },
+        },
     },
   });
 }

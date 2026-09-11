@@ -124,6 +124,27 @@ export function computeVariantCost(
   return variant.costPrice.times(factor).toDecimalPlaces(2, Prisma.Decimal.ROUND_UP);
 }
 
+/// Precio de venta de una variante para una cantidad dada del producto.
+///
+/// Compone las dos capas en el orden correcto: primero el descuento de rango
+/// del proveedor sobre el costo, y recien despues el margen. Al reves daria
+/// otro numero — el margen se cobra sobre lo que a nosotros nos cuesta.
+///
+/// `productQuantity` es el total del PRODUCTO sumando todas sus variantes.
+/// Ver computeVariantCost() para por que.
+export function computeSellPriceForQuantity(
+  variant: VariantDiscountInputs,
+  currency: Currency,
+  config: PricingInputs,
+  productQuantity: number
+): Prisma.Decimal {
+  return computeSellPrice(
+    computeVariantCost(variant, productQuantity),
+    currency,
+    config
+  );
+}
+
 export interface PriceRange {
   min: Prisma.Decimal;
   max: Prisma.Decimal;
@@ -146,12 +167,23 @@ export interface PriceRange {
 /// Devuelve null si el producto no tiene variantes: quien llama decide que
 /// hacer (hoy no deberia pasar, el alta siempre crea al menos una).
 ///
-/// NO aplica el descuento de rango, a proposito: una card no tiene cantidad, y
-/// el descuento arranca en 2 unidades. Muestra entonces el precio de 1 unidad,
-/// que es el mas alto de la escala — honesto y conservador, el mismo criterio
-/// por el que "Desde $X" muestra el piso y no el precio que a uno le gustaria.
+/// EL PRECIO QUE DEVUELVE ES SIEMPRE EL DE 1 UNIDAD: una card no tiene
+/// cantidad, y el descuento de rango arranca en 2. Es el mas alto de la
+/// escala — honesto y conservador, el mismo criterio por el que "Desde $X"
+/// muestra el piso y no el precio que a uno le gustaria.
+///
+/// PERO `varies` SI mira el descuento, y por eso las variantes traen
+/// `discountPercent`. Antes alcanzaba con comparar costos: en Zecat todas las
+/// variantes de un producto comparten `costPrice`, asi que la card mostraba un
+/// precio exacto. Con el descuento por variante eso dejo de ser cierto — en la
+/// Remera Regent, el talle S descuenta 37,83% y el 3XL 14,82%, asi que a
+/// partir de 2 unidades valen distinto. Una card que promete un numero unico
+/// que la ficha despues no sostiene es peor que un "Desde".
 export function computePriceRange(
-  variants: Array<{ costPrice: Prisma.Decimal }>,
+  variants: Array<{
+    costPrice: Prisma.Decimal;
+    discountPercent?: Prisma.Decimal | null;
+  }>,
   currency: Currency,
   config: PricingInputs
 ): PriceRange | null {
@@ -168,5 +200,20 @@ export function computePriceRange(
     if (p.greaterThan(max)) max = p;
   }
 
-  return { min, max, varies: !min.equals(max) };
+  // Difieren en el precio de 1 unidad (el caso de CDO, con costos distintos
+  // por variante) O en el descuento de rango (el caso de los textiles de
+  // Zecat, que comparten costo pero descuentan distinto a partir de 2).
+  const descuentos = new Set(
+    variants.map((v) =>
+      v.discountPercent === null || v.discountPercent === undefined
+        ? "sin"
+        : v.discountPercent.toString()
+    )
+  );
+
+  return {
+    min,
+    max,
+    varies: !min.equals(max) || descuentos.size > 1,
+  };
 }

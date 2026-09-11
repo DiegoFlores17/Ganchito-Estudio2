@@ -2,7 +2,7 @@
 
 import { QuoteStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { computeSellPrice, getPricingConfig } from "@/lib/pricing";
+import { computeSellPriceForQuantity, getPricingConfig } from "@/lib/pricing";
 import { formatPriceArs } from "@/lib/format";
 import { getVariantAvailableStock } from "@/lib/product";
 import { sendQuoteNotification } from "@/lib/email";
@@ -64,6 +64,20 @@ function sanitizeItems(raw: unknown): QuoteCartItemInput[] | null {
     items.push({ productId, variantSku, quantity });
   }
   return items;
+}
+
+/// Cantidad total por producto, sumando TODAS sus variantes.
+///
+/// Es lo que define el tramo de descuento del proveedor: verificado en el
+/// backoffice de Zecat que un pedido de 50 talle S + 50 talle M cae en el
+/// tramo de 100 unidades, no en el de 2. Usar la cantidad de la linea daria un
+/// tramo mas caro que el que Zecat efectivamente cobra.
+function sumarPorProducto(items: QuoteCartItemInput[]): Map<string, number> {
+  const total = new Map<string, number>();
+  for (const i of items) {
+    total.set(i.productId, (total.get(i.productId) ?? 0) + i.quantity);
+  }
+  return total;
 }
 
 /// Nombres de los productos que quedaron afuera de una cotizacion, para
@@ -128,6 +142,10 @@ export async function getQuoteItemsSummary(
 
   const pricingConfig = await getPricingConfig();
   const productIds = [...new Set(items.map((i) => i.productId))];
+  // ANTES del loop, no dentro: el tramo de descuento se elige por el total del
+  // producto, asi que ese total tiene que estar completo antes de valuar la
+  // primera linea.
+  const totalPorProducto = sumarPorProducto(items);
 
   const products = await prisma.product.findMany({
     // Solo productos VIVOS: un producto pausado o eliminado no se cotiza por
@@ -148,6 +166,9 @@ export async function getQuoteItemsSummary(
           stock: true,
           reservedStock: true,
           costPrice: true,
+          // Lo necesita computeSellPriceForQuantity: el precio depende del
+          // descuento de rango de ESTA variante.
+          discountPercent: true,
         },
       },
     },
@@ -176,10 +197,11 @@ export async function getQuoteItemsSummary(
       continue;
     }
 
-    const sellPrice = computeSellPrice(
-      variant.costPrice,
+    const sellPrice = computeSellPriceForQuantity(
+      variant,
       product.currency,
-      pricingConfig
+      pricingConfig,
+      totalPorProducto.get(item.productId) ?? item.quantity
     );
     const unitPrice = Number(sellPrice);
     const subtotal = unitPrice * item.quantity;
@@ -346,6 +368,10 @@ export async function submitQuote(
   // cliente un precio que nunca vio.
   const pricingConfig = await getPricingConfig();
   const productIds = [...new Set(items.map((i) => i.productId))];
+  // ANTES del loop, no dentro: el tramo de descuento se elige por el total del
+  // producto, asi que ese total tiene que estar completo antes de valuar la
+  // primera linea.
+  const totalPorProducto = sumarPorProducto(items);
   const products = await prisma.product.findMany({
     // Solo productos VIVOS: pausado o eliminado no se cotiza por primera
     // vez. Ojo con la distincion: las cotizaciones YA enviadas conservan sus
@@ -359,7 +385,13 @@ export async function submitQuote(
       name: true,
       currency: true,
       variants: {
-        select: { sku: true, costPrice: true, colorName: true, sizeName: true },
+        select: {
+          sku: true,
+          costPrice: true,
+          discountPercent: true,
+          colorName: true,
+          sizeName: true,
+        },
       },
     },
   });
@@ -392,10 +424,11 @@ export async function submitQuote(
       continue;
     }
 
-    const unitPrice = computeSellPrice(
-      variant.costPrice,
+    const unitPrice = computeSellPriceForQuantity(
+      variant,
       product.currency,
-      pricingConfig
+      pricingConfig,
+      totalPorProducto.get(item.productId) ?? item.quantity
     );
 
     quoteItemsData.push({

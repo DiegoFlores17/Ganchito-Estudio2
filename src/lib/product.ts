@@ -24,6 +24,10 @@ export async function getProductById(id: string) {
           active: true,
           // El precio de la ficha cambia segun la variante elegida.
           costPrice: true,
+          // ...y desde 2 unidades tambien segun el descuento de rango de esa
+          // variante, que dentro de un mismo producto puede diferir (talle S
+          // 37,83% vs 3XL 14,82% en la Remera Regent).
+          discountPercent: true,
         },
       },
       printingAreas: true,

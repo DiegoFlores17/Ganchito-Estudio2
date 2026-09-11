@@ -62,7 +62,7 @@ export async function getManualProducts(search?: string) {
       category: true,
       // El costo vive en la variante: la grilla necesita todas para mostrar
       // el precio, o el rango si difieren.
-      variants: { select: { costPrice: true } },
+      variants: { select: { costPrice: true, discountPercent: true } },
     },
   });
 }

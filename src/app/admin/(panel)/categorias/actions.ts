@@ -3,16 +3,33 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
+import { getMenuGroups, resolverMenuGroup } from "@/lib/admin-categories";
 
 export interface CategoryActionResult {
   success: boolean;
   error?: string;
 }
 
-/// Todo lo que toca el mapeo cambia lo que ve el cliente en el filtro.
+/// Todo lo que toca el mapeo cambia lo que ve el cliente en el filtro Y el
+/// menu del header, que esta en el layout de TODAS las paginas de la tienda.
 function revalidarCatalogo() {
   revalidatePath("/admin/categorias");
   revalidatePath("/catalogo");
+  // El layout, no una ruta: el menu vive en el Header y lo ven todas.
+  revalidatePath("/", "layout");
+}
+
+/// Marca la categoria como REVISADA. Se llama desde toda accion del panel que
+/// implique que un humano la miro y decidio algo sobre ella.
+///
+/// Es lo que saca a una categoria del aviso de "esperando revision". Ojo: se
+/// marca aunque la decision haya sido dejarla oculta — justamente esa es la
+/// diferencia entre "nadie la miro" y "la miraron y la ocultaron".
+async function marcarRevisada(categoryId: string) {
+  await prisma.category.update({
+    where: { id: categoryId },
+    data: { reviewedAt: new Date() },
+  });
 }
 
 /// Prende o apaga una categoria como opcion de filtro del catalogo publico.
@@ -36,7 +53,43 @@ export async function toggleCategoryVisible(
 
   await prisma.category.update({
     where: { id: categoryId },
-    data: { visible },
+    data: { visible, reviewedAt: new Date() },
+  });
+
+  revalidarCatalogo();
+  return { success: true };
+}
+
+/// Asigna (o saca) el grupo del menu de una categoria.
+///
+/// El valor llega como texto libre desde un input con datalist: el cliente
+/// puede elegir uno existente o escribir uno nuevo. La normalizacion se hace
+/// ACA y no en el input — si dependiera de que el usuario elija de la lista,
+/// tarde o temprano conviven "Hogar y bebidas" y "hogar y bebidas" como dos
+/// grupos distintos, y el menu muestra dos columnas donde deberia haber una.
+///
+/// Vacio saca la categoria de su grupo: pasa a la fila secundaria del menu,
+/// que es el default y no una penalizacion.
+export async function setCategoryMenuGroup(
+  categoryId: string,
+  valor: string | null
+): Promise<CategoryActionResult> {
+  await requireAdmin();
+
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { id: true },
+  });
+  if (!category) {
+    return { success: false, error: "Esa categoría no existe." };
+  }
+
+  const existentes = await getMenuGroups();
+  const menuGroup = resolverMenuGroup(valor, existentes);
+
+  await prisma.category.update({
+    where: { id: categoryId },
+    data: { menuGroup, reviewedAt: new Date() },
   });
 
   revalidarCatalogo();
@@ -125,6 +178,7 @@ export async function setCategoryCanonical(
       where: { id: categoryId },
       data: { canonicalId: null },
     });
+    await marcarRevisada(categoryId);
     revalidarCatalogo();
     return { success: true };
   }
@@ -173,6 +227,7 @@ export async function setCategoryCanonical(
     where: { id: categoryId },
     data: { canonicalId },
   });
+  await marcarRevisada(categoryId);
 
   revalidarCatalogo();
   return { success: true };

@@ -116,17 +116,20 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       existía allá). **En local NUNCA se pausaron** (verificado el 2026-09-07:
       la pausa fue solo contra Neon) — por eso local muestra 656 ZECAT
       activos y producción 641. Inocuo: local es entorno de trabajo.
-- [ ] **Las campañas homónimas de los dos proveedores son trabajo manual
-      RECURRENTE del cliente.** Cada campaña nueva de cada proveedor ("Día de
-      la Madre" la traen Zecat Y CDO) aparece como categoría visible y el
-      cliente tiene que ocultarla o unificarla a mano, campaña por campaña,
-      temporada tras temporada. El fix de colisión de slugs evita que el sync
-      explote, pero no resuelve esto. Idea a evaluar (decisión de producto):
-      que las categorías NUEVAS de proveedor nazcan con `visible: false` y el
-      panel muestre una cola de "categorías sin revisar" — invierte el
-      default: el ruido no llega al cliente hasta que alguien lo apruebe.
-      Matcheo automático por nombre sigue descartado (filosofía del
-      proyecto).
+- [x] **Las campañas homónimas de los dos proveedores eran trabajo manual
+      RECURRENTE del cliente.** RESUELTO (2026-09-14) con lo que este ítem
+      proponía como idea a evaluar: las categorías nuevas de proveedor nacen
+      con `visible: false` y el panel avisa cuántas esperan revisión
+      (`reviewedAt IS NULL`). El ruido no llega al catálogo hasta que alguien
+      lo aprueba.
+
+      Lo que el ítem no anticipaba y hubo que resolver: cómo distinguir "está
+      oculta porque nadie la miró" de "está oculta porque el cliente decidió
+      ocultarla". Sin esa distinción el aviso mostraría para siempre las que
+      ya se revisaron. De ahí `reviewedAt`, con backfill a NOW() en la
+      migración para las que ya existían.
+
+      El matcheo automático por nombre sigue descartado, como decía el ítem.
 
 ## Vercel Pro: dos razones convergentes (en gestión con el cliente)
 
@@ -279,6 +282,42 @@ cuatro quedaron a propósito, cada uno con su cuándo:
       logo completo del header es un SVG estático que no se va a leer sobre fondo
       violeta oscuro (ej: hero con fondo Indigo, como sugiere el brief). Conseguir o
       generar una versión clara/monocromática para esos fondos.
+
+## Menú de categorías del header
+
+- [ ] **Evaluar `cacheComponents` para el menú del header.** `getMenuGroups()`
+      corre una vez por navegación, en el layout de TODA la tienda. Hoy sin
+      caché a propósito: son ~24 filas de una tabla chica contra Neon en gru1,
+      y el catálogo ya hace consultas más pesadas por página.
+
+      La alternativa es la directiva `use cache` de Next 16, que **obliga a
+      activar `cacheComponents: true` en `next.config.ts`** — y eso cambia el
+      modelo de caché de la aplicación ENTERA, no solo del menú. Es un cambio
+      con su propia verificación, no algo para colar dentro de la tarea del
+      menú. Hacerlo sólo si el costo se vuelve medible.
+
+      **Dato del camino recorrido:** las páginas estáticas (la home) sirven el
+      menú del momento del build. Se mantiene fresco porque las acciones del
+      panel hacen `revalidatePath("/", "layout")`. Un script que escriba
+      `menuGroup` directo en la base NO revalida nada — si algún día se
+      automatiza la asignación de grupos, hay que revalidar a mano.
+
+- [ ] **Íconos en el menú de categorías.** Quedó afuera de la v1 a propósito.
+      Ojo con el dato de origen: `Category.iconUrl` lo pisan los conectores en
+      cada corrida, así que un ícono propio necesita otra columna o se pierde
+      en el próximo sync.
+
+- [ ] **Los pills de la página de catálogo conviven con el menú.** Se dejaron
+      como estaban: el menú es NAVEGACIÓN (te lleva al catálogo filtrado) y
+      los pills son REFINAMIENTO (ya estás adentro y cambiás de categoría sin
+      volver al header). Con 24 pills la fila es larga y ahora que existen los
+      grupos se podrían agrupar también — decidirlo con el menú en uso, viendo
+      si los pills siguen usándose.
+
+- [ ] **El menú muestra duplicados si hay homónimas sin unificar.** Cada
+      canónica visible es una entrada; dos "Paraguas" sin unificar salen dos
+      veces en la misma columna. No es un bug del menú sino la señal de que
+      falta mapear — pero conviene saber que ahora se ve más que antes.
 
 ## Precios / catálogo
 

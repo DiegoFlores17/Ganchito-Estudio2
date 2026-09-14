@@ -4,6 +4,7 @@ import { AdminRole } from "@prisma/client";
 import { signOut } from "@/auth";
 import { requireAdmin } from "@/lib/admin-auth";
 import { AdminMobileNav } from "@/components/admin/admin-mobile-nav";
+import { countPendingReview } from "@/lib/admin-categories";
 
 export default async function AdminPanelLayout({
   children,
@@ -12,6 +13,11 @@ export default async function AdminPanelLayout({
 }) {
   const admin = await requireAdmin();
   const isSuperAdmin = admin.role === AdminRole.SUPER_ADMIN;
+  // Categorias que llegaron de un proveedor y nadie miro. Va en el LAYOUT y
+  // no en la pantalla de Categorias a proposito: nacen ocultas, asi que si el
+  // aviso viviera solo adentro de esa pantalla habria que entrar para
+  // enterarse de que hay algo que mirar.
+  const categoriasPendientes = await countPendingReview();
 
   // Una sola lista para los dos menús: si el de escritorio y el de mobile
   // arman sus links por separado, tarde o temprano uno queda con una pantalla
@@ -23,7 +29,11 @@ export default async function AdminPanelLayout({
   const navLinks = [
     { label: "Cotizaciones", href: "/admin/cotizaciones" },
     { label: "Productos", href: "/admin/productos" },
-    { label: "Categorías", href: "/admin/categorias" },
+    {
+      label: "Categorías",
+      href: "/admin/categorias",
+      badge: categoriasPendientes,
+    },
     // Sincronizar es operacion del dia a dia (aplica la verdad del
     // proveedor, reversible), no configuracion de negocio: cualquier admin.
     { label: "Proveedores", href: "/admin/proveedores" },
@@ -56,9 +66,19 @@ export default async function AdminPanelLayout({
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="text-sm text-foreground/70 transition-colors hover:text-primary"
+                  className="flex items-center gap-1.5 text-sm text-foreground/70 transition-colors hover:text-primary"
                 >
                   {link.label}
+                  {/* El numero es el aviso: sin el, las categorias nuevas
+                      nacen ocultas y nadie se entera de que llegaron. */}
+                  {link.badge ? (
+                    <span
+                      aria-label={`${link.badge} esperando revisión`}
+                      className="rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-medium leading-none text-white"
+                    >
+                      {link.badge}
+                    </span>
+                  ) : null}
                 </Link>
               ))}
             </nav>

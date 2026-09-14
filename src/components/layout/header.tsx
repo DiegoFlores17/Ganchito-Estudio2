@@ -1,7 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { CartIndicator } from "./cart-indicator";
+import { CategoryMenu } from "./category-menu";
 import { MobileNav } from "./mobile-nav";
+import { getMenuGroups } from "@/lib/catalog";
 
 /// Solo destinos que existen. Antes habia links a /como-funciona y /contacto,
 /// dos paginas que nunca se crearon: eran links al 404 en TODAS las paginas de
@@ -20,7 +22,11 @@ const NAV_LINKS = [
   { label: "Cómo funciona", href: "/#como-funciona" },
 ];
 
-export function Header() {
+/// Server Component: hace UNA query de categorias y la comparte con el menu
+/// desktop y el mobile. Sin cache por ahora — ver la nota de getMenuGroups().
+export async function Header() {
+  const menuGroups = await getMenuGroups();
+
   return (
     <header className="border-b border-black/5 bg-background">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-4">
@@ -35,6 +41,7 @@ export function Header() {
         </Link>
 
         <nav className="hidden items-center gap-8 md:flex">
+          <CategoryMenu groups={menuGroups} />
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
@@ -55,7 +62,7 @@ export function Header() {
 
         <div className="flex items-center gap-1">
           <CartIndicator />
-          <MobileNav navLinks={NAV_LINKS} />
+          <MobileNav navLinks={NAV_LINKS} menuGroups={menuGroups} />
         </div>
       </div>
     </header>

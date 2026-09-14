@@ -277,7 +277,52 @@ model Category {
   /// Default true: una categoría nueva del proveedor aparece hasta que
   /// alguien decida lo contrario. Al revés, un proveedor nuevo entraría
   /// entero invisible y nadie se enteraría.
+  /// Default true a nivel columna, PERO los conectores pasan `visible: false`
+  /// explícito al CREAR. O sea: una categoría que llega de un proveedor nace
+  /// oculta y espera revisión; una que el cliente crea a mano desde el panel
+  /// nace visible, porque la está creando a propósito.
+  ///
+  /// Esa asimetría es deliberada. Cada temporada los dos proveedores traen
+  /// campañas nuevas ("Día de la Madre" la traen Zecat Y CDO) y antes había
+  /// que ocultarlas a mano una por una. Con 60 pills eso era un pill más; con
+  /// un menú curado, una categoría nueva sin grupo queda colgando.
+  ///
+  /// Lo que NUNCA debe pasar: que un sync vuelva a ocultar una categoría que
+  /// el cliente ya hizo visible. Por eso `visible` va sólo en el bloque
+  /// `create` de los conectores, jamás en el `update`.
   visible       Boolean   @default(true)
+  /// Grupo del menú de categorías del header ("Hogar y bebidas", "Bolsos y
+  /// viaje"). String libre y no enum a propósito: agregar un grupo nuevo no
+  /// debe requerir un deploy.
+  ///
+  /// Null es el DEFAULT y no un caso especial: una categoría visible sin
+  /// grupo cae en la fila secundaria del menú. Así, una categoría que alguien
+  /// hace visible pero no agrupa no rompe el layout — aparece abajo.
+  ///
+  /// Se llama menuGroup y no group por dos razones: `group` es palabra
+  /// reservada en SQL (toda query cruda tendría que escribirla entre comillas
+  /// o falla con un error de sintaxis que no dice nada útil), y el nombre
+  /// dice de qué agrupamiento se trata, que no es el único posible.
+  ///
+  /// La normalización de mayúsculas/acentos se hace al GUARDAR, en la acción
+  /// del panel: si dependiera de que el usuario elija de la lista, tarde o
+  /// temprano conviven "Hogar y bebidas" y "hogar y bebidas".
+  menuGroup     String?
+  /// Cuándo un humano miró esta categoría desde el panel. Null = nadie la
+  /// revisó todavía.
+  ///
+  /// Existe para poder distinguir "está oculta porque nadie la miró" de "está
+  /// oculta porque el cliente decidió ocultarla". Sin esa distinción, el aviso
+  /// de pendientes mostraría para siempre las 27 que ya se revisaron.
+  ///
+  /// Se podría aproximar con createdAt y una ventana de días, pero el error
+  /// es al revés y peor: una categoría vieja que nadie miró se caería sola
+  /// del aviso, que es exactamente el caso que el aviso existe para atrapar.
+  ///
+  /// La migración que agregó esta columna hace `SET reviewedAt = NOW()` en
+  /// todas las filas existentes: al momento de crearla, el cliente acababa de
+  /// revisar el catálogo entero.
+  reviewedAt    DateTime?
   /// Si esta categoría es un ALIAS de otra: la de arriba es la que ve el
   /// cliente, esta no aparece en el filtro y sus productos se muestran bajo
   /// aquella.

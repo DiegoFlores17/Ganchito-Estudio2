@@ -49,6 +49,11 @@ async function resolveCategoryId(
         name: family.description,
         slug: slugifyFamily(family),
         iconUrl: family.icon_url ?? null,
+        // Nace OCULTA y esperando revision. Va solo en `create`: el `update`
+        // de arriba no menciona `visible`, y Prisma escribe unicamente los
+        // campos presentes, asi que una categoria que el cliente ya hizo
+        // visible NUNCA vuelve a ocultarse en una corrida posterior.
+        visible: false,
       },
     });
     return category.id;
@@ -71,6 +76,11 @@ async function resolveCategoryId(
         // zecatFamilyId ya es unique), y deja rastro de donde salio.
         slug: `${slugifyFamily(family)}-zecat-${family.id}`,
         iconUrl: family.icon_url ?? null,
+        // Igual que en el camino feliz: nace oculta. Este `create` es el del
+        // reintento por colision de slug — si se olvidara aca, las categorias
+        // homonimas entre proveedores (las que MAS ruido hacen) entrarian
+        // visibles y el olvido solo se notaria en produccion.
+        visible: false,
       },
     });
     console.warn(

@@ -3,13 +3,29 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import type { MenuGroup } from "@/lib/catalog";
+
+/// Mismo tope que el menu desktop, por la misma razon: la fila de sueltas no
+/// puede crecer sin control. En mobile pesa mas todavia — la lista es
+/// vertical, asi que cuarenta items sueltos empujan el CTA de cotizacion
+/// fuera de la pantalla.
+const MAX_SUELTAS = 8;
 
 interface NavLink {
   label: string;
   href: string;
 }
 
-export function MobileNav({ navLinks }: { navLinks: NavLink[] }) {
+export function MobileNav({
+  navLinks,
+  menuGroups,
+}: {
+  navLinks: NavLink[];
+  /// Los mismos grupos que usa el menu desktop: la query la hace el Header y
+  /// la comparte. Las categorias viven DENTRO de este panel y no en un
+  /// componente aparte — en mobile no hace falta un desplegable sobre otro.
+  menuGroups: MenuGroup[];
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -55,6 +71,54 @@ export function MobileNav({ navLinks }: { navLinks: NavLink[] }) {
                 {link.label}
               </Link>
             ))}
+
+            {menuGroups.length > 0 && (
+              <div className="mt-6 flex flex-col gap-6 border-t border-black/5 pt-6">
+                {menuGroups.map((grupo) => (
+                  <div key={grupo.name ?? "sin-grupo"}>
+                    {/* Las sueltas van sin encabezado: ponerles uno
+                        ("Otras") les daria una jerarquia que no tienen. */}
+                    {grupo.name && (
+                      <p className="mb-2 text-xs font-semibold tracking-wide text-foreground/40">
+                        {grupo.name}
+                      </p>
+                    )}
+                    <div className="flex flex-col">
+                      {(grupo.name === null
+                        ? grupo.categories.slice(0, MAX_SUELTAS)
+                        : grupo.categories
+                      ).map((c) => (
+                        <Link
+                          key={c.id}
+                          href={`/catalogo?categoria=${c.slug}`}
+                          onClick={() => setOpen(false)}
+                          className="py-2 text-base text-foreground/80 transition-colors hover:text-primary"
+                        >
+                          {c.name}
+                        </Link>
+                      ))}
+                      {grupo.name === null &&
+                        grupo.categories.length > MAX_SUELTAS && (
+                          <Link
+                            href="/catalogo"
+                            onClick={() => setOpen(false)}
+                            className="py-2 text-base text-foreground/50"
+                          >
+                            y {grupo.categories.length - MAX_SUELTAS} más
+                          </Link>
+                        )}
+                    </div>
+                  </div>
+                ))}
+                <Link
+                  href="/catalogo"
+                  onClick={() => setOpen(false)}
+                  className="text-base font-medium text-primary"
+                >
+                  Ver todo el catálogo →
+                </Link>
+              </div>
+            )}
 
             <Link
               href="/cotizar"

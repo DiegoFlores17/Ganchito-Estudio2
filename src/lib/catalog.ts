@@ -26,6 +26,98 @@ export async function getVisibleCategories() {
   });
 }
 
+/// Un grupo del menu del header, con sus categorias ya ordenadas.
+export interface MenuGroup {
+  /// null es el grupo de las SUELTAS: las visibles que nadie agrupo. No es un
+  /// caso especial sino el default, y por eso tiene su lugar en el menu (la
+  /// fila de abajo) en vez de desaparecer.
+  name: string | null;
+  categories: Array<{ id: string; name: string; slug: string; productCount: number }>;
+}
+
+/// El menu de categorias del header.
+///
+/// Mismo criterio de visibilidad que getVisibleCategories(): solo `visible` y
+/// no-alias. Lo que agrega es el agrupamiento y el conteo de productos.
+///
+/// Va en el header de TODO el sitio, asi que corre una vez por navegacion. Hoy
+/// sin cache a proposito: son ~24 filas de una tabla chica contra Neon en
+/// gru1, y la alternativa (`use cache` de Next 16) obliga a activar
+/// `cacheComponents` en next.config.ts, que cambia el modelo de cache de la
+/// aplicacion ENTERA. Ese es un cambio propio, con su propia verificacion, no
+/// algo para colar dentro de esta tarea. Queda anotado en PENDIENTES.
+///
+/// El orden DENTRO de cada grupo es por cantidad de productos descendente:
+/// todavia no hay datos de ventas, y la cantidad es la mejor aproximacion
+/// disponible a "que le interesa mas al cliente". Entre grupos, el orden es el
+/// de GRUPOS_ORDENADOS y las sueltas van siempre al final.
+export async function getMenuGroups(): Promise<MenuGroup[]> {
+  const categories = await prisma.category.findMany({
+    where: { visible: true, canonicalId: null },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      menuGroup: true,
+      _count: {
+        select: { products: { where: { deletedAt: null, active: true } } },
+      },
+      // Los productos de los ALIAS cuentan para esta categoria: es lo que el
+      // filtro publico muestra cuando el cliente la elige (ver getProducts,
+      // que resuelve por categoria O por sus alias).
+      //
+      // Sin esto el orden es una mentira. Las canonicas son categorias
+      // PROPIAS y los productos cuelgan de las de proveedor, asi que casi
+      // todas tienen 0 productos propios: ordenar por ese numero deja
+      // "Escritura" —con cuatro alias llenos— al fondo de su columna.
+      aliases: {
+        select: {
+          _count: {
+            select: { products: { where: { deletedAt: null, active: true } } },
+          },
+        },
+      },
+    },
+  });
+
+  const porGrupo = new Map<string | null, MenuGroup["categories"]>();
+  for (const c of categories) {
+    const clave = c.menuGroup ?? null;
+    const fila = {
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      productCount:
+        c._count.products +
+        c.aliases.reduce((n, a) => n + a._count.products, 0),
+    };
+    porGrupo.set(clave, [...(porGrupo.get(clave) ?? []), fila]);
+  }
+
+  const grupos: MenuGroup[] = [];
+  for (const [name, cats] of porGrupo) {
+    if (name === null) continue; // las sueltas van al final
+    grupos.push({
+      name,
+      categories: cats.sort((a, b) => b.productCount - a.productCount),
+    });
+  }
+  // Entre grupos, alfabetico: sin un criterio de negocio, el alfabetico es
+  // estable y predecible. Un `sortOrder` por grupo se puede agregar despues
+  // sin tocar nada de esto.
+  grupos.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "es"));
+
+  const sueltas = porGrupo.get(null);
+  if (sueltas?.length) {
+    grupos.push({
+      name: null,
+      categories: sueltas.sort((a, b) => b.productCount - a.productCount),
+    });
+  }
+
+  return grupos;
+}
+
 /// TODAS las categorias, visibles y ocultas. Es la que va en los formularios
 /// del panel.
 ///

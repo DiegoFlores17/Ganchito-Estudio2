@@ -18,6 +18,10 @@ export interface AdminCategoryRow {
   /// Si es alias, a que categoria apunta.
   canonicalId: string | null;
   canonicalName: string | null;
+  /// Grupo del menu del header. Null = cae en la fila secundaria.
+  menuGroup: string | null;
+  /// Null = nadie la reviso todavia desde el panel.
+  reviewedAt: Date | null;
 }
 
 /// Una categoria propia con los alias que le apuntan. Es lo que ve el
@@ -40,6 +44,9 @@ export interface AdminCategoriesView {
   suggestions: CategorySuggestion[];
   totalCount: number;
   hiddenCount: number;
+  /// Las que llegaron de un proveedor y todavia no miro nadie. Nacen ocultas,
+  /// asi que si no se avisan quedan invisibles para siempre.
+  pendingReview: AdminCategoryRow[];
 }
 
 export interface CategorySuggestion {
@@ -76,6 +83,59 @@ export function normalizeForMatch(name: string): string {
     .trim();
 }
 
+/// Normaliza un nombre de grupo del menu para COMPARARLO con los existentes.
+///
+/// Hace exactamente tres cosas: minusculas, saca acentos, y colapsa espacios
+/// repetidos. NADA MAS. Deliberadamente NO cubre singular/plural ni "y" contra
+/// "&": un matcheo mas listo de la cuenta fusionaria grupos que el cliente
+/// queria separados, y recuperar eso es mas caro que tener dos grupos
+/// parecidos un rato.
+///
+/// Es una funcion aparte de normalizeForMatch() a proposito: aquella colapsa
+/// todo lo no alfanumerico porque compara NOMBRES DE CATEGORIA para sugerir
+/// unificaciones. Acá el valor se GUARDA, no se sugiere.
+export function normalizarMenuGroup(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/// Los grupos que YA existen, para ofrecerlos en el panel.
+export async function getMenuGroups(): Promise<string[]> {
+  const filas = await prisma.category.findMany({
+    where: { menuGroup: { not: null } },
+    select: { menuGroup: true },
+    distinct: ["menuGroup"],
+    orderBy: { menuGroup: "asc" },
+  });
+  return filas.map((f) => f.menuGroup!).filter(Boolean);
+}
+
+/// Devuelve el grupo tal como debe GUARDARSE.
+///
+/// Si lo que escribio el usuario coincide con uno existente ignorando
+/// mayusculas y acentos, devuelve EL EXISTENTE — asi no conviven "Hogar y
+/// bebidas" y "hogar y bebidas" como grupos distintos. Si no coincide con
+/// ninguno, devuelve lo escrito con los espacios recortados, respetando las
+/// mayusculas que el cliente eligio.
+///
+/// Vacio o solo espacios devuelve null: es como se saca una categoria de su
+/// grupo.
+export function resolverMenuGroup(
+  escrito: string | null | undefined,
+  existentes: string[]
+): string | null {
+  const limpio = (escrito ?? "").replace(/\s+/g, " ").trim();
+  if (limpio === "") return null;
+
+  const clave = normalizarMenuGroup(limpio);
+  const yaExiste = existentes.find((g) => normalizarMenuGroup(g) === clave);
+  return yaExiste ?? limpio;
+}
+
 /// Todas las categorias agrupadas para la pantalla del panel.
 export async function getAdminCategoriesView(): Promise<AdminCategoriesView> {
   const categories = await prisma.category.findMany({
@@ -84,6 +144,8 @@ export async function getAdminCategoriesView(): Promise<AdminCategoriesView> {
       name: true,
       slug: true,
       visible: true,
+      menuGroup: true,
+      reviewedAt: true,
       canonicalId: true,
       zecatFamilyId: true,
       cdoCategoryId: true,
@@ -106,6 +168,8 @@ export async function getAdminCategoriesView(): Promise<AdminCategoriesView> {
     productCount: category._count.products,
     canonicalId: category.canonicalId,
     canonicalName: category.canonical?.name ?? null,
+    menuGroup: category.menuGroup,
+    reviewedAt: category.reviewedAt,
   }));
 
   const aliasesByCanonical = new Map<string, AdminCategoryRow[]>();
@@ -146,6 +210,7 @@ export async function getAdminCategoriesView(): Promise<AdminCategoriesView> {
     suggestions: buildSuggestions(unassigned),
     totalCount: rows.length,
     hiddenCount: rows.filter((r) => !r.visible).length,
+    pendingReview: rows.filter(esPendienteDeRevision),
   };
 }
 
@@ -181,5 +246,28 @@ export async function getCanonicalOptions() {
     },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
+  });
+}
+
+/// Una categoria "esperando revision": llego de un proveedor, nace oculta, y
+/// nadie la miro todavia.
+///
+/// Las dos condiciones importan. Sin `!visible` aparecerian las que el cliente
+/// ya publico; sin `reviewedAt === null` aparecerian para siempre las que
+/// decidio ocultar a proposito. La migracion que agrego la columna marco todas
+/// las existentes como revisadas, asi que esto empieza vacio y solo se llena
+/// con lo que llegue de aca en adelante.
+export function esPendienteDeRevision(row: {
+  visible: boolean;
+  reviewedAt: Date | null;
+}): boolean {
+  return !row.visible && row.reviewedAt === null;
+}
+
+/// Cuantas categorias esperan revision. Query barata y aparte de la vista
+/// completa: la usa el nav del panel, que se renderiza en TODAS sus pantallas.
+export async function countPendingReview(): Promise<number> {
+  return prisma.category.count({
+    where: { visible: false, reviewedAt: null },
   });
 }

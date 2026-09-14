@@ -56,8 +56,13 @@ type Tx = Prisma.TransactionClient;
 ///
 /// Se importan TODAS, incluidas las de campaña ("Día de la Madre", "Precios
 /// Wow"): filtrarlas por nombre desde el conector seria adivinar. La
-/// visibilidad se resuelve con el campo editable desde el panel que ya esta
-/// planteado en PENDIENTES, que sirve igual para Zecat y para CDO.
+/// visibilidad se decide desde el panel.
+///
+/// Las que se CREAN nacen ocultas (`visible: false`) y esperando revision.
+/// Las que YA EXISTEN no se tocan: el `update` de abajo escribe unicamente
+/// `name`, asi que una categoria que el cliente ya hizo visible no puede
+/// volver a ocultarse en una corrida posterior. Son dos caminos separados y
+/// el de actualizacion ni siquiera menciona el campo.
 async function resolveCategoryId(
   tx: Tx,
   category: CdoCategory | undefined
@@ -90,6 +95,10 @@ async function resolveCategoryId(
       cdoCategoryId: String(category.id),
       name: category.name,
       slug: slugTomado ? `${slug}-cdo-${category.id}` : slug,
+      // Nace oculta: el ruido del proveedor no llega al catalogo hasta que
+      // alguien lo apruebe. Este es el UNICO create de categorias de CDO, y
+      // solo se alcanza cuando el findUnique de arriba no encontro nada.
+      visible: false,
     },
   });
   return created.id;

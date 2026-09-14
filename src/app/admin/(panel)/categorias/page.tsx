@@ -3,12 +3,14 @@ import { requireAdmin } from "@/lib/admin-auth";
 import {
   getAdminCategoriesView,
   getCanonicalOptions,
+  getMenuGroups,
   type AdminCategoryRow,
   type CategoryOrigin,
 } from "@/lib/admin-categories";
 import { ToggleCategoryVisibleButton } from "@/components/admin/toggle-category-visible-button";
 import { CategoryUnifySelect } from "@/components/admin/category-unify-select";
 import { NewCategoryForm } from "@/components/admin/new-category-form";
+import { CategoryMenuGroupInput } from "@/components/admin/category-menu-group-input";
 import { CategorySuggestion } from "@/components/admin/category-suggestion";
 
 const ORIGIN_LABEL: Record<CategoryOrigin, string> = {
@@ -66,9 +68,10 @@ export default async function CategoriasPage() {
   // requireAdmin() en src/lib/admin-auth.ts.
   await requireAdmin();
 
-  const [view, canonicalOptions] = await Promise.all([
+  const [view, canonicalOptions, gruposExistentes] = await Promise.all([
     getAdminCategoriesView(),
     getCanonicalOptions(),
+    getMenuGroups(),
   ]);
 
   return (
@@ -96,6 +99,68 @@ export default async function CategoriasPage() {
         como cada producto tiene una sola categoría, sus productos quedan sin
         ninguna vía de filtro. Para eso está unificar.
       </p>
+
+      {/* Las que llegaron de un proveedor y nadie miro. Nacen ocultas, asi
+          que sin este bloque quedarian invisibles para siempre: el cliente no
+          tiene forma de enterarse de que existen. Desaparece cuando no hay
+          ninguna — un aviso permanente en cero se vuelve parte del fondo. */}
+      {view.pendingReview.length > 0 && (
+        <section className="mt-10">
+          <h2 className="text-lg font-medium text-foreground">
+            {view.pendingReview.length === 1
+              ? "Llegó 1 categoría nueva"
+              : `Llegaron ${view.pendingReview.length} categorías nuevas`}
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm text-foreground/60">
+            Las trajo un proveedor en el último sync y están ocultas hasta que
+            decidas. Cada temporada llegan campañas nuevas (&quot;Día de la
+            Madre&quot;, &quot;Precios Wow&quot;): las que no te sirvan,
+            dejalas ocultas y listo.
+          </p>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-foreground/10">
+            <table className="w-full min-w-[40rem] text-sm">
+              <thead className="bg-foreground/[0.03] text-left text-xs uppercase tracking-wide text-foreground/50">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Categoría</th>
+                  <th className="px-4 py-3 font-medium">Origen</th>
+                  <th className="px-4 py-3 text-right font-medium">Productos</th>
+                  <th className="px-4 py-3 font-medium">Grupo del menú</th>
+                  <th className="px-4 py-3 text-right font-medium">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-foreground/10">
+                {view.pendingReview.map((row) => (
+                  <tr key={row.id}>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-foreground">{row.name}</p>
+                      <p className="text-xs text-foreground/50">{row.slug}</p>
+                    </td>
+                    <td className="px-4 py-3 text-foreground/60">{row.origin}</td>
+                    <td className="px-4 py-3 text-right">
+                      <ProductCount count={row.productCount} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <CategoryMenuGroupInput
+                        categoryId={row.id}
+                        categoryName={row.name}
+                        menuGroup={row.menuGroup}
+                        gruposExistentes={gruposExistentes}
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <ToggleCategoryVisibleButton
+                        categoryId={row.id}
+                        categoryName={row.name}
+                        visible={row.visible}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {view.suggestions.length > 0 && (
         <section className="mt-10">
@@ -152,6 +217,7 @@ export default async function CategoriasPage() {
                 <th className="px-4 py-3 font-medium">Categoría</th>
                 <th className="px-4 py-3 font-medium">Unificadas</th>
                 <th className="px-4 py-3 font-medium">Productos</th>
+                <th className="px-4 py-3 font-medium">Grupo del menú</th>
                 <th className="px-4 py-3 font-medium">En el filtro</th>
                 <th className="px-4 py-3"></th>
               </tr>
@@ -203,6 +269,14 @@ export default async function CategoriasPage() {
                         {canonical.productCount} propios
                       </p>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <CategoryMenuGroupInput
+                      categoryId={canonical.id}
+                      categoryName={canonical.name}
+                      menuGroup={canonical.menuGroup}
+                      gruposExistentes={gruposExistentes}
+                    />
                   </td>
                   <td className="px-4 py-3">
                     <VisibleBadge visible={canonical.visible} />

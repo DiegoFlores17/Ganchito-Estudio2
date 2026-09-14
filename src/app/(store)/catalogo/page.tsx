@@ -2,7 +2,7 @@ import { CategoryFilter } from "@/components/catalog/category-filter";
 import { Pagination } from "@/components/catalog/pagination";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SearchInput } from "@/components/search-input";
-import { getVisibleCategories, getProducts, hasAvailableStock } from "@/lib/catalog";
+import { getMenuGroups, getProducts, hasAvailableStock } from "@/lib/catalog";
 import { computePriceRange, getPricingConfig } from "@/lib/pricing";
 
 export default async function CatalogoPage({
@@ -15,16 +15,18 @@ export default async function CatalogoPage({
   const categorySlug = params.categoria || undefined;
   const search = params.q || undefined;
 
-  const [{ products, totalPages, total }, categories, pricingConfig] =
+  // Los MISMOS grupos que el menu del header: una sola fuente para los dos
+  // lugares, asi no pueden mostrar contenido u orden distintos.
+  const [{ products, totalPages, total }, categoryGroups, pricingConfig] =
     await Promise.all([
       getProducts({ page, categorySlug, search }),
-      getVisibleCategories(),
+      getMenuGroups(),
       getPricingConfig(),
     ]);
 
-  const activeCategoryName = categories.find(
-    (c) => c.slug === categorySlug
-  )?.name;
+  const activeCategoryName = categoryGroups
+    .flatMap((g) => g.categories)
+    .find((c) => c.slug === categorySlug)?.name;
 
   // Se pasa a cada ProductCard para que la ficha de producto pueda armar
   // un "volver al catalogo" que preserve pagina/categoria/busqueda.
@@ -58,7 +60,7 @@ export default async function CatalogoPage({
 
       <div className="mt-4">
         <CategoryFilter
-          categories={categories}
+          groups={categoryGroups}
           activeSlug={categorySlug}
           search={search}
         />

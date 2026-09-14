@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { Category } from "@prisma/client";
+import type { MenuGroup } from "@/lib/catalog";
+import { GRUPO_SIN_AGRUPAR } from "@/lib/menu-groups";
 import { CategoryChip, PanelRow } from "@/components/catalog/link-content";
 
 /// Tope para cerrar el panel si la navegacion nunca termina (red caida,
@@ -19,16 +20,33 @@ function buildHref(categorySlug?: string, search?: string) {
 }
 
 export function CategoryFilter({
-  categories,
+  groups,
   activeSlug,
   search,
 }: {
-  categories: Category[];
+  /// Los MISMOS grupos que el menu del header, de la misma query
+  /// (getMenuGroups). Que los dos lugares coincidan en contenido y orden es
+  /// el punto de agrupar acá: si el catalogo armara su propio orden, tarde o
+  /// temprano muestran cosas distintas.
+  groups: MenuGroup[];
   activeSlug?: string;
   search?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const categories = groups.flatMap((g) => g.categories);
   const activeCategory = categories.find((c) => c.slug === activeSlug);
+
+  const agrupados = groups.filter((g) => g.name !== null);
+  const sueltas = groups.find((g) => g.name === null)?.categories ?? [];
+
+  // "Otras" arranca CERRADA salvo que la categoria filtrada este adentro: si
+  // se quedara cerrada en ese caso, el cliente veria el catalogo filtrado sin
+  // ninguna pill marcada y sin forma de saber por que.
+  //
+  // Se calcula en el useState inicial y no en un efecto: el efecto pintaria un
+  // frame con el bloque cerrado antes de abrirlo.
+  const activaEsSuelta = sueltas.some((c) => c.slug === activeSlug);
+  const [otrasAbierto, setOtrasAbierto] = useState(activaEsSuelta);
 
   // Que categoria se toco y todavia no llego. El panel ya NO se cierra en el
   // toque: si se cerrara ahi, el control que el usuario acaba de tocar
@@ -76,24 +94,77 @@ export function CategoryFilter({
 
   return (
     <>
-      {/* Desktop: pills envueltas, como siempre. */}
-      <nav className="hidden flex-wrap gap-2 md:flex">
-        <CategoryLink
-          href={buildHref(undefined, search)}
-          active={!slugMostrado}
-          label="Todas"
-          onNavigate={() => setPendingSlug("")}
-        />
-        {categories.map((category) => (
+      {/* Desktop: una COLUMNA por grupo, en el mismo orden que el menu del
+          header. Apilados uno abajo del otro ocupaban toda la altura de la
+          pantalla y desperdiciaban el ancho. */}
+      <div className="hidden flex-col gap-5 md:flex">
+        {/* "Todas" arriba y separada de las columnas, no adentro de una: no es
+            una categoria sino la forma de LIMPIAR el filtro. Metida en el
+            primer grupo se leeria como si perteneciera a el. */}
+        <nav className="flex flex-wrap gap-2">
           <CategoryLink
-            key={category.id}
-            href={buildHref(category.slug, search)}
-            active={category.slug === slugMostrado}
-            label={category.name}
-            onNavigate={() => setPendingSlug(category.slug)}
+            href={buildHref(undefined, search)}
+            active={!slugMostrado}
+            label="Todas"
+            onNavigate={() => setPendingSlug("")}
           />
-        ))}
-      </nav>
+        </nav>
+
+        {/* Mismo mecanismo que el menu del header: auto-fit + minmax para que
+            las columnas se adapten al ancho real en vez de aplastarse. */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-x-6 gap-y-5">
+          {agrupados.map((grupo) => (
+            <div key={grupo.name}>
+              <p className="mb-2 text-xs font-semibold tracking-wide text-foreground/40">
+                {grupo.name}
+              </p>
+              <nav className="flex flex-wrap gap-2">
+                {grupo.categories.map((category) => (
+                  <CategoryLink
+                    key={category.id}
+                    href={buildHref(category.slug, search)}
+                    active={category.slug === slugMostrado}
+                    label={category.name}
+                    onNavigate={() => setPendingSlug(category.slug)}
+                  />
+                ))}
+              </nav>
+            </div>
+          ))}
+        </div>
+
+        {/* "Otras" COLAPSADA: es la bolsa de lo que no entro en ningun grupo
+            y no tiene que competir visualmente con los grupos curados. Se
+            abre sola cuando la categoria activa esta adentro — si no, el
+            cliente no veria por que esta filtrando. */}
+        {sueltas.length > 0 && (
+          <div className="border-t border-foreground/10 pt-4">
+            <button
+              type="button"
+              onClick={() => setOtrasAbierto((v) => !v)}
+              aria-expanded={otrasAbierto}
+              className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-foreground/40 transition-colors hover:text-foreground/70"
+            >
+              {GRUPO_SIN_AGRUPAR}
+              <span className="text-foreground/30">({sueltas.length})</span>
+              <ChevronIcon abierto={otrasAbierto} />
+            </button>
+            {otrasAbierto && (
+              <nav className="mt-2 flex flex-wrap gap-2">
+                {sueltas.map((category) => (
+                  <CategoryLink
+                    key={category.id}
+                    href={buildHref(category.slug, search)}
+                    active={category.slug === slugMostrado}
+                    label={category.name}
+                    onNavigate={() => setPendingSlug(category.slug)}
+                  />
+                ))}
+              </nav>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Mobile: boton compacto que abre un panel, en vez de las 27 pills
           apiladas ocupando toda la pantalla antes de llegar a un producto. */}
@@ -127,21 +198,56 @@ export function CategoryFilter({
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-4">
+              {/* Igual que en desktop: "Todas" arriba, fuera de los grupos. */}
               <PanelLink
                 href={buildHref(undefined, search)}
                 active={!slugMostrado}
                 label="Todas"
                 onNavigate={() => setPendingSlug("")}
               />
-              {categories.map((category) => (
-                <PanelLink
-                  key={category.id}
-                  href={buildHref(category.slug, search)}
-                  active={category.slug === slugMostrado}
-                  label={category.name}
-                  onNavigate={() => setPendingSlug(category.slug)}
-                />
+              {/* En mobile los grupos van en una sola columna: es lo que
+                  entra. */}
+              {agrupados.map((grupo) => (
+                <div key={grupo.name} className="mt-5">
+                  <p className="mb-1 text-xs font-semibold tracking-wide text-foreground/40">
+                    {grupo.name}
+                  </p>
+                  {grupo.categories.map((category) => (
+                    <PanelLink
+                      key={category.id}
+                      href={buildHref(category.slug, search)}
+                      active={category.slug === slugMostrado}
+                      label={category.name}
+                      onNavigate={() => setPendingSlug(category.slug)}
+                    />
+                  ))}
+                </div>
               ))}
+
+              {sueltas.length > 0 && (
+                <div className="mt-5 border-t border-foreground/10 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setOtrasAbierto((v) => !v)}
+                    aria-expanded={otrasAbierto}
+                    className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-foreground/40"
+                  >
+                    {GRUPO_SIN_AGRUPAR}
+                    <span className="text-foreground/30">({sueltas.length})</span>
+                    <ChevronIcon abierto={otrasAbierto} />
+                  </button>
+                  {otrasAbierto &&
+                    sueltas.map((category) => (
+                      <PanelLink
+                        key={category.id}
+                        href={buildHref(category.slug, search)}
+                        active={category.slug === slugMostrado}
+                        label={category.name}
+                        onNavigate={() => setPendingSlug(category.slug)}
+                      />
+                    ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -184,6 +290,25 @@ function PanelLink({
     <Link href={href} onClick={onNavigate} className="block">
       <PanelRow active={active} label={label} />
     </Link>
+  );
+}
+
+function ChevronIcon({ abierto }: { abierto: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className={"h-3.5 w-3.5 transition-transform " + (abierto ? "rotate-180" : "")}
+    >
+      <path
+        d="M6 8l4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

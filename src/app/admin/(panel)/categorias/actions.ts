@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getMenuGroups, resolverMenuGroup } from "@/lib/admin-categories";
+import { GRUPO_SIN_AGRUPAR, esGrupoReservado } from "@/lib/menu-groups";
 
 export interface CategoryActionResult {
   success: boolean;
@@ -82,6 +83,18 @@ export async function setCategoryMenuGroup(
   });
   if (!category) {
     return { success: false, error: "Esa categoría no existe." };
+  }
+
+  // "Otras" es el encabezado que el front le pone a las categorias SIN grupo.
+  // Si se pudiera guardar como grupo real, esas categorias dejarian de tener
+  // menuGroup null y se perderia la señal de que falta mapearlas: quedarian
+  // escondidas en un cajon con nombre propio en vez de visibles como
+  // pendientes.
+  if (valor && esGrupoReservado(valor)) {
+    return {
+      success: false,
+      error: `"${GRUPO_SIN_AGRUPAR}" no se puede usar como grupo: es el título que lleva el bloque de las categorías sin agrupar. Dejá el campo vacío y va a aparecer ahí sola.`,
+    };
   }
 
   const existentes = await getMenuGroups();

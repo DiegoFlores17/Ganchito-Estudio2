@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { MenuGroup } from "@/lib/catalog";
+import { GRUPO_SIN_AGRUPAR } from "@/lib/menu-groups";
 
 /// Cuantas categorias sueltas se muestran en la fila secundaria antes de
 /// cortar. El resto queda detras del link al catalogo.
@@ -22,6 +23,7 @@ const MAX_SUELTAS = 8;
 /// Component, y la comparte con el menu mobile. Una sola consulta para los dos.
 export function CategoryMenu({ groups }: { groups: MenuGroup[] }) {
   const [open, setOpen] = useState(false);
+  const [otrasAbierto, setOtrasAbierto] = useState(false);
   const [top, setTop] = useState(0);
   const contenedor = useRef<HTMLDivElement>(null);
   const boton = useRef<HTMLButtonElement>(null);
@@ -135,29 +137,56 @@ export function CategoryMenu({ groups }: { groups: MenuGroup[] }) {
             ))}
           </div>
 
-          {/* Las sueltas: las visibles que nadie agrupo. Fila secundaria, no
-              ausencia — una categoria nueva que alguien publica sin agrupar
-              tiene que aparecer en algun lado. */}
-          {sueltas.length > 0 && (
-            <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-black/5 pt-4">
-              {sueltas.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/catalogo?categoria=${c.slug}`}
-                  onClick={() => setOpen(false)}
-                  className="text-sm text-foreground/60 transition-colors hover:text-primary"
+          {/* Las sueltas: las visibles que nadie agrupo. COLAPSADAS por
+              default — son la bolsa de lo que no entro en ningun grupo y no
+              tienen que competir con las columnas curadas. Siguen estando: una
+              categoria nueva que alguien publica sin agrupar tiene que
+              aparecer en algun lado.
+              
+              A diferencia del filtro del catalogo, aca NO se abre sola: el
+              menu del header es navegacion y no marca ninguna categoria como
+              activa, asi que no hay nada que revelar. */}
+          {sueltasTodas.length > 0 && (
+            <div className="mt-6 border-t border-black/5 pt-4">
+              <button
+                type="button"
+                onClick={() => setOtrasAbierto((v) => !v)}
+                aria-expanded={otrasAbierto}
+                className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-foreground/40 transition-colors hover:text-foreground/70"
+              >
+                {GRUPO_SIN_AGRUPAR}
+                <span className="text-foreground/30">({sueltasTodas.length})</span>
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  aria-hidden="true"
+                  className={"h-3.5 w-3.5 transition-transform " + (otrasAbierto ? "rotate-180" : "")}
                 >
-                  {c.name}
-                </Link>
-              ))}
-              {sueltasDeMas > 0 && (
-                <Link
-                  href="/catalogo"
-                  onClick={() => setOpen(false)}
-                  className="text-sm text-foreground/40 transition-colors hover:text-primary"
-                >
-                  y {sueltasDeMas} más
-                </Link>
+                  <path d="M6 8l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+              {otrasAbierto && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  {sueltas.map((c) => (
+                    <Link
+                      key={c.id}
+                      href={`/catalogo?categoria=${c.slug}`}
+                      onClick={() => setOpen(false)}
+                      className="text-sm text-foreground/60 transition-colors hover:text-primary"
+                    >
+                      {c.name}
+                    </Link>
+                  ))}
+                  {sueltasDeMas > 0 && (
+                    <Link
+                      href="/catalogo"
+                      onClick={() => setOpen(false)}
+                      className="text-sm text-foreground/40 transition-colors hover:text-primary"
+                    >
+                      y {sueltasDeMas} más
+                    </Link>
+                  )}
+                </div>
               )}
             </div>
           )}

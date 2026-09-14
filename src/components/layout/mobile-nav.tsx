@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { MenuGroup } from "@/lib/catalog";
+import { GRUPO_SIN_AGRUPAR } from "@/lib/menu-groups";
 
 /// Mismo tope que el menu desktop, por la misma razon: la fila de sueltas no
 /// puede crecer sin control. En mobile pesa mas todavia — la lista es
@@ -76,13 +77,12 @@ export function MobileNav({
               <div className="mt-6 flex flex-col gap-6 border-t border-black/5 pt-6">
                 {menuGroups.map((grupo) => (
                   <div key={grupo.name ?? "sin-grupo"}>
-                    {/* Las sueltas van sin encabezado: ponerles uno
-                        ("Otras") les daria una jerarquia que no tienen. */}
-                    {grupo.name && (
-                      <p className="mb-2 text-xs font-semibold tracking-wide text-foreground/40">
-                        {grupo.name}
-                      </p>
-                    )}
+                    {/* Las sin grupo llevan encabezado propio, igual que en
+                        el filtro del catalogo: lo pone el front, no es un
+                        valor guardado. */}
+                    <p className="mb-2 text-xs font-semibold tracking-wide text-foreground/40">
+                      {grupo.name ?? GRUPO_SIN_AGRUPAR}
+                    </p>
                     <div className="flex flex-col">
                       {(grupo.name === null
                         ? grupo.categories.slice(0, MAX_SUELTAS)

@@ -3,8 +3,8 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-09-09 — el mínimo de compra salía del campo
-equivocado (deployado y re-sincronizado en producción)
+**Última actualización:** 2026-09-15 — menú de categorías, escalera de tramos
+de precio, y dos fixes de mobile (todo en producción)
 **Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
 el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
 Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
@@ -36,6 +36,169 @@ antes de mergear.
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
 > `PENDIENTES/pendientes.md`.
+
+---
+
+## Menú de categorías y escalera de precios (2026-09-15) — en producción
+
+Tanda larga. Todo deployado y verificado; lo que quedó pendiente está marcado
+como tal.
+
+### Menú de categorías
+
+`Category.menuGroup` (String libre, nullable) agrupa las categorías visibles.
+String y no enum a propósito: agregar un grupo nuevo no debe requerir deploy.
+**Null es el default y no un caso especial** — una categoría visible sin grupo
+cae en el bloque "Otras", así que publicar sin agrupar no rompe el layout.
+
+El menú vive en el header (desplegable en desktop, dentro del hamburguesa en
+mobile) y **los pills del catálogo usan la misma query** (`getMenuGroups`), para
+que los dos lugares no puedan mostrar contenido u orden distintos.
+
+**"Otras" lo pone el front, NO es un valor guardado**, y la acción del panel lo
+rechaza explícitamente. Si fuera asignable, esas categorías dejarían de tener
+`menuGroup` null y se perdería la señal de que falta mapearlas: quedarían
+escondidas en un cajón con nombre propio.
+
+### EL MAPEO DE PRODUCCIÓN LO HIZO EL DESARROLLADOR — FALTA QUE EL CLIENTE LO REVISE
+
+Los 4 grupos y qué categoría va en cada uno se definieron con criterio propio,
+sin consultar a Ganchito. Son decisiones de negocio disfrazadas de
+organización: que "Llaveros" esté en Indumentaria y no en un grupo propio, o
+que "Eco y Sustentables" vaya con Hogar, es discutible y el cliente puede
+tener otra idea de cómo buscan sus clientes.
+
+Está todo editable desde el panel sin tocar código. **Conviene que lo revise
+antes del lanzamiento.**
+
+Las 14 asignaciones se hicieron con `scripts/asignar-grupos-menu.ts`, que
+**aborta sin escribir nada** si alguna de la lista no resuelve: asignar 13 de
+14 en silencio dejaría el menú incompleto sin que nadie sepa cuál falta. El
+script encontró dos defectos de su propio diseño antes de escribir (buscaba
+entre todas las categorías en vez de solo las canónicas, y hay categorías con
+espacios sobrantes en el nombre como "Apparel ").
+
+### OJO — EN LOCAL EL MENÚ SE VE DEFORMADO, Y NO ES UN BUG
+
+El mapeo se hizo **solo en producción**. En local las categorías no tienen
+grupo y las homónimas no están unificadas, así que el menú muestra un solo
+bloque "Otras" con ~59 entradas y nombres repetidos ("Paraguas" dos veces).
+
+**No optimizar el layout contra eso.** Para evaluar diseño hay que simular la
+forma de producción (14 agrupadas + 7 sueltas) y restaurar después. Ya pasó:
+una evaluación sobre el caso de local habría llevado a decisiones equivocadas.
+
+### Las categorías nuevas de proveedor nacen ocultas
+
+Los dos conectores pasan `visible: false` **solo en su bloque `create`**. El
+default de la columna queda en `true`: una categoría que el cliente crea a mano
+desde el panel nace visible, porque la está creando a propósito. La regla no es
+"todas nacen ocultas" sino "las que llegan del proveedor".
+
+Que un sync NO pueda volver a ocultar algo ya publicado no se garantiza con
+cuidado sino con caminos de código separados: en Zecat el `update` del upsert
+no menciona `visible`, y en CDO el `update` recibe literalmente `data: { name }`
+y sale por `return` antes del `create`. Verificado con syncs reales en las dos
+direcciones.
+
+`reviewedAt` distingue "nadie la miró" de "la miraron y la ocultaron" — sin eso
+el aviso del panel mostraría para siempre las 27 ya revisadas. La migración
+hizo `SET reviewedAt = NOW()` en las existentes: el momento de correrla ES el
+corte.
+
+### Escalera completa de tramos de precio
+
+`computeVariantCost` elige el escalón según el total del producto, no el primer
+tramo. Lo destapó el Set de Belleza BLACK, que escala en 2/400/800: un pedido
+de 400 pagaba el precio de 2.
+
+**No era un caso raro.** Hay 16 escalas distintas en el catálogo y la estándar
+(2/100/500/1000) cubre solo 226 de 1.594 variantes. A 400 unidades, **1.274
+variantes cotizaban de más**, 2,13% en promedio.
+
+La ficha muestra la tabla de precios por cantidad: 4 escalones y el resto tras
+un "ver más/ver menos", escalones por encima del stock atenuados, y todo de la
+variante seleccionada porque las escalas difieren entre variantes.
+
+### El umbral del 2% fue un error de diseño y se descartó
+
+Se había definido mostrar la tabla solo si entre el escalón actual y **el
+siguiente** había 2% de diferencia. La condición **no se cumplía nunca por
+construcción**: los saltos de Zecat son de ~1 punto porcentual entre escalones
+consecutivos, así que la tabla aparecía en **0 de 552 productos** cuando el
+cliente ya tenía una cantidad cargada, y en 4 al entrar.
+
+Peor: dejaba afuera justo el caso que la motivaba — quien pide 350 y no se
+entera de que a 400 baja, porque ese salto es de 1,01%.
+
+Se probó medir contra el último escalón visible (19 y 430 productos) y bajar el
+umbral a 1% (541, o sea todos). **Se terminó sacando el umbral por completo:**
+si hay más de un escalón con precios distintos, la tabla se muestra. Queda solo
+el colapso de escalones con el mismo precio formateado, que sí evita filas
+repetidas de verdad.
+
+### Dos bugs introducidos y corregidos en la misma tanda
+
+**Scroll horizontal en todo el sitio en mobile.** Al unificar el carrito y el
+CTA en un solo componente se perdió el `hidden md:inline-block` del botón, que
+apareció en el header mobile donde no entra: 391px de contenido más 48 de
+padding en una pantalla de 390. Eran 64px de desborde a 390 y 94px a 360.
+**Solo se ve con el carrito VACÍO** — con productos el header muestra el ícono
+de 40px y entra igual.
+
+**La nota "el precio varía según el talle" aparecía con cantidad 1**, donde
+todas las variantes valen lo mismo porque el descuento arranca en 2. El cliente
+leía la nota, probaba dos talles, veía el mismo número.
+
+### El scroll del menú mobile
+
+No era scroll anidado: **ningún contenedor tenía overflow**. El `<nav>` es
+`flex-1`, crecía libre y se salía del panel `fixed`, que no recortaba. El
+último elemento quedaba 382px fuera de la pantalla. Y el gesto movía la página
+de atrás, que sí desborda — de ahí "scrollea pero no baja".
+
+El desplegable desktop tenía otro problema distinto: es `fixed` con el `top`
+medido al abrir, y como el header no es sticky, al scrollear quedaba flotando
+a 412px del botón. Ahora se cierra al scrollear.
+
+---
+
+## Un push puede no disparar deploy, y no deja NINGÚN rastro (2026-09-15)
+
+Pasó una vez en esta sesión y conviene tenerlo escrito porque el modo de falla
+es silencioso.
+
+**Qué es**: Vercel construye a partir de un webhook que GitHub dispara en cada
+push a `main`. No es un canal de notificación de errores — es lo que ARRANCA el
+build.
+
+**Qué pasó**: el commit `e2b5d1d` llegó a GitHub (verificado con `git fetch`:
+`origin/main` apuntaba ahí) pero Vercel nunca lo recibió. En el dashboard **no
+figuraba de ninguna forma**: ni como error, ni en cola, ni construyendo.
+Producción siguió sirviendo el commit anterior.
+
+**Qué se pierde**: el deploy no ocurre y nadie se entera. Un build que FALLA
+deja log y se diagnostica solo; uno que NUNCA LLEGA no deja nada. La única
+forma de detectarlo es comparar `origin/main` contra lo que sirve producción.
+
+**Cómo se destrabó**: un commit vacío (`git commit --allow-empty`) genera un
+evento nuevo y Vercel construye. No hace falta tocar código.
+
+**Alcance**: fue un evento aislado, NO una falla persistente. Los deploys
+anteriores de la sesión salieron solos, y los dos posteriores (`e3ebd1c`,
+`85bf8c1`) también. Si se repite seguido, ahí sí hay que revisar la integración
+GitHub–Vercel en los settings del proyecto.
+
+> Para verificar si un deploy llegó, `curl` sirve **si se siguen los redirects
+> y se falsea el user-agent** (`curl -sL -A "Mozilla/..."`): así se lee el HTML
+> y se puede buscar una huella del código nuevo. Sin `-L` devuelve 308 y sin
+> user-agent de navegador, el anti-bot responde 403.
+>
+> Y ojo con los `until` de bash: `rg -qv patron` invierte el match POR LÍNEA,
+> no el resultado. En un HTML de 70KB siempre hay líneas sin el patrón, así que
+> el loop sale de inmediato y **anuncia un éxito que no ocurrió**. Lo correcto
+> es `until ! curl ... | rg -q patron`. Ya pasó una vez en esta sesión: el
+> waiter avisó "deploy listo" con producción todavía en el código viejo.
 
 ---
 

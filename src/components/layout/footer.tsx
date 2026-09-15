@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { IsotipoGanchito } from "@/components/icons/isotipo-ganchito";
 import {
   IconoEmail,
@@ -99,9 +100,21 @@ export async function Footer() {
         )}
       </div>
 
-      <div className="border-t border-white/10 px-6 py-4 text-center text-xs text-white/60">
-        © {new Date().getFullYear()} Ganchito Estudio. Todos los derechos
-        reservados.
+      {/* La politica de privacidad va en el footer para que sea alcanzable
+          desde CUALQUIER pagina: la Ley 25.326 pide que el titular pueda
+          conocer el tratamiento de sus datos, y un link que solo existe en el
+          formulario no cumple eso para quien todavia no llego ahi. */}
+      <div className="flex flex-col items-center gap-2 border-t border-white/10 px-6 py-4 text-center text-xs text-white/60 sm:flex-row sm:justify-center sm:gap-4">
+        <span>
+          © {new Date().getFullYear()} Ganchito Estudio. Todos los derechos
+          reservados.
+        </span>
+        <Link
+          href="/privacidad"
+          className="underline underline-offset-2 transition-colors hover:text-white"
+        >
+          Política de Privacidad
+        </Link>
       </div>
     </footer>
   );

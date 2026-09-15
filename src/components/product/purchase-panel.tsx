@@ -3,8 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { addToQuoteCart } from "@/lib/quote-cart";
+import type { EscalonPrecio } from "@/lib/pricing";
 
 const TOAST_MS = 3200;
+
+/// Cuantos escalones de precio se muestran antes del "ver mas".
+///
+/// La escala completa es correcta en contenido pero pesada de entrada: siete
+/// filas al abrir la ficha compiten con el precio, que es lo que el cliente
+/// vino a ver. Cuatro alcanzan para entender que bajando la cantidad sube el
+/// precio unitario, y el resto queda a un click.
+const MAX_ESCALONES_VISIBLES = 4;
 
 interface VariantData {
   id: string;
@@ -42,29 +51,25 @@ export function PurchasePanel({
   productId,
   variants,
   minOrderQuantity,
-  priceBySku,
-  bulkPriceBySku,
+  escalonesPorSku,
   bulkFromQuantity,
   fallbackPriceLabel,
 }: {
   productId: string;
   variants: VariantData[];
   minOrderQuantity: number | null;
-  /// Precio de venta ya formateado, por SKU de variante. Viene calculado del
-  /// server: el costo ahora vive en la variante, asi que el precio cambia
-  /// segun lo que elija el cliente.
+  /// La escala de precios de cada variante: cada escalon con desde cuantas
+  /// unidades rige y el precio de venta YA FORMATEADO.
   ///
-  /// Este es el precio de UNA unidad.
-  priceBySku: Record<string, string>;
-  /// El mismo precio, pero a partir de 2 unidades del producto, con el
-  /// descuento de rango del proveedor ya aplicado.
+  /// Viene calculado del server y no se hace ninguna cuenta de dinero aca:
+  /// este componente solo elige que escalon mostrar. Ademas de ser mas seguro,
+  /// importar el modulo de precios del lado del cliente arrastraria el cliente
+  /// de Prisma entero al bundle (ver el comentario de lib/format.ts).
   ///
-  /// Son dos mapas y no una funcion de calculo porque NINGUNA cuenta de dinero
-  /// ocurre en el navegador: el server manda los valores posibles y aca solo
-  /// se elige cual mostrar. Ademas de ser mas seguro, importar el modulo de
-  /// precios del lado del cliente arrastraria el cliente de Prisma entero al
-  /// bundle (ver el comentario de lib/format.ts).
-  bulkPriceBySku: Record<string, string>;
+  /// Por SKU porque las variantes pueden tener escalas distintas: en la Remera
+  /// Regent, Blanco S y Blanco 3XL no comparten ni los cortes ni los
+  /// porcentajes.
+  escalonesPorSku: Record<string, EscalonPrecio[]>;
   /// A partir de cuantas unidades del producto vale `bulkPriceBySku`. Viaja
   /// como prop y no se importa la constante del conector: este componente es
   /// de la tienda y no tiene por que saber que el umbral lo define Zecat.
@@ -121,11 +126,17 @@ export function PurchasePanel({
   // si mostrar una linea de texto, no para calcular dinero. Lo que importa es
   // si el cliente VE numeros distintos.
   const precioVariaPorVariante = useMemo(() => {
+    // Se compara el precio a partir de 2 unidades, que es donde las escalas
+    // empiezan a diferir: con 1 unidad todas las variantes de un producto de
+    // Zecat valen lo mismo y la nota nunca apareceria.
     const distintos = new Set(
-      activeVariants.map((v) => bulkPriceBySku[v.sku] ?? "")
+      activeVariants.map((v) => {
+        const esc = escalonesPorSku[v.sku] ?? [];
+        return esc[indiceEscalon(esc, bulkFromQuantity)]?.precio ?? "";
+      })
     );
     return distintos.size > 1;
-  }, [activeVariants, bulkPriceBySku]);
+  }, [activeVariants, escalonesPorSku, bulkFromQuantity]);
 
   // minOrderQuantity es el minimo REAL de compra a nivel PRODUCTO
   // (minimum_application_quantity de Zecat, lo que su backoffice muestra
@@ -297,14 +308,63 @@ export function PurchasePanel({
   // secas y la formula sirve igual.
   const totalDelProducto = linesTotal + quantity;
 
-  // El precio sigue a la variante elegida Y a la cantidad. Si el SKU no esta
-  // en el mapa (no deberia pasar: viene del mismo producto), cae al minimo en
-  // vez de mostrar un hueco.
-  const mapaDePrecios =
-    totalDelProducto >= bulkFromQuantity ? bulkPriceBySku : priceBySku;
+  // El precio sigue a la variante elegida Y a la cantidad: se busca el escalon
+  // mas alto que no supere el total del producto. Si el SKU no esta en el mapa
+  // (no deberia pasar: viene del mismo producto), cae al minimo en vez de
+  // mostrar un hueco.
+  const escalones = selectedVariant
+    ? (escalonesPorSku[selectedVariant.sku] ?? [])
+    : [];
+  const indiceActual = indiceEscalon(escalones, totalDelProducto);
   const precioMostrado =
-    (selectedVariant && mapaDePrecios[selectedVariant.sku]) ??
-    fallbackPriceLabel;
+    escalones[indiceActual]?.precio ?? fallbackPriceLabel;
+
+  // La escala COMPLETA, como la muestra Zecat: desde 1 unidad hasta el ultimo
+  // tramo. Sin umbral de porcentaje — el umbral escondia la tabla justo cuando
+  // el cliente esta decidiendo cuanto pedir, que es cuando sirve.
+  //
+  // Aparece con cantidad 1 o 0 igual: no hay que cargar nada para verla.
+  const mostrarTabla = escalones.length > 1;
+
+  // De las filas se ven las primeras cuatro y el resto detras de un "ver mas".
+  //
+  // Quien manda es una decision EXPLICITA del cliente si la tomo: null = no
+  // toco el boton todavia, true = expandio, false = colapso. No es un booleano
+  // porque hay tres estados y el tercero importa — que la tabla se haya
+  // expandido sola una vez no le da derecho a pisar un colapso hecho a mano
+  // mientras el cliente sigue ajustando la cantidad.
+  const [verMasManual, setVerMasManual] = useState<boolean | null>(null);
+
+  // La cantidad la expande sola al llegar al cuarto escalon: ahi el cliente ya
+  // esta en posicion de alcanzar los siguientes.
+  const expandidaPorCantidad = indiceActual >= MAX_ESCALONES_VISIBLES - 1;
+
+  // Y una vez abierta por cantidad, se queda abierta aunque despues la baje:
+  // colapsarse sola mientras alguien ajusta un numero se siente como que la
+  // interfaz le saca cosas de adelante. Estado derivado ajustado en el render,
+  // mismo patron que el panel de filtros del catalogo.
+  const [seExpandioAlgunaVez, setSeExpandioAlgunaVez] = useState(false);
+  if (expandidaPorCantidad && !seExpandioAlgunaVez) {
+    setSeExpandioAlgunaVez(true);
+  }
+
+  const expandida =
+    verMasManual ?? (expandidaPorCantidad || seExpandioAlgunaVez);
+  const filasTabla = expandida
+    ? escalones
+    : escalones.slice(0, MAX_ESCALONES_VISIBLES);
+  const escalonesOcultos = escalones.length - filasTabla.length;
+
+  // Un escalon por encima del stock de ESTA variante no se puede pedir hoy: el
+  // input recorta la cantidad a lo disponible. El precio es verdadero (Zecat
+  // lo cobraria si hubiera stock) asi que la fila no se saca, pero se atenua
+  // para que no se lea como una promesa.
+  //
+  // Con stock 0 NO se atenua nada: ahi el input deja pedir de mas a proposito,
+  // porque el sync puede estar atrasado. Atenuar toda la tabla en ese caso
+  // seria mentir al reves.
+  const hayTopeDeStock = !outOfStock && available > 0;
+  const fueraDeStock = (desde: number) => hayTopeDeStock && desde > available;
 
   function handleAddToQuote() {
     if (hasVariantOptions) {
@@ -351,6 +411,58 @@ export function PurchasePanel({
             El precio varía según {sizes.length > 0 ? "el talle" : "la opción"}{" "}
             que elijas.
           </p>
+        )}
+
+        {/* Precio por cantidad. SIN porcentajes: el descuento del proveedor es
+            su estructura de costos, no informacion para el cliente. Lo que se
+            comunica es que pidiendo mas paga menos por unidad.
+
+            Es de la variante SELECCIONADA y cambia al elegir otro talle —
+            mostrar la escala del S cuando el cliente eligio 3XL seria mostrarle
+            un precio que no va a pagar. */}
+        {mostrarTabla && (
+          <div className="mt-3 inline-flex flex-col gap-1 rounded-lg bg-foreground/[0.03] px-3 py-2">
+            {filasTabla.map((e, i) => {
+              const inalcanzable = fueraDeStock(e.desde);
+              return (
+                <div
+                  key={e.desde}
+                  className={
+                    "flex items-baseline justify-between gap-6 text-xs " +
+                    (i === indiceActual
+                      ? "font-medium text-foreground"
+                      : inalcanzable
+                        ? "text-foreground/30"
+                        : "text-foreground/55")
+                  }
+                  // Para lector de pantalla la atenuacion no existe: hay que
+                  // decirlo con palabras.
+                  title={inalcanzable ? "Más unidades que las disponibles hoy" : undefined}
+                >
+                  <span>
+                    {e.desde === 1 ? "1 unidad" : `${e.desde} unidades`}
+                  </span>
+                  <span className="tabular-nums">{e.precio} c/u</span>
+                </div>
+              );
+            })}
+
+            {/* El boton existe mientras haya algo que mostrar U ocultar: sin
+                el "Ver menos", una tabla expandida se quedaba abierta para
+                siempre. */}
+            {(escalonesOcultos > 0 || expandida) &&
+              escalones.length > MAX_ESCALONES_VISIBLES && (
+                <button
+                  type="button"
+                  onClick={() => setVerMasManual(!expandida)}
+                  className="mt-0.5 text-left text-xs text-primary transition-colors hover:text-primary-light"
+                >
+                  {expandida
+                    ? "Ver menos"
+                    : `Ver ${escalonesOcultos} ${escalonesOcultos === 1 ? "cantidad" : "cantidades"} más`}
+                </button>
+              )}
+          </div>
         )}
       </div>
 
@@ -569,3 +681,16 @@ export function PurchasePanel({
     </div>
   );
 }
+
+
+/// Indice del escalon que rige para una cantidad: el mas alto cuyo `desde` no
+/// la supera. Devuelve 0 (el de 1 unidad) si no hay ninguno.
+function indiceEscalon(escalones: EscalonPrecio[], cantidad: number): number {
+  let i = 0;
+  for (let j = 0; j < escalones.length; j++) {
+    if (cantidad >= escalones[j].desde) i = j;
+    else break;
+  }
+  return i;
+}
+

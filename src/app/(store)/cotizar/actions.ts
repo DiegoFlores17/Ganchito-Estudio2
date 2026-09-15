@@ -167,8 +167,9 @@ export async function getQuoteItemsSummary(
           reservedStock: true,
           costPrice: true,
           // Lo necesita computeSellPriceForQuantity: el precio depende del
-          // descuento de rango de ESTA variante.
+          // escalon de ESTA variante que corresponda a la cantidad.
           discountPercent: true,
+          discountTiers: true,
         },
       },
     },
@@ -389,6 +390,7 @@ export async function submitQuote(
           sku: true,
           costPrice: true,
           discountPercent: true,
+          discountTiers: true,
           colorName: true,
           sizeName: true,
         },

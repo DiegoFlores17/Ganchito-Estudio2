@@ -61,10 +61,62 @@ export function computeSellPrice(
   return toArs(costPrice, currency, usdRate).times(marginMultiplier);
 }
 
+/// Un escalon de la escala del proveedor: desde `min` unidades (hasta `max`, o
+/// sin tope) se descuenta `pct` sobre el costo.
+export interface DiscountTier {
+  min: number;
+  max: number | null;
+  pct: number;
+}
+
 /// Lo que hace falta de una variante para aplicarle su descuento de rango.
 export interface VariantDiscountInputs {
   costPrice: Prisma.Decimal;
   discountPercent: Prisma.Decimal | null;
+  /// La escala COMPLETA, como la guardo el conector. Es Json en la base, asi
+  /// que llega sin tipar y se valida al leer.
+  discountTiers?: Prisma.JsonValue | null;
+}
+
+/// Lee y valida la escala guardada.
+///
+/// Viene de una columna Json, o sea sin garantias de forma: cualquier fila
+/// escrita por una version vieja del conector, o a mano, puede tener otra
+/// cosa. Se descartan los escalones que no sirven en vez de confiar.
+export function parseDiscountTiers(raw: Prisma.JsonValue | null | undefined): DiscountTier[] {
+  if (!Array.isArray(raw)) return [];
+  const tiers: DiscountTier[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    const min = Number(o.min);
+    const pct = Number(o.pct);
+    const max = o.max === null || o.max === undefined ? null : Number(o.max);
+    if (!Number.isFinite(min) || min < 1) continue;
+    // Mismo criterio que el conector: fuera de (0,100) no es un descuento.
+    if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) continue;
+    if (max !== null && (!Number.isFinite(max) || max < min)) continue;
+    tiers.push({ min, max, pct });
+  }
+  return tiers.sort((a, b) => a.min - b.min);
+}
+
+/// El escalon que corresponde a una cantidad, o null si no hay descuento.
+///
+/// Se busca el de MAYOR `min` que no supere la cantidad. No se usa `max` para
+/// decidir: si la escala tuviera un hueco (un `max` que no llega al `min`
+/// siguiente), mirar `max` dejaria al cliente sin descuento en la zona del
+/// hueco. Con el `min` alcanza y es robusto ante datos imperfectos.
+export function tierForQuantity(
+  tiers: DiscountTier[],
+  productQuantity: number
+): DiscountTier | null {
+  let elegido: DiscountTier | null = null;
+  for (const t of tiers) {
+    if (productQuantity >= t.min) elegido = t;
+    else break;
+  }
+  return elegido;
 }
 
 /// Costo de una variante DESPUES del descuento de rango del proveedor.
@@ -88,23 +140,35 @@ export interface VariantDiscountInputs {
 /// costo real (en una Regent Blanca S, $6.974 de venta contra un costo de
 /// $7.736).
 ///
-/// Hoy se usa un solo tramo, el de 2 unidades, que es el que quedo guardado en
-/// `discountPercent`. La escala completa esta en `discountTiers`: cuando se
-/// quiera usar, se cambia ACA — la firma ya recibe la cantidad correcta y no
-/// hace falta re-importar ni migrar.
+/// Usa la escala COMPLETA de `discountTiers`, eligiendo el escalon que
+/// corresponde a la cantidad. Antes se aplicaba siempre el primero, y eso
+/// mostraba el precio equivocado en cuanto la escala no era la estandar: el
+/// Set de Belleza BLACK escala en 2/400/800, asi que un pedido de 400 unidades
+/// pagaba el precio de 2. Cobrabamos de mas —el lado conservador— pero el
+/// precio se quedaba quieto justo donde el cliente esperaba que bajara.
+///
+/// Si no hay escala guardada se cae a `discountPercent`, que es el primer
+/// tramo: es lo que hay para las variantes sincronizadas antes de que se
+/// guardara la escala. No hace falta re-importar para que esto funcione, pero
+/// una variante sin `discountTiers` se comporta como antes.
 export function computeVariantCost(
   variant: VariantDiscountInputs,
   productQuantity: number
 ): Prisma.Decimal {
-  if (
-    variant.discountPercent === null ||
-    productQuantity < RANGE_DISCOUNT_MIN_QUANTITY
-  ) {
+  if (productQuantity < RANGE_DISCOUNT_MIN_QUANTITY) {
     return variant.costPrice;
   }
-  const factor = new Prisma.Decimal(1).minus(
-    variant.discountPercent.dividedBy(100)
-  );
+
+  const tiers = parseDiscountTiers(variant.discountTiers);
+  const tier = tierForQuantity(tiers, productQuantity);
+
+  const pct =
+    tier !== null
+      ? new Prisma.Decimal(tier.pct)
+      : variant.discountPercent;
+  if (pct === null) return variant.costPrice;
+
+  const factor = new Prisma.Decimal(1).minus(pct.dividedBy(100));
   // Guarda: un porcentaje fuera de (0, 100) daria un costo negativo o mayor al
   // original. El conector ya no deberia guardar eso, pero el dato viene del
   // proveedor y esto se lee en cada cotizacion.
@@ -216,4 +280,48 @@ export function computePriceRange(
     max,
     varies: !min.equals(max) || descuentos.size > 1,
   };
+}
+
+
+/// Un escalon listo para mostrar: desde cuantas unidades, y el precio de venta
+/// ya formateado.
+export interface EscalonPrecio {
+  desde: number;
+  precio: string;
+}
+
+/// Los escalones de precio de UNA variante, para que el cliente elija cual
+/// mostrar sin hacer ninguna cuenta.
+///
+/// Se calcula por SKU y no una lista global del producto porque las variantes
+/// pueden tener escalas DISTINTAS: en la Remera Regent, Blanco S y Blanco 3XL
+/// no comparten ni los porcentajes ni los cortes. Una lista del producto seria
+/// falsa para al menos una de las dos.
+///
+/// Siempre arranca con el escalon de 1 unidad (sin descuento), que es el
+/// precio mas alto: asi el cliente ve de donde parte.
+///
+/// Escalones consecutivos con el MISMO precio formateado se colapsan: una fila
+/// que repite el numero de la anterior no informa nada, solo alarga la tabla.
+export function computeEscalones(
+  variant: VariantDiscountInputs,
+  currency: Currency,
+  config: PricingInputs,
+  formatear: (precio: Prisma.Decimal) => string
+): EscalonPrecio[] {
+  const cortes = [1, ...parseDiscountTiers(variant.discountTiers).map((t) => t.min)];
+  const escalones: EscalonPrecio[] = [];
+  for (const desde of cortes) {
+    const precio = formatear(
+      computeSellPriceForQuantity(variant, currency, config, desde)
+    );
+    // Colapsa contra el anterior, no contra todos: si la escala volviera a un
+    // precio ya visto mas abajo (no deberia, pero el dato es del proveedor),
+    // esa fila sigue siendo informacion.
+    if (escalones.length > 0 && escalones[escalones.length - 1].precio === precio) {
+      continue;
+    }
+    escalones.push({ desde, precio });
+  }
+  return escalones;
 }

@@ -28,6 +28,9 @@ export async function getProductById(id: string) {
           // variante, que dentro de un mismo producto puede diferir (talle S
           // 37,83% vs 3XL 14,82% en la Remera Regent).
           discountPercent: true,
+          // La escala completa: el precio de la ficha depende del escalon que
+          // corresponda a la cantidad, no solo del primer tramo.
+          discountTiers: true,
         },
       },
       printingAreas: true,

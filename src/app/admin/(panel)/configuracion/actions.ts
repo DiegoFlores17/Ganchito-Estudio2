@@ -136,6 +136,10 @@ export async function updateSiteConfig(
     // mismo chequeo para todos los campos.
     contactEmail: contactEmail || null,
     whatsappNumber: whatsapp.value ?? null,
+    // Vacio guarda null y la burbuja cae al mensaje por defecto. No se guarda
+    // el default como texto: si manana se decide cambiarlo, quedaria congelado
+    // en la base el de hoy y habria que editarlo a mano.
+    whatsappMessage: texto("whatsappMessage") || null,
     instagramHandle: instagramHandle || null,
     address: texto("address") || null,
     openingHours: texto("openingHours") || null,

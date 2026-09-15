@@ -2,12 +2,14 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { updateSiteConfig } from "@/app/admin/(panel)/configuracion/actions";
+import { WHATSAPP_MENSAJE_DEFECTO } from "@/lib/whatsapp-mensaje";
 
 /// Datos de contacto que se muestran en el footer y en el botón del hero.
 export function SiteConfigForm({
   contactEmail,
   whatsappNumber,
   whatsappLabel,
+  whatsappMessage,
   instagramHandle,
   address,
   openingHours,
@@ -18,6 +20,7 @@ export function SiteConfigForm({
   /// quiera.
   whatsappNumber: string;
   whatsappLabel: string;
+  whatsappMessage: string;
   instagramHandle: string;
   address: string;
   openingHours: string;
@@ -74,6 +77,14 @@ export function SiteConfigForm({
         defaultValue={whatsappLabel || whatsappNumber}
         placeholder="+54 9 11 5555-1234"
         ayuda="Escribilo como quieras, con espacios o guiones. Tiene que llevar código de país, sin el 0 ni el 15."
+      />
+
+      <Campo
+        label="Mensaje del botón de WhatsApp (opcional)"
+        name="whatsappMessage"
+        defaultValue={whatsappMessage}
+        placeholder={WHATSAPP_MENSAJE_DEFECTO}
+        ayuda="Es el texto que viene escrito cuando alguien abre el chat desde la burbuja. Si lo dejás vacío se usa el del ejemplo."
       />
 
       <Campo

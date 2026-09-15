@@ -183,6 +183,16 @@ model SiteConfig {
   /// deriva al mostrar (ver formatWhatsappLabel en lib/site-config.ts).
   /// Guardar las dos formas por separado las dejaria desincronizarse.
   whatsappNumber  String?
+  /// Mensaje que viene pre-escrito al abrir WhatsApp desde la burbuja
+  /// flotante del sitio.
+  ///
+  /// Vive acá y no en el código para que Ganchito pueda cambiarlo desde el
+  /// panel: es texto comercial, y ajustarlo no debería requerir un deploy.
+  ///
+  /// Nullable con fallback al leer: si queda vacío, el link a WhatsApp se abre
+  /// igual, sin texto. Un mensaje en blanco no rompe nada; un botón que no
+  /// abre, sí.
+  whatsappMessage String?
   /// El usuario SIN el "@" (ej: "ganchitoestudio"). El panel acepta que se
   /// pegue el usuario o la URL entera y normaliza a esto.
   instagramHandle String?

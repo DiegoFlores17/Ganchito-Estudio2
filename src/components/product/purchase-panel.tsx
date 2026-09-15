@@ -657,6 +657,11 @@ export function PurchasePanel({
             type="button"
             onClick={handleAddToQuote}
             disabled={lines.length === 0 || !minimumMet}
+            // Marca para que la burbuja de WhatsApp se corra cuando este boton
+            // esta a la vista. Va solo en el CIERRE de la accion: "+ Agregar
+            // combinacion" se toca varias veces mientras se arma el pedido y
+            // no es el momento de esconder nada.
+            data-cta-principal
             className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-foreground/10 disabled:text-foreground/40"
           >
             Agregar a mi cotización
@@ -666,6 +671,7 @@ export function PurchasePanel({
         <button
           type="button"
           onClick={handleAddToQuote}
+          data-cta-principal
           className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
         >
           Agregar a mi cotización

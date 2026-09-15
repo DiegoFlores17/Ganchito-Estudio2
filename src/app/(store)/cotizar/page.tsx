@@ -479,10 +479,30 @@ export default function CotizarPage() {
         <button
           type="submit"
           disabled={isPending}
+          data-cta-principal
           className="self-start rounded-full bg-accent px-8 py-3.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover disabled:opacity-60"
         >
           {isPending ? "Enviando..." : "Enviar solicitud de cotización"}
         </button>
+
+        {/* Texto informativo, NO un checkbox obligatorio.
+        
+            Un checkbox de "acepto" agrega un paso mas para cerrar la unica
+            conversion del sitio, y como consentimiento no aporta gran cosa:
+            los datos que se piden son los indispensables para responder la
+            cotizacion que el cliente esta pidiendo. Lo que si corresponde es
+            que pueda LEER que se hace con ellos antes de mandarlos, y para eso
+            alcanza con el link visible junto al boton. */}
+        <p className="text-xs text-foreground/50">
+          Al enviar aceptás nuestra{" "}
+          <Link
+            href="/privacidad"
+            className="text-foreground/70 underline underline-offset-2 transition-colors hover:text-primary"
+          >
+            política de privacidad
+          </Link>
+          .
+        </p>
       </form>
     </div>
   );

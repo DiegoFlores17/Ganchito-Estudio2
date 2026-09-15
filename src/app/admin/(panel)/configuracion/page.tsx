@@ -59,6 +59,7 @@ export default async function ConfiguracionPage() {
             contactEmail={site.contactEmail ?? ""}
             whatsappNumber={site.whatsappNumber ?? ""}
             whatsappLabel={formatWhatsappLabel(site.whatsappNumber) ?? ""}
+            whatsappMessage={site.whatsappMessage ?? ""}
             instagramHandle={site.instagramHandle ?? ""}
             address={site.address ?? ""}
             openingHours={site.openingHours ?? ""}

@@ -1,5 +1,6 @@
 import type { SiteConfig } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { WHATSAPP_MENSAJE_DEFECTO } from "@/lib/whatsapp-mensaje";
 
 /// La config cuando todavia no hay fila: todo vacio. No hay riesgo de que se
 /// desincronice con los defaults del schema porque en esta tabla no hay
@@ -8,6 +9,7 @@ const SITE_CONFIG_VACIA: SiteConfig = {
   id: 1,
   contactEmail: null,
   whatsappNumber: null,
+  whatsappMessage: null,
   instagramHandle: null,
   address: null,
   openingHours: null,
@@ -118,6 +120,26 @@ export function validateWhatsappNumber(raw: string): WhatsappValidation {
 export function whatsappUrl(number: string | null): string | null {
   const digits = number ? normalizeWhatsappNumber(number) : "";
   return digits ? `https://wa.me/${digits}` : null;
+}
+
+export { WHATSAPP_MENSAJE_DEFECTO };
+
+/// Link de WhatsApp con el mensaje ya escrito.
+///
+/// Devuelve null si no hay numero: sin numero no hay link posible, y un boton
+/// de WhatsApp que lleva a una URL rota es peor que no tener boton.
+///
+/// El mensaje se encodea UNA sola vez. Encodear dos veces —pasarle un texto ya
+/// encodeado— deja el "%20" literal en la conversacion de WhatsApp; es el
+/// mismo cuidado que ya se documenta en buildWaUrl (lib/quote-message.ts).
+export function whatsappUrlConMensaje(
+  number: string | null,
+  message: string | null
+): string | null {
+  const base = whatsappUrl(number);
+  if (!base) return null;
+  const texto = (message ?? "").trim() || WHATSAPP_MENSAJE_DEFECTO;
+  return `${base}?text=${encodeURIComponent(texto)}`;
 }
 
 /// Codigos de area argentinos de TRES digitos: las capitales de provincia y

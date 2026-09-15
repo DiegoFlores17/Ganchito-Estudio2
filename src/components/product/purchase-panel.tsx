@@ -125,6 +125,13 @@ export function PurchasePanel({
   // Se compara sobre los precios ya formateados a proposito: es para decidir
   // si mostrar una linea de texto, no para calcular dinero. Lo que importa es
   // si el cliente VE numeros distintos.
+  //
+  // OJO: esto dice si las variantes PUEDEN valer distinto, no si valen distinto
+  // AHORA. Con cantidad 1 todas valen lo mismo, porque el descuento arranca en
+  // 2 unidades — por eso el JSX exige ademas que el total llegue a 2 antes de
+  // mostrar la nota. Sin esa condicion, el cliente leia "el precio varía según
+  // el talle", probaba dos talles, veia el mismo numero, y la nota quedaba
+  // desmentida justo antes de empezar a ser verdad.
   const precioVariaPorVariante = useMemo(() => {
     // Se compara el precio a partir de 2 unidades, que es donde las escalas
     // empiezan a diferir: con 1 unidad todas las variantes de un producto de
@@ -406,7 +413,7 @@ export function PurchasePanel({
         {/* Sobria a proposito: dice QUE el precio cambia, no por que ni
             cuanto. El porcentaje del proveedor no se muestra — es su
             estructura de costos, no información para el cliente. */}
-        {precioVariaPorVariante && (
+        {precioVariaPorVariante && totalDelProducto >= bulkFromQuantity && (
           <p className="mt-1 text-xs text-foreground/50">
             El precio varía según {sizes.length > 0 ? "el talle" : "la opción"}{" "}
             que elijas.

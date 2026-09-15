@@ -46,3 +46,7 @@ next-env.d.ts
 
 # configuracion local de Claude Code (sesion/permisos de esta maquina, no del proyecto)
 /.claude/
+
+# snapshots de datos de proveedor antes de una reimportacion (megabytes de JSON,
+# utiles como red de seguridad en la maquina, no como historia del repo)
+/backups/

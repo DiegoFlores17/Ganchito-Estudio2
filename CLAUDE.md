@@ -289,7 +289,7 @@ de los chunks servidos, que sí responde.
 
 ### Pero el navegador también miente: de un entorno roto no se concluye nada
 
-Ya pasó dos veces que la herramienta de verificación indujo un diagnóstico
+Ya pasó varias veces que la herramienta de verificación indujo un diagnóstico
 falso. Una extensión que bloqueaba scripts inline hizo reportar un flujo de
 cotización "caído en producción" que en un Chromium limpio andaba perfecto. Y
 en otra tanda **todos los elementos de la página pasaron a medir 0×0**: los
@@ -304,6 +304,38 @@ reproducir en un navegador distinto.
 Un test sintético es un entorno más, con las mismas trampas: React delega
 `onBlur` en `focusout`, así que un `dispatchEvent(new Event("blur"))` no
 ejecuta el handler y hace parecer roto un input que está bien.
+
+**En una sola sesión (2026-09-15) el entorno produjo CUATRO diagnósticos
+falsos.** No es una rareza que pase de vez en cuando: es lo más probable
+cuando algo "no anda".
+
+1. **Navegador degradado, React sin hidratar.** Elementos a 0×0 y clicks que
+   no aterrizan.
+2. **El dev server en mal estado sirviendo código viejo**, con errores que no
+   aparecen en el build de producción (`destination stream closed early`,
+   full reloads de Fast Refresh). El código en disco ya estaba bien; lo que
+   respondía, no. La causa exacta quedó sin medir —pudo ser un `.next`
+   desactualizado o un proceso levantado antes de la migración—, así que lo
+   anotado es el síntoma, que es lo verificable. La salida fue matar el
+   proceso y levantarlo de nuevo.
+3. **Datos de local sin el mapeo de categorías de producción.** La pantalla
+   mostraba todo bajo "Otras" y parecía que la agrupación estaba rota.
+4. **`IntersectionObserver` sin entregar un solo evento con el tab en segundo
+   plano** (`document.visibilityState === "hidden"`). React además difiere
+   ahí el intercambio del contenido en streaming, así que los elementos
+   quedan dentro de un `<div hidden id="S:0">` y vuelven a medir 0×0 — igual
+   que el caso 1, por otra causa. Una captura de pantalla activa el tab lo
+   suficiente para destrabar las dos cosas.
+
+El patrón común es que **el entorno miente antes que el código**. Así que la
+primera hipótesis ante cualquier síntoma raro no es "hay un bug", es "qué
+parte de lo que estoy usando para mirar está mal".
+
+La sonda que resuelve el caso 4 —y que generaliza— es **reproducir el
+mecanismo por afuera**: si un `IntersectionObserver` propio, sobre el mismo
+elemento, tampoco entrega eventos, el problema es el entorno y no el
+componente. Vale para lo que sea: antes de culpar al código, medir si la
+herramienta que lo observa está viva.
 
 ### Recorrer la tienda como cliente encuentra lo que leer el código no
 

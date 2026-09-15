@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { MenuGroup } from "@/lib/catalog";
+import { CartIndicator } from "./cart-indicator";
 import { GRUPO_SIN_AGRUPAR } from "@/lib/menu-groups";
 
 /// Mismo tope que el menu desktop, por la misma razon: la fila de sueltas no
@@ -29,6 +30,24 @@ export function MobileNav({
 }) {
   const [open, setOpen] = useState(false);
 
+  // Con el panel abierto, el scroll del body se bloquea.
+  //
+  // Sin esto el gesto movia la PAGINA DE ATRAS (que si desborda) mientras el
+  // panel quedaba quieto — la mitad del sintoma de "scrollea pero no baja".
+  //
+  // El cleanup restaura el valor que habia, no fuerza "": si el bloqueo no se
+  // libera, la pagina queda congelada y la unica salida es recargar. Corre
+  // tambien al desmontar, asi que un cambio de ruta con el panel abierto
+  // tampoco lo deja trabado.
+  useEffect(() => {
+    if (!open) return;
+    const previo = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previo;
+    };
+  }, [open]);
+
   return (
     <div className="md:hidden">
       <button
@@ -51,82 +70,116 @@ export function MobileNav({
                 height={38}
               />
             </Link>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label="Cerrar menú"
-              className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
-            >
-              <CloseIcon />
-            </button>
+            <div className="flex items-center gap-2">
+              {/* El acceso a la cotizacion TIENE que estar aca dentro: el
+                  panel es `fixed inset-0`, o sea que tapa el header entero —
+                  incluido el CartIndicator. Sin esto, con el menu abierto no
+                  hay ninguna forma de llegar a la cotizacion.
+                  
+                  Es el MISMO componente que el del header, no una copia: sigue
+                  mostrando CTA o carrito con contador segun el estado, asi que
+                  no son dos accesos distintos sino el mismo en el unico lugar
+                  visible mientras el panel esta abierto. */}
+              <CartIndicator soloEstado />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                aria-label="Cerrar menú"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
+              >
+                <CloseIcon />
+              </button>
+            </div>
           </div>
 
-          <nav className="flex flex-1 flex-col gap-2 px-6 py-10">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                onClick={() => setOpen(false)}
-                className="rounded-lg px-2 py-3 text-2xl font-medium text-foreground transition-colors hover:text-primary-light"
-              >
-                {link.label}
-              </Link>
-            ))}
+          {/* overflow-y-auto ACA, en el hijo flex-1, y no en el panel: el
+              panel es `fixed inset-0 flex flex-col`, asi que su altura es la
+              del viewport y es este nav el que crece con el contenido. Sin
+              esto el nav se salia del panel —ningun contenedor recortaba— y el
+              ultimo elemento quedaba fuera de la pantalla, inalcanzable: el
+              gesto scrolleaba la PAGINA DE ATRAS, que si desborda, y por eso
+              "scrollea pero no baja". */}
+          <nav className="flex flex-1 flex-col overflow-y-auto px-6 py-8">
+            {/* Bloque 1 — navegacion. 17px y no 24px: "Catálogo" no es mas
+                importante que "Drinkware", es otra cosa. A 24px competia con
+                el logo y dejaba dos capas de titulares peleando. */}
+            <div className="flex flex-col gap-1">
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setOpen(false)}
+                  className="-mx-2 rounded-lg px-2 py-2 text-[17px] font-medium text-foreground transition-colors hover:text-primary"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </div>
 
             {menuGroups.length > 0 && (
-              <div className="mt-6 flex flex-col gap-6 border-t border-black/5 pt-6">
-                {menuGroups.map((grupo) => (
-                  <div key={grupo.name ?? "sin-grupo"}>
-                    {/* Las sin grupo llevan encabezado propio, igual que en
-                        el filtro del catalogo: lo pone el front, no es un
-                        valor guardado. */}
-                    <p className="mb-2 text-xs font-semibold tracking-wide text-foreground/40">
-                      {grupo.name ?? GRUPO_SIN_AGRUPAR}
-                    </p>
-                    <div className="flex flex-col">
-                      {(grupo.name === null
-                        ? grupo.categories.slice(0, MAX_SUELTAS)
-                        : grupo.categories
-                      ).map((c) => (
-                        <Link
-                          key={c.id}
-                          href={`/catalogo?categoria=${c.slug}`}
-                          onClick={() => setOpen(false)}
-                          className="py-2 text-base text-foreground/80 transition-colors hover:text-primary"
-                        >
-                          {c.name}
-                        </Link>
-                      ))}
-                      {grupo.name === null &&
-                        grupo.categories.length > MAX_SUELTAS && (
-                          <Link
-                            href="/catalogo"
-                            onClick={() => setOpen(false)}
-                            className="py-2 text-base text-foreground/50"
-                          >
-                            y {grupo.categories.length - MAX_SUELTAS} más
-                          </Link>
-                        )}
-                    </div>
-                  </div>
-                ))}
-                <Link
-                  href="/catalogo"
-                  onClick={() => setOpen(false)}
-                  className="text-base font-medium text-primary"
-                >
-                  Ver todo el catálogo →
-                </Link>
-              </div>
-            )}
+              <>
+                {/* Bloque 2 — categorias. Separador y no solo espacio: son
+                    tres tipos de contenido distintos y tiene que verse donde
+                    termina uno y empieza otro. */}
+                <div className="mt-7 flex flex-col gap-5 border-t border-black/5 pt-7">
+                  {menuGroups.map((grupo) => (
+                    <div key={grupo.name ?? "sin-grupo"}>
+                      {/* La jerarquia va al reves que antes: el GRUPO es lo
+                          que organiza, asi que lleva el peso y el color de
+                          marca; la categoria es regular e indentada debajo.
+                          La indentacion hace visible la pertenencia sin lineas
+                          ni cajas.
 
-            <Link
-              href="/cotizar"
-              onClick={() => setOpen(false)}
-              className="mt-6 rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
-            >
-              Pedí tu cotización
-            </Link>
+                          Sentence case, igual que el desplegable desktop: si
+                          uno usa versalitas y el otro no, los dos menus dejan
+                          de leerse igual. */}
+                      <p className="text-[13px] font-semibold tracking-wide text-primary">
+                        {grupo.name ?? GRUPO_SIN_AGRUPAR}
+                      </p>
+                      <div className="mt-1.5 flex flex-col gap-1">
+                        {(grupo.name === null
+                          ? grupo.categories.slice(0, MAX_SUELTAS)
+                          : grupo.categories
+                        ).map((c) => (
+                          <Link
+                            key={c.id}
+                            href={`/catalogo?categoria=${c.slug}`}
+                            onClick={() => setOpen(false)}
+                            className="-mx-2 rounded-lg px-2 pl-4 text-[15px] text-foreground/75 transition-colors hover:text-primary"
+                          >
+                            {c.name}
+                          </Link>
+                        ))}
+                        {grupo.name === null &&
+                          grupo.categories.length > MAX_SUELTAS && (
+                            <Link
+                              href="/catalogo"
+                              onClick={() => setOpen(false)}
+                              className="-mx-2 rounded-lg px-2 pl-4 text-[15px] text-foreground/45"
+                            >
+                              y {grupo.categories.length - MAX_SUELTAS} más
+                            </Link>
+                          )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Bloque 3 — la salida al catalogo completo. El CTA de
+                    cotizacion NO va aca: desde que el header tiene un solo
+                    acceso (CartIndicator, que muestra CTA o carrito segun el
+                    estado), duplicarlo adentro volveria a tener dos. */}
+                <div className="mt-7 border-t border-black/5 pt-7">
+                  <Link
+                    href="/catalogo"
+                    onClick={() => setOpen(false)}
+                    className="text-[15px] font-medium text-primary"
+                  >
+                    Ver todo el catálogo →
+                  </Link>
+                </div>
+              </>
+            )}
           </nav>
         </div>
       )}

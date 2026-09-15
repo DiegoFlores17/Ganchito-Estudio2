@@ -39,11 +39,27 @@ export function CategoryMenu({ groups }: { groups: MenuGroup[] }) {
     function alTeclear(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
+    // Y al scrollear la pagina. El panel es `fixed` con el `top` MEDIDO al
+    // abrir, y el header no es sticky: al scrollear, el boton se va y el panel
+    // se queda clavado donde estaba, flotando sin relacion con nada. Medido:
+    // con 400px de scroll la separacion entre boton y panel pasa de 12px a
+    // 412px.
+    //
+    // Se cierra en vez de reposicionarse: si el boton que lo abrio ya no esta
+    // a la vista, el panel tampoco tiene por que estarlo. El scroll INTERNO
+    // del panel no dispara este evento, asi que una escala larga se puede
+    // recorrer sin que se cierre.
+    function alScrollear() {
+      setOpen(false);
+    }
+
     document.addEventListener("mousedown", alClickear);
     document.addEventListener("keydown", alTeclear);
+    window.addEventListener("scroll", alScrollear, { passive: true });
     return () => {
       document.removeEventListener("mousedown", alClickear);
       document.removeEventListener("keydown", alTeclear);
+      window.removeEventListener("scroll", alScrollear);
     };
   }, [open]);
 

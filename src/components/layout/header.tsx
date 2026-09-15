@@ -53,14 +53,10 @@ export async function Header() {
           ))}
         </nav>
 
-        <Link
-          href="/cotizar"
-          className="hidden rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover md:inline-block"
-        >
-          Pedí tu cotización
-        </Link>
-
-        <div className="flex items-center gap-1">
+        {/* Un solo acceso a la cotización: CartIndicator decide si mostrar
+            el CTA o el carrito con contador, según lo que haya cargado. Antes
+            estaban los dos siempre y apuntaban al mismo lugar. */}
+        <div className="flex items-center gap-2">
           <CartIndicator />
           <MobileNav navLinks={NAV_LINKS} menuGroups={menuGroups} />
         </div>

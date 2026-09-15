@@ -165,11 +165,13 @@ export function MobileNav({
                   ))}
                 </div>
 
-                {/* Bloque 3 — la salida al catalogo completo. El CTA de
-                    cotizacion NO va aca: desde que el header tiene un solo
-                    acceso (CartIndicator, que muestra CTA o carrito segun el
-                    estado), duplicarlo adentro volveria a tener dos. */}
-                <div className="mt-7 border-t border-black/5 pt-7">
+                {/* Bloque 3 — la salida al catalogo completo y el CTA.
+                
+                    El CTA SI va aca, y no duplica nada: en mobile el header no
+                    lo muestra (no entra junto al logo, ver CartIndicator), asi
+                    que este es el unico lugar donde existe. A ancho completo,
+                    que es como si entra. */}
+                <div className="mt-7 flex flex-col gap-5 border-t border-black/5 pt-7">
                   <Link
                     href="/catalogo"
                     onClick={() => setOpen(false)}
@@ -177,6 +179,9 @@ export function MobileNav({
                   >
                     Ver todo el catálogo →
                   </Link>
+                  <div onClick={() => setOpen(false)}>
+                    <CartIndicator ctaAncho />
+                  </div>
                 </div>
               </>
             )}

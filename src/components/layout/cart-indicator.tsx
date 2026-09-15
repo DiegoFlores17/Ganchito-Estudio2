@@ -19,7 +19,20 @@ import { getQuoteCart, QUOTE_CART_EVENT } from "@/lib/quote-cart";
 ///
 /// Con uno solo, además, deja de hacer falta duplicar el CTA adentro del panel
 /// mobile: el acceso vive en el header y está siempre a la vista.
-export function CartIndicator({ soloEstado = false }: { soloEstado?: boolean } = {}) {
+export function CartIndicator({
+  soloEstado = false,
+  ctaAncho = false,
+}: {
+  /// No mostrar nada cuando el carrito esta vacio. Lo usa el menu mobile:
+  /// quien abrio el menu esta navegando, y si no hay nada cargado no hay
+  /// cotizacion que ver.
+  soloEstado?: boolean;
+  /// CTA a ancho completo, para el final del panel mobile. Implica lo
+  /// inverso de `soloEstado`: con productos cargados no muestra nada, porque
+  /// el carrito ya esta arriba en la barra del panel. Entre los dos modos
+  /// cubren los dos estados sin que nunca aparezcan juntos.
+  ctaAncho?: boolean;
+} = {}) {
   const [count, setCount] = useState(0);
   // El carrito vive en localStorage, así que en el primer render del server
   // no existe. Sin esto, el header se pinta como "vacío" y salta a "con
@@ -53,12 +66,30 @@ export function CartIndicator({ soloEstado = false }: { soloEstado?: boolean } =
   // Ademas no entra: el CTA de texto junto al logo del panel suma 398px en una
   // barra de 389 — se desborda en cualquier celular.
   if (soloEstado && !conProductos) return null;
+  // Y al reves: el CTA del final del panel desaparece cuando hay productos,
+  // porque en ese caso la barra de arriba ya muestra el carrito. Sin esto se
+  // veian dos accesos en el mismo panel.
+  if (ctaAncho && conProductos) return null;
 
   if (!conProductos) {
     return (
       <Link
         href="/cotizar"
-        className="shrink-0 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
+        className={
+          ctaAncho
+            ? "block rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
+            : // `hidden md:inline-block`: en MOBILE este CTA no se muestra.
+              //
+              // No es una preferencia estetica, es que no entra: junto al logo
+              // (191px) y al hamburguesa (40px) suma 391px de contenido mas 48
+              // de padding, en una pantalla de 390. Medido — provocaba 64px de
+              // scroll horizontal a 390 y 94px a 360, en TODO el sitio.
+              //
+              // En mobile el CTA vive al final del panel del hamburguesa, a
+              // ancho completo, y en el header queda solo el carrito cuando
+              // hay algo cargado.
+              "hidden shrink-0 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover md:inline-block"
+        }
       >
         Pedí tu cotización
       </Link>

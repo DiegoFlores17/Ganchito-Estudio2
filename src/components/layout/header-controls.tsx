@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { MenuGroup } from "@/lib/catalog";
 import { CartIndicator } from "./cart-indicator";
 import { GRUPO_SIN_AGRUPAR } from "@/lib/menu-groups";
+import { RUTA_CON_BUSCADOR_PROPIO } from "./header-search-desktop";
+import { SearchForm, SearchIcon } from "./search-form";
 
 /// Mismo tope que el menu desktop, por la misma razon: la fila de sueltas no
 /// puede crecer sin control. En mobile pesa mas todavia — la lista es
@@ -18,7 +22,15 @@ interface NavLink {
   href: string;
 }
 
-export function MobileNav({
+/// Los controles de la barra que abren algo: la lupa de búsqueda y el
+/// hamburguesa.
+///
+/// **Viven en el MISMO componente a propósito, con UN estado de tres valores
+/// en vez de dos booleanos.** Dos booleanos pueden representar "los dos
+/// abiertos", que es justamente el estado que no queremos que exista; con un
+/// estado único, la exclusión mutua es estructural y no depende de que alguien
+/// se acuerde de apagar el otro al prender uno.
+export function HeaderControls({
   navLinks,
   menuGroups,
 }: {
@@ -28,9 +40,15 @@ export function MobileNav({
   /// componente aparte — en mobile no hace falta un desplegable sobre otro.
   menuGroups: MenuGroup[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [abierto, setAbierto] = useState<null | "buscar" | "menu">(null);
+  const open = abierto === "menu";
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pathname = usePathname();
+  // Mismo criterio que el buscador de desktop: en /catalogo manda el buscador
+  // propio de esa pagina. Ver el comentario largo en header-search-desktop.
+  const hayBuscador = pathname !== RUTA_CON_BUSCADOR_PROPIO;
 
-  // Con el panel abierto, el scroll del body se bloquea.
+  // Con el MENU abierto, el scroll del body se bloquea.
   //
   // Sin esto el gesto movia la PAGINA DE ATRAS (que si desborda) mientras el
   // panel quedaba quieto — la mitad del sintoma de "scrollea pero no baja".
@@ -39,6 +57,9 @@ export function MobileNav({
   // libera, la pagina queda congelada y la unica salida es recargar. Corre
   // tambien al desmontar, asi que un cambio de ruta con el panel abierto
   // tampoco lo deja trabado.
+  //
+  // La fila de busqueda NO bloquea el scroll: no tapa la pagina, y bloquearlo
+  // dejaria al cliente sin poder moverse por una fila de 56px.
   useEffect(() => {
     if (!open) return;
     const previo = document.body.style.overflow;
@@ -48,13 +69,96 @@ export function MobileNav({
     };
   }, [open]);
 
+  // Escape cierra lo que este abierto. Es la salida que un teclado espera, y
+  // ademas cubre el caso de quedar con la fila de busqueda abierta sin ver el
+  // boton de cerrar.
+  useEffect(() => {
+    if (abierto === null) return;
+    function alTecla(e: KeyboardEvent) {
+      if (e.key === "Escape") setAbierto(null);
+    }
+    document.addEventListener("keydown", alTecla);
+    return () => document.removeEventListener("keydown", alTecla);
+  }, [abierto]);
+
+  /// Abre la fila de busqueda y deja el cursor adentro del campo.
+  ///
+  /// **flushSync y no un useEffect**: Safari en iOS solo abre el teclado si el
+  /// `.focus()` ocurre DENTRO de la tarea del gesto del usuario. React no
+  /// actualiza el DOM de forma sincrona al hacer setState, asi que enfocar
+  /// desde un efecto posterior puede caer fuera de esa tarea y dejar el campo
+  /// enfocado pero SIN teclado. flushSync fuerza el render acá mismo, de modo
+  /// que el input ya existe cuando se lo enfoca, todo en el mismo click.
+  function abrirBuscador() {
+    flushSync(() => setAbierto("buscar"));
+    inputRef.current?.focus();
+  }
+
   return (
-    <div className="md:hidden">
+    <>
+      {hayBuscador && (
+        <button
+          type="button"
+          onClick={() =>
+            abierto === "buscar" ? setAbierto(null) : abrirBuscador()
+          }
+          aria-label={abierto === "buscar" ? "Cerrar búsqueda" : "Buscar"}
+          aria-expanded={abierto === "buscar"}
+          aria-controls="fila-busqueda"
+          // lg:hidden y no md:hidden: desde 1024px el input entra entero en la
+          // barra (hay 238px libres) y la lupa sobra. Entre 768 y 1024 el nav
+          // de desktop ya ocupa todo el ancho disponible, asi que ahi tambien
+          // se busca por lupa.
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5 lg:hidden"
+        >
+          {abierto === "buscar" ? <CloseIcon /> : <SearchIcon />}
+        </button>
+      )}
+
+      {abierto === "buscar" && (
+        // Segunda fila y no un input que se expande sobre la barra: asi el
+        // logo, el acceso a la cotizacion y el hamburguesa no se mueven ni
+        // pelean por ancho. A 360px, expandir sobre la barra dejaba ~215px
+        // para el campo.
+        //
+        // `absolute` contra el <header> (que lleva `relative`) y no en el
+        // flujo: en el flujo, abrir la busqueda empujaria la pagina entera
+        // hacia abajo de golpe.
+        //
+        // z-50 como el resto de lo que se abre encima. La burbuja de WhatsApp
+        // es z-40, asi que queda por debajo — aunque en la practica nunca se
+        // cruzan: la fila esta arriba y la burbuja abajo a la derecha.
+        <div
+          id="fila-busqueda"
+          className="absolute inset-x-0 top-full z-50 border-b border-black/5 bg-background shadow-sm"
+        >
+          <div className="mx-auto flex max-w-6xl items-center gap-2 px-6 py-3">
+            <SearchForm
+              inputId="header-search-mobile"
+              inputRef={inputRef}
+              onSubmitted={() => setAbierto(null)}
+              className="min-w-0 flex-1"
+            />
+            <button
+              type="button"
+              onClick={() => setAbierto(null)}
+              aria-label="Cerrar búsqueda"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground/60 transition-colors hover:bg-foreground/5"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+      )}
+
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setAbierto("menu")}
         aria-label="Abrir menú"
-        className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
+        // lg:hidden y no md:hidden, para acompañar al nav de escritorio: entre
+        // 768 y 1024 la barra no tiene lugar para el nav completo, así que ahí
+        // la navegación vive en este panel. Ver el comentario en header.tsx.
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5 lg:hidden"
       >
         <HamburgerIcon />
       </button>
@@ -62,7 +166,7 @@ export function MobileNav({
       {open && (
         <div className="fixed inset-0 z-50 flex flex-col bg-background">
           <div className="flex items-center justify-between border-b border-black/5 px-6 py-4">
-            <Link href="/" onClick={() => setOpen(false)} className="shrink-0">
+            <Link href="/" onClick={() => setAbierto(null)} className="shrink-0">
               <Image
                 src="/logo-ganchito.svg"
                 alt="Ganchito Estudio"
@@ -83,7 +187,7 @@ export function MobileNav({
               <CartIndicator soloEstado />
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => setAbierto(null)}
                 aria-label="Cerrar menú"
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
               >
@@ -108,7 +212,7 @@ export function MobileNav({
                 <Link
                   key={link.href}
                   href={link.href}
-                  onClick={() => setOpen(false)}
+                  onClick={() => setAbierto(null)}
                   className="-mx-2 rounded-lg px-2 py-2 text-[17px] font-medium text-foreground transition-colors hover:text-primary"
                 >
                   {link.label}
@@ -144,7 +248,7 @@ export function MobileNav({
                           <Link
                             key={c.id}
                             href={`/catalogo?categoria=${c.slug}`}
-                            onClick={() => setOpen(false)}
+                            onClick={() => setAbierto(null)}
                             className="-mx-2 rounded-lg px-2 pl-4 text-[15px] text-foreground/75 transition-colors hover:text-primary"
                           >
                             {c.name}
@@ -154,7 +258,7 @@ export function MobileNav({
                           grupo.categories.length > MAX_SUELTAS && (
                             <Link
                               href="/catalogo"
-                              onClick={() => setOpen(false)}
+                              onClick={() => setAbierto(null)}
                               className="-mx-2 rounded-lg px-2 pl-4 text-[15px] text-foreground/45"
                             >
                               y {grupo.categories.length - MAX_SUELTAS} más
@@ -174,12 +278,12 @@ export function MobileNav({
                 <div className="mt-7 flex flex-col gap-5 border-t border-black/5 pt-7">
                   <Link
                     href="/catalogo"
-                    onClick={() => setOpen(false)}
+                    onClick={() => setAbierto(null)}
                     className="text-[15px] font-medium text-primary"
                   >
                     Ver todo el catálogo →
                   </Link>
-                  <div onClick={() => setOpen(false)}>
+                  <div onClick={() => setAbierto(null)}>
                     <CartIndicator ctaAncho />
                   </div>
                 </div>
@@ -188,7 +292,7 @@ export function MobileNav({
           </nav>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

@@ -5,33 +5,47 @@ import Link from "next/link";
 import type { MenuGroup } from "@/lib/catalog";
 import { GRUPO_SIN_AGRUPAR } from "@/lib/menu-groups";
 import { CategoryChip, PanelRow } from "@/components/catalog/link-content";
+import { FiltersContent } from "@/components/catalog/filters-content";
+import { contarActivos } from "@/components/catalog/filters-panel";
+import type { CatalogFilterOptions } from "@/lib/catalog";
+import {
+  buildCatalogHref,
+  hayAlgunFiltro,
+  type CatalogFilters,
+} from "@/lib/catalog-params";
 
 /// Tope para cerrar el panel si la navegacion nunca termina (red caida,
 /// servidor sin responder). Sin esto, el panel se quedaria abierto para
 /// siempre con una fila marcada y el usuario atrapado adentro.
 const PANEL_SALIDA_MS = 2000;
 
-function buildHref(categorySlug?: string, search?: string) {
-  const params = new URLSearchParams();
-  if (categorySlug) params.set("categoria", categorySlug);
-  if (search) params.set("q", search);
-  const query = params.toString();
-  return query ? `/catalogo?${query}` : "/catalogo";
-}
+/// Cambiar de categoria preserva el resto de los filtros. Antes esta funcion
+/// solo conocia `categoria` y `q`: con precio, color y tecnica encima, elegir
+/// una categoria habria borrado en silencio todo lo demas.
 
 export function CategoryFilter({
   groups,
-  activeSlug,
-  search,
+  filtros,
+  opciones,
+  total,
 }: {
   /// Los MISMOS grupos que el menu del header, de la misma query
   /// (getMenuGroups). Que los dos lugares coincidan en contenido y orden es
   /// el punto de agrupar acá: si el catalogo armara su propio orden, tarde o
   /// temprano muestran cosas distintas.
   groups: MenuGroup[];
-  activeSlug?: string;
-  search?: string;
+  filtros: CatalogFilters;
+  opciones: CatalogFilterOptions;
+  /// Cuantos productos da la combinacion actual. Va al boton que cierra el
+  /// panel para que el cliente vea el efecto de lo que marco SIN cerrarlo:
+  /// con multi-seleccion, cerrar en cada toque obliga a reabrir el panel
+  /// tantas veces como colores quiera marcar.
+  total: number;
 }) {
+  const activeSlug = filtros.categoria;
+  const buildHref = (categorySlug?: string) =>
+    buildCatalogHref(filtros, { categoria: categorySlug ?? null });
+
   const [open, setOpen] = useState(false);
   const categories = groups.flatMap((g) => g.categories);
   const activeCategory = categories.find((c) => c.slug === activeSlug);
@@ -45,6 +59,7 @@ export function CategoryFilter({
   //
   // Se calcula en el useState inicial y no en un efecto: el efecto pintaria un
   // frame con el bloque cerrado antes de abrirlo.
+  const activosDeFaceta = contarActivos(filtros);
   const activaEsSuelta = sueltas.some((c) => c.slug === activeSlug);
   const [otrasAbierto, setOtrasAbierto] = useState(activaEsSuelta);
 
@@ -87,6 +102,24 @@ export function CategoryFilter({
     return () => clearTimeout(id);
   }, [pendingSlug]);
 
+  // Con el panel abierto, el scroll del body se bloquea.
+  //
+  // Este panel es `fixed inset-0` igual que el del hamburguesa y NO tenia el
+  // bloqueo: el gesto movia la pagina de atras mientras el panel quedaba
+  // quieto. Con los filtros adentro el panel pasa a ser mucho mas largo, asi
+  // que el sintoma que antes casi no se notaba ahora seria el normal.
+  //
+  // El cleanup restaura el valor previo y no fuerza "": si el bloqueo no se
+  // libera, la pagina queda congelada y la unica salida es recargar.
+  useEffect(() => {
+    if (!open) return;
+    const previo = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previo;
+    };
+  }, [open]);
+
   function cerrarPanel() {
     setOpen(false);
     setPendingSlug(null);
@@ -103,7 +136,7 @@ export function CategoryFilter({
             primer grupo se leeria como si perteneciera a el. */}
         <nav className="flex flex-wrap gap-2">
           <CategoryLink
-            href={buildHref(undefined, search)}
+            href={buildHref(undefined)}
             active={!slugMostrado}
             label="Todas"
             onNavigate={() => setPendingSlug("")}
@@ -122,7 +155,7 @@ export function CategoryFilter({
                 {grupo.categories.map((category) => (
                   <CategoryLink
                     key={category.id}
-                    href={buildHref(category.slug, search)}
+                    href={buildHref(category.slug)}
                     active={category.slug === slugMostrado}
                     label={category.name}
                     onNavigate={() => setPendingSlug(category.slug)}
@@ -154,7 +187,7 @@ export function CategoryFilter({
                 {sueltas.map((category) => (
                   <CategoryLink
                     key={category.id}
-                    href={buildHref(category.slug, search)}
+                    href={buildHref(category.slug)}
                     active={category.slug === slugMostrado}
                     label={category.name}
                     onNavigate={() => setPendingSlug(category.slug)}
@@ -175,15 +208,18 @@ export function CategoryFilter({
           className="flex w-full items-center gap-2 rounded-full border border-foreground/15 px-4 py-2.5 text-sm font-medium text-foreground/80"
         >
           <FilterIcon />
-          {activeCategory ? activeCategory.name : "Filtrar por categoría"}
+          {activeCategory ? activeCategory.name : "Filtrar"}
+          {activosDeFaceta > 0 && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-semibold text-white">
+              {activosDeFaceta}
+            </span>
+          )}
         </button>
 
         {open && (
           <div className="fixed inset-0 z-50 flex flex-col bg-background">
             <div className="flex items-center justify-between border-b border-black/5 px-6 py-4">
-              <p className="text-sm font-medium text-foreground">
-                Categorías
-              </p>
+              <p className="text-sm font-medium text-foreground">Filtrar</p>
               {/* Nunca se deshabilita, ni siquiera mientras hay una
                   navegacion en curso: el usuario tiene que poder salir
                   siempre. */}
@@ -200,7 +236,7 @@ export function CategoryFilter({
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {/* Igual que en desktop: "Todas" arriba, fuera de los grupos. */}
               <PanelLink
-                href={buildHref(undefined, search)}
+                href={buildHref(undefined)}
                 active={!slugMostrado}
                 label="Todas"
                 onNavigate={() => setPendingSlug("")}
@@ -215,7 +251,7 @@ export function CategoryFilter({
                   {grupo.categories.map((category) => (
                     <PanelLink
                       key={category.id}
-                      href={buildHref(category.slug, search)}
+                      href={buildHref(category.slug)}
                       active={category.slug === slugMostrado}
                       label={category.name}
                       onNavigate={() => setPendingSlug(category.slug)}
@@ -240,7 +276,7 @@ export function CategoryFilter({
                     sueltas.map((category) => (
                       <PanelLink
                         key={category.id}
-                        href={buildHref(category.slug, search)}
+                        href={buildHref(category.slug)}
                         active={category.slug === slugMostrado}
                         label={category.name}
                         onNavigate={() => setPendingSlug(category.slug)}
@@ -248,6 +284,51 @@ export function CategoryFilter({
                     ))}
                 </div>
               )}
+
+              {/* Los filtros nuevos van DEBAJO de las categorías, dentro del
+                  mismo panel: en mobile no hace falta un panel sobre otro, y
+                  la categoría es la decisión más gruesa — primero se elige el
+                  rubro y después se afina. */}
+              <div className="mt-7 border-t border-foreground/10 pt-6">
+                {/* Sin onNavegar: tocar un color NO cierra el panel. Con
+                    multi-selección, cerrar en cada toque obliga a reabrirlo
+                    tantas veces como chips quiera marcar. El contador del pie
+                    le muestra el efecto sin salir. */}
+                <FiltersContent filtros={filtros} opciones={opciones} />
+              </div>
+
+              {/* Aire al final: sin esto, el último chip queda pegado al pie
+                  fijo y en un teléfono corto parece que la lista se cortó. */}
+              <div className="h-6" />
+            </div>
+
+            {/* Pie fijo: el contador de resultados y la salida. Fuera del
+                contenedor con overflow, así no se va con el scroll. */}
+            <div className="flex items-center gap-3 border-t border-black/5 px-6 py-4">
+              {hayAlgunFiltro(filtros) && (
+                <Link
+                  href={buildCatalogHref(filtros, {
+                    q: null,
+                    categoria: null,
+                    precioMin: null,
+                    precioMax: null,
+                    colores: [],
+                    tecnicas: [],
+                  })}
+                  scroll={false}
+                  onClick={cerrarPanel}
+                  className="shrink-0 text-sm font-medium text-foreground/55 underline underline-offset-2"
+                >
+                  Borrar
+                </Link>
+              )}
+              <button
+                type="button"
+                onClick={cerrarPanel}
+                className="flex-1 rounded-full bg-primary px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-primary-dark"
+              >
+                Ver {total} {total === 1 ? "producto" : "productos"}
+              </button>
             </div>
           </div>
         )}

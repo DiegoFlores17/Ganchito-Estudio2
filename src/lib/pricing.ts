@@ -61,6 +61,35 @@ export function computeSellPrice(
   return toArs(costPrice, currency, usdRate).times(marginMultiplier);
 }
 
+/// El costo que corresponde a un precio de venta dado. Es `computeSellPrice`
+/// al reves.
+///
+/// **Para qué**: el filtro de precio del catálogo. El precio de venta se
+/// calcula al leer, así que filtrar "hasta $10.000" parecía obligar a calcular
+/// el precio de los ~950 productos en cada request, o a persistir un precio
+/// que habría que recalcular cada vez que se mueve el dólar o el margen.
+///
+/// No hace falta ninguna de las dos. La fórmula es lineal y MONÓTONA
+/// (`costo × tasa × multiplicador`, todos positivos), así que en vez de llevar
+/// cada costo al espacio de los precios se trae el umbral al espacio de los
+/// costos, y la comparación se hace en SQL sobre `costPrice`. El resultado es
+/// exacto, y sigue siendo exacto cuando cambian el dólar o el margen porque el
+/// divisor se lee en el mismo request.
+///
+/// Devuelve null si el divisor no es positivo — un margen de -100% o un dólar
+/// en cero harían una división por cero y un filtro que no filtra nada.
+export function sellPriceToCost(
+  sellPrice: number,
+  currency: Currency,
+  { defaultMarginPercent, usdRate }: PricingInputs
+): Prisma.Decimal | null {
+  const marginMultiplier = defaultMarginPercent.dividedBy(100).plus(1);
+  const divisor =
+    currency === Currency.USD ? marginMultiplier.times(usdRate) : marginMultiplier;
+  if (divisor.lessThanOrEqualTo(0)) return null;
+  return new Prisma.Decimal(sellPrice).dividedBy(divisor);
+}
+
 /// Un escalon de la escala del proveedor: desde `min` unidades (hasta `max`, o
 /// sin tope) se descuenta `pct` sobre el costo.
 export interface DiscountTier {

@@ -3,19 +3,22 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PageNavLabel, PageNumber } from "@/components/catalog/link-content";
+import { buildCatalogHref, type CatalogFilters } from "@/lib/catalog-params";
 
 /// Tope para soltar la pagina tocada si la navegacion nunca llega. Sin esto,
 /// un numero se quedaria marcado como actual sin serlo — un estado optimista
 /// equivocado es peor que no tener ninguno.
 const PAGINA_SALIDA_MS = 2000;
 
-function buildHref(page: number, categorySlug?: string, search?: string) {
-  const params = new URLSearchParams();
-  if (categorySlug) params.set("categoria", categorySlug);
-  if (search) params.set("q", search);
-  if (page > 1) params.set("page", String(page));
-  const query = params.toString();
-  return query ? `/catalogo?${query}` : "/catalogo";
+/// Cambiar de pagina preserva TODOS los filtros. Antes esta funcion armaba su
+/// propia URL con categoria y busqueda; con precio, color y tecnica encima,
+/// cada control que arme la suya termina borrando los que no conoce.
+///
+/// `{ page }` como unico cambio es lo que le dice a buildCatalogHref que NO
+/// resetee a la pagina 1: es el unico caso donde moverse de pagina es la
+/// intencion, y no el efecto de haber cambiado un filtro.
+function buildHref(page: number, filtros: CatalogFilters) {
+  return buildCatalogHref(filtros, { page });
 }
 
 /// Ventana de paginas alrededor de la actual, con "..." para los saltos.
@@ -37,13 +40,11 @@ function buildPageWindow(current: number, total: number): (number | "...")[] {
 export function Pagination({
   currentPage,
   totalPages,
-  categorySlug,
-  search,
+  filtros,
 }: {
   currentPage: number;
   totalPages: number;
-  categorySlug?: string;
-  search?: string;
+  filtros: CatalogFilters;
 }) {
   // Que pagina se toco y todavia no llego.
   const [pendingPage, setPendingPage] = useState<number | null>(null);
@@ -77,7 +78,7 @@ export function Pagination({
   return (
     <nav className="flex items-center justify-center gap-1">
       <PageLink
-        href={buildHref(currentPage - 1, categorySlug, search)}
+        href={buildHref(currentPage - 1, filtros)}
         disabled={currentPage <= 1}
         label="Anterior"
         onNavigate={() => setPendingPage(currentPage - 1)}
@@ -94,7 +95,7 @@ export function Pagination({
         ) : (
           <Link
             key={page}
-            href={buildHref(page, categorySlug, search)}
+            href={buildHref(page, filtros)}
             onClick={() => setPendingPage(page)}
             className="rounded-full"
           >
@@ -104,7 +105,7 @@ export function Pagination({
       )}
 
       <PageLink
-        href={buildHref(currentPage + 1, categorySlug, search)}
+        href={buildHref(currentPage + 1, filtros)}
         disabled={currentPage >= totalPages}
         label="Siguiente"
         onNavigate={() => setPendingPage(currentPage + 1)}

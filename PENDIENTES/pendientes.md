@@ -664,3 +664,66 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       casos el cliente no puede completar el pedido nunca.
       Propuesta: aviso en el panel al cargar (no bloqueo), y del lado público
       mostrar "consultanos por disponibilidad" si el stock total no alcanza el mínimo.
+## Filtros del catálogo (lo que quedó afuera de la primera tanda)
+
+La tanda de filtros construyó tres: **precio, color y técnica de aplicación**.
+Lo de abajo es lo que quedó pendiente, con el motivo.
+
+### Filtro de cantidad mínima: esperar datos
+
+Se decidió **no construirlo**. El campo correcto es `Product.minOrderQuantity`
+(el mínimo de venta real), NO `supplierMinOrderQuantity` — ese ya está
+descartado como mínimo de venta y usarlo escondería productos que el cliente sí
+puede comprar. El caso que lo cierra: **Gorro CARDENAL, venta 15 / proveedor
+31**.
+
+El problema es que sobre el campo correcto casi no hay dato: en producción
+(2026-09-16) solo **19 de 942 productos** tienen `minOrderQuantity > 1`, y el
+máximo es 16. Cualquiera que pueda pedir 16 unidades o más vería el catálogo
+entero, o sea un filtro que casi nunca filtra — ocupa lugar en el panel y le
+enseña al cliente que los filtros no sirven.
+
+**Revisar si el catálogo cambia**: si aparecen más productos con mínimo de
+venta real, el filtro pasa a tener sentido y la pieza es chica (un `lte` sobre
+`minOrderQuantity` en `getProducts`, más un campo en el panel).
+
+### Familias de color: mapeo MANUAL, nunca por nombre
+
+Hay **234 valores de color distintos**. El filtro agrupa solo GRAFÍAS del mismo
+texto (acentos, mayúsculas, espacios) y muestra los 16 más frecuentes; al
+resto se llega por el buscador de la propia faceta, no por un "ver más".
+
+Lo que NO hace, a propósito: agrupar "Royal Blue" y "Azul Francia" bajo "Azul".
+Son azules, pero deducirlo del nombre es adivinar — la misma regla que ya
+aplicamos a los iconos de CDO y al mapeo de categorías. Si se quiere, va igual
+que las categorías canónicas: una tabla de familias propias y un mapeo hecho a
+mano desde el panel.
+
+Hay además basura para limpiar en el dato: `"Beige / Kaki / Beige / kaki"`
+(33 productos) es un solo valor mal formado del proveedor.
+
+### Canonicalización de técnicas de impresión
+
+Mismo caso, más chico: el filtro ya unifica `Sublimación`/`Sublimacion` y
+`Laser CO2`/`Láser CO2` por normalización. Lo que no unifica son las que
+significan lo mismo con otro nombre, y eso necesita criterio humano.
+
+### Índices (todavía NO hacen falta)
+
+Con 942 productos las consultas responden bien sin índices. Si el catálogo
+crece a varios miles, los que van a pesar:
+
+- `product_variants(costPrice)` — el filtro de precio (`some` / `none`)
+- `product_variants(colorName)`
+- `product_printing_types(name)`
+- `products(active, deletedAt)` compuesto — lo usan todas las consultas
+  públicas
+
+### Los otros cuatro filtros de Zecat: son trabajo de DATOS, no de UI
+
+- **Subcategoría**: bloqueado por "Categorías múltiples" (ver más arriba en
+  este archivo). Hoy cada producto tiene una sola categoría.
+- **Marca**: viene en `subattributes` de Zecat y nunca se mapeó.
+- **Sale**: el descuento ya viene aplicado dentro del precio; no hay flag de
+  "en oferta".
+- **Logo 24hs**: es un servicio de Zecat, no un atributo nuestro.

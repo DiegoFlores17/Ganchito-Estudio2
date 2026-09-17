@@ -1,5 +1,11 @@
-import { Prisma } from "@prisma/client";
+import { Currency, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  normalizarNombre,
+  type CatalogFilterOptions,
+  type OpcionFiltro,
+} from "@/lib/catalog-params";
+import { computeSellPrice, getPricingConfig, sellPriceToCost } from "@/lib/pricing";
 
 export const PRODUCTS_PER_PAGE = 24;
 
@@ -7,6 +13,13 @@ interface GetProductsParams {
   page: number;
   categorySlug?: string;
   search?: string;
+  /// Precio de VENTA en pesos, tal como lo ve el cliente.
+  priceMin?: number;
+  priceMax?: number;
+  /// Nombres YA normalizados (ver normalizarNombre). Se expanden a todas las
+  /// grafias reales antes de ir a la base.
+  colores?: string[];
+  tecnicas?: string[];
 }
 
 /// Categorias que se ofrecen como filtro en el catalogo publico.
@@ -157,10 +170,107 @@ async function searchProductIds(search: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+/// El filtro de precio, traducido a una condicion sobre el COSTO.
+///
+/// El precio de venta se calcula al leer, asi que no existe como columna. En
+/// vez de calcular ~950 precios por request (o persistir uno que habria que
+/// recalcular cada vez que se mueve el dolar), se invierte el umbral: ver
+/// `sellPriceToCost`.
+///
+/// **La semantica es la del precio que MUESTRA la card**, o sea el minimo entre
+/// las variantes (el "Desde $X"):
+///
+///   - "hasta B"  => existe alguna variante con costo <= B   (`some`)
+///   - "desde A"  => NINGUNA variante por debajo de A        (`none`)
+///
+/// El `none` no es un detalle: con `some(costo >= A)` alcanzaria con que UNA
+/// variante cara entre en el rango, y el producto apareceria mostrando un
+/// "Desde" por debajo del minimo que el cliente pidio.
+///
+/// El divisor depende de la moneda del producto (309 en USD, 633 en ARS), por
+/// eso el OR de dos ramas en vez de un solo umbral.
+async function priceWhere(
+  priceMin?: number,
+  priceMax?: number
+): Promise<Prisma.ProductWhereInput> {
+  if (priceMin === undefined && priceMax === undefined) return {};
+  const config = await getPricingConfig();
+
+  const rama = (currency: Currency): Prisma.ProductWhereInput | null => {
+    const min = priceMin === undefined ? null : sellPriceToCost(priceMin, currency, config);
+    const max = priceMax === undefined ? null : sellPriceToCost(priceMax, currency, config);
+    // Un divisor invalido (margen -100%, dolar en cero) devuelve null. Se
+    // descarta la rama en vez de dejar pasar todo: un filtro que dice estar
+    // aplicado y no filtra es peor que uno que no muestra nada.
+    if ((priceMin !== undefined && !min) || (priceMax !== undefined && !max)) return null;
+
+    const condiciones: Prisma.ProductWhereInput[] = [{ currency }];
+    if (max) condiciones.push({ variants: { some: { costPrice: { lte: max } } } });
+    if (min) condiciones.push({ variants: { none: { costPrice: { lt: min } } } });
+    return { AND: condiciones };
+  };
+
+  const ramas = [rama(Currency.ARS), rama(Currency.USD)].filter(
+    (r): r is Prisma.ProductWhereInput => r !== null
+  );
+  // Sin ninguna rama valida, no devolver {} (seria "sin filtro"): devolver algo
+  // que no matchee nada, que es lo que el cliente pidio.
+  if (ramas.length === 0) return { id: { in: [] } };
+  return { OR: ramas };
+}
+
+/// Color y tecnica. Los dos son relaciones, asi que bajan a EXISTS y no
+/// generan N+1: una sola consulta con subqueries, no una por producto.
+async function facetaWhere(
+  colores?: string[],
+  tecnicas?: string[]
+): Promise<Prisma.ProductWhereInput> {
+  const pedidos: Prisma.ProductWhereInput[] = [];
+
+  if (colores?.length) {
+    const todos = await grafiasDeColor();
+    const grafias = expandirGrafias(colores, todos);
+    // Ningun color real matchea lo pedido: no dejar pasar todo.
+    if (grafias.length === 0) return { id: { in: [] } };
+    // Varios colores son un OR entre si (azul O negro), no un AND: pedir un
+    // producto que venga en los dos a la vez no es lo que significa marcar
+    // dos chips.
+    pedidos.push({ variants: { some: { colorName: { in: grafias } } } });
+  }
+
+  if (tecnicas?.length) {
+    const todas = await grafiasDeTecnica();
+    const grafias = expandirGrafias(tecnicas, todas);
+    if (grafias.length === 0) return { id: { in: [] } };
+    pedidos.push({ printingTypes: { some: { name: { in: grafias } } } });
+  }
+
+  // Entre facetas distintas si es AND: color azul Y tecnica sublimacion.
+  return pedidos.length ? { AND: pedidos } : {};
+}
+
+/// Expande nombres normalizados a todas las grafias reales de la base.
+///
+/// El filtro guarda en la URL el nombre normalizado ("sublimacion"), no la
+/// grafia: asi el link sigue funcionando el dia que un proveedor agregue una
+/// escritura nueva del mismo nombre, y un mismo chip trae los productos de las
+/// dos grafias en vez de partirlos.
+function expandirGrafias(
+  normalizados: string[],
+  todas: string[]
+): string[] {
+  const buscados = new Set(normalizados);
+  return todas.filter((g) => buscados.has(normalizarNombre(g)));
+}
+
 export async function getProducts({
   page,
   categorySlug,
   search,
+  priceMin,
+  priceMax,
+  colores,
+  tecnicas,
 }: GetProductsParams) {
   const trimmedSearch = search?.trim();
   const matchedIds = trimmedSearch
@@ -190,6 +300,8 @@ export async function getProducts({
         }
       : {}),
     ...(matchedIds ? { id: { in: matchedIds } } : {}),
+    ...(await priceWhere(priceMin, priceMax)),
+    ...(await facetaWhere(colores, tecnicas)),
   };
 
   const [products, total] = await Promise.all([
@@ -257,4 +369,167 @@ export function hasAvailableStock(
   variants: { stock: number; reservedStock: number }[]
 ): boolean {
   return variants.some((v) => v.stock - v.reservedStock > 0);
+}
+
+// ---------------------------------------------------------------------------
+//  Opciones de los filtros
+// ---------------------------------------------------------------------------
+
+const VIVOS = { active: true, deletedAt: null } as const;
+
+// Re-export por comodidad: quien ya trabaja con catalog.ts no tiene que saber
+// que los tipos viven en catalog-params.
+export type { CatalogFilterOptions, OpcionFiltro };
+
+/// Percentil que se usa como PISO del placeholder de precio, en vez del minimo
+/// absoluto.
+///
+/// El minimo real sale de un costo de 0,09 USD, que es basura de proveedor: da
+/// un precio de venta de ~$200 y no hay nada comprable a ese valor. Un
+/// placeholder que promete un piso inexistente desorienta mas de lo que ayuda.
+const PERCENTIL_PISO = 0.05;
+
+async function grafiasDeColor(): Promise<string[]> {
+  const filas = await prisma.productVariant.findMany({
+    where: { product: VIVOS, colorName: { not: null } },
+    select: { colorName: true },
+    distinct: ["colorName"],
+  });
+  return filas.map((f) => f.colorName!).filter(Boolean);
+}
+
+async function grafiasDeTecnica(): Promise<string[]> {
+  const filas = await prisma.productPrintingType.findMany({
+    where: { product: VIVOS },
+    select: { name: true },
+    distinct: ["name"],
+  });
+  return filas.map((f) => f.name).filter(Boolean);
+}
+
+/// Agrupa grafias por nombre normalizado y se queda con la mas frecuente como
+/// etiqueta.
+function agrupar(
+  filas: Array<{ nombre: string; productos: number; hex?: string | null }>
+): OpcionFiltro[] {
+  const grupos = new Map<string, OpcionFiltro & { _mejor: number }>();
+  for (const f of filas) {
+    const valor = normalizarNombre(f.nombre);
+    if (!valor) continue;
+    const previo = grupos.get(valor);
+    if (!previo) {
+      grupos.set(valor, {
+        valor,
+        etiqueta: f.nombre.trim(),
+        productos: f.productos,
+        hex: f.hex ?? undefined,
+        _mejor: f.productos,
+      });
+      continue;
+    }
+    // Los productos se SUMAN entre grafias: es el punto de agruparlas. Ojo que
+    // puede sobrecontar un producto que tenga dos grafias del mismo nombre; es
+    // un numero orientativo para ordenar, no un total exacto.
+    previo.productos += f.productos;
+    previo.hex = previo.hex ?? f.hex ?? undefined;
+    if (f.productos > previo._mejor) {
+      previo.etiqueta = f.nombre.trim();
+      previo._mejor = f.productos;
+    }
+  }
+  // Se descarta `_mejor` (auxiliar para elegir la etiqueta) del objeto que
+  // sale: no es parte de OpcionFiltro y viajaria al cliente sin uso.
+  return [...grupos.values()]
+    .map((g): OpcionFiltro => ({
+      valor: g.valor,
+      etiqueta: g.etiqueta,
+      productos: g.productos,
+      hex: g.hex,
+    }))
+    .sort((a, b) => b.productos - a.productos);
+}
+
+/// Todo lo que el panel necesita para dibujarse. Tres consultas agregadas, sin
+/// N+1: los conteos los hace Postgres, no un bucle sobre productos.
+export async function getCatalogFilterOptions(): Promise<CatalogFilterOptions> {
+  const [coloresRaw, tecnicasRaw, config] = await Promise.all([
+    // COUNT(DISTINCT producto), no de variantes: un producto con ocho variantes
+    // negras cuenta una vez. El conteo de variantes inflaba "Negro" a 604
+    // cuando los productos son 449.
+    prisma.$queryRaw<{ nombre: string; productos: bigint; hex: string | null }[]>`
+      SELECT v."colorName" AS nombre,
+             COUNT(DISTINCT p.id) AS productos,
+             MAX(v."colorHex") AS hex
+      FROM product_variants v
+      JOIN products p ON p.id = v."productId"
+      WHERE p.active AND p."deletedAt" IS NULL AND v."colorName" IS NOT NULL
+      GROUP BY v."colorName"
+    `,
+    prisma.$queryRaw<{ nombre: string; productos: bigint }[]>`
+      SELECT t.name AS nombre, COUNT(DISTINCT p.id) AS productos
+      FROM product_printing_types t
+      JOIN products p ON p.id = t."productId"
+      WHERE p.active AND p."deletedAt" IS NULL
+      GROUP BY t.name
+    `,
+    getPricingConfig(),
+  ]);
+
+  const { precioPiso, precioTecho } = await rangoDePrecios(config);
+
+  return {
+    colores: agrupar(
+      coloresRaw.map((c) => ({ nombre: c.nombre, productos: Number(c.productos), hex: c.hex }))
+    ),
+    tecnicas: agrupar(
+      tecnicasRaw.map((t) => ({ nombre: t.nombre, productos: Number(t.productos) }))
+    ),
+    precioPiso,
+    precioTecho,
+  };
+}
+
+/// El rango de precios que se muestra como placeholder.
+///
+/// El piso sale de un PERCENTIL y no del minimo: ver PERCENTIL_PISO. El techo
+/// si es el maximo real — ahi no hay basura que distorsione, y prometer menos
+/// techo del que existe escondería productos caros que si estan.
+async function rangoDePrecios(config: Awaited<ReturnType<typeof getPricingConfig>>) {
+  // El precio de venta se calcula al leer, asi que el orden por precio no es
+  // el orden por costo cuando hay dos monedas. Se traen los costos por moneda
+  // y se convierten en memoria: son ~2700 numeros, una sola consulta.
+  const variantes = await prisma.productVariant.findMany({
+    where: { product: VIVOS },
+    select: { costPrice: true, product: { select: { currency: true } } },
+  });
+
+  const precios = variantes
+    .map((v) => Number(computeSellPrice(v.costPrice, v.product.currency, config)))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => a - b);
+
+  if (precios.length === 0) return { precioPiso: 0, precioTecho: 0 };
+
+  const piso = precios[Math.floor(precios.length * PERCENTIL_PISO)] ?? precios[0];
+  const techo = precios[precios.length - 1];
+  return { precioPiso: redondearAbajo(piso), precioTecho: redondearArriba(techo) };
+}
+
+/// Redondeo a una cifra "defendible": el placeholder es una orientacion, no un
+/// dato exacto, y "$1.847" invita a creer que ese numero significa algo.
+function redondearAbajo(n: number): number {
+  const paso = escalon(n);
+  return Math.max(0, Math.floor(n / paso) * paso);
+}
+
+function redondearArriba(n: number): number {
+  const paso = escalon(n);
+  return Math.ceil(n / paso) * paso;
+}
+
+function escalon(n: number): number {
+  if (n < 1_000) return 100;
+  if (n < 10_000) return 500;
+  if (n < 100_000) return 1_000;
+  return 10_000;
 }

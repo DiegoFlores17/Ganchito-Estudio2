@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/usd-rate",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/sync/zecat",
+      "schedule": "* 9-10,21-22 * * *"
     }
   ],
   "regions": [

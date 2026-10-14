@@ -270,11 +270,31 @@ export type SyncAlertInput =
       provider: string;
       runId: string;
       ausentes: AusenteAlerta[];
+      recordatorio?: boolean;
       umbral: number;
       activos: number;
     }
   /// La corrida termino FAILED (error del loop o guarda de cordura).
-  | { motivo: "fallo"; provider: string; runId: string; detalle: string }
+  | { motivo: "fallo"; provider: string; runId: string; detalle: string; recordatorio?: boolean }
+  /// Productos que el proveedor publica pero no lista: siguen a la venta sin
+  /// sincronizarse.
+  | {
+      motivo: "a-revisar";
+      provider: string;
+      runId: string;
+      productos: AusenteAlerta[];
+      recordatorio?: boolean;
+    }
+  /// Mas de 26 h sin una corrida completa.
+  | {
+      motivo: "desactualizado";
+      provider: string;
+      runId: string;
+      ultimaCompleta: Date;
+      recordatorio?: boolean;
+    }
+  /// Volvio a estar todo bien despues de un problema avisado.
+  | { motivo: "resuelto"; provider: string; runId: string; antes: string }
   /// Demasiadas variantes desactivadas o productos sin variantes de golpe.
   | {
       motivo: "variantes";
@@ -358,6 +378,9 @@ export function armarAlerta(
 ): { titulo: string; cuerpo: string; link?: string } {
   const proveedor = nombreProveedor(input.provider);
   const cuando = formatDateTime(ahora);
+  // Un recordatorio dice que lo es en el asunto: el problema es el mismo de
+  // un mail anterior y sigue sin resolverse.
+  const rec = "recordatorio" in input && input.recordatorio ? "Recordatorio — " : "";
 
   if (input.motivo === "prueba") {
     return {
@@ -368,9 +391,51 @@ export function armarAlerta(
     };
   }
 
+  if (input.motivo === "resuelto") {
+    return {
+      titulo: `Sync de ${proveedor}: resuelto, el catálogo está al día (${cuando})`,
+      link: linkCorrida(input.runId),
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">El problema que avisamos antes (${escapar(input.antes)}) ya no está: la última sincronización completó bien y no queda nada pendiente.</p>
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+    };
+  }
+
+  if (input.motivo === "desactualizado") {
+    return {
+      titulo: `${rec}Sync de ${proveedor}: el catálogo no se actualiza hace más de 26 horas (${cuando})`,
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">La última sincronización completa de ${proveedor} fue el ${formatDateTime(input.ultimaCompleta)}. Desde entonces, precios y stock de sus productos pueden estar viejos.</p>
+  <h2 style="${ESTILO_SUBTITULO}">Qué hacer</h2>
+  <p style="${ESTILO_PARRAFO}">Entrá al panel, en Proveedores, y sincronizá a mano. Si la sincronización automática está activada y esto se repite, avisale a quien opera el sistema: puede que el disparo automático no esté corriendo.</p>`,
+    };
+  }
+
+  if (input.motivo === "a-revisar") {
+    const filas = input.productos
+      .map(
+        (p) => `
+      <tr>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(p.externalId)}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee;">${escapar(p.nombre ?? "(sin nombre)")}</td>
+      </tr>`
+      )
+      .join("");
+    return {
+      titulo: `${rec}Sync de ${proveedor}: ${input.productos.length} productos a revisar (${cuando})`,
+      link: linkCorrida(input.runId),
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">Estos productos no vinieron en el listado de ${proveedor}, pero su ficha sigue publicada y con variantes, así que no se pausaron. Siguen a la venta en la tienda <strong>sin sincronizarse</strong>: su precio y stock no se actualizan.</p>
+  <h2 style="${ESTILO_SUBTITULO}">Qué hacer</h2>
+  <p style="${ESTILO_PARRAFO}">Buscalos en la web de ${proveedor}. Si no están, avisale a quien opera el sistema para pausarlos. Si vuelven al listado, la próxima sincronización los pone al día sola.</p>
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;"><tbody>${filas}</tbody></table>
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+    };
+  }
+
   if (input.motivo === "fallo") {
     return {
-      titulo: `Sync de ${proveedor}: la corrida falló (${cuando})`,
+      titulo: `${rec}Sync de ${proveedor}: la corrida falló (${cuando})`,
       cuerpo: `
   <p style="${ESTILO_PARRAFO} white-space: pre-wrap;">${escapar(input.detalle)}</p>
   <p style="${ESTILO_PARRAFO}">Esta corrida no pausó ni borró nada. Los productos que alcanzó a actualizar antes del fallo quedan con los datos nuevos; el resto, con los de la corrida anterior. La próxima sincronización completa los pone al día.</p>
@@ -435,7 +500,7 @@ export function armarAlerta(
     .join("");
 
   return {
-    titulo: `Sync de ${proveedor}: ${n} productos dejaron de venir y no se pausó ninguno (${cuando})`,
+    titulo: `${rec}Sync de ${proveedor}: ${n} productos dejaron de venir y no se pausó ninguno (${cuando})`,
     link: linkCorrida(input.runId),
     cuerpo: `
   <p style="${ESTILO_PARRAFO}">En esta sincronización, <strong>${n} productos</strong> que están a la venta en la tienda ya no aparecen en el listado de ${proveedor}. El límite de seguridad es ${input.umbral} (sobre ${input.activos} productos activos), así que el sistema <strong>no pausó ninguno</strong>: cuando desaparecen tantos juntos puede ser una baja real o una falla de ${proveedor}, y eso lo decide una persona.</p>

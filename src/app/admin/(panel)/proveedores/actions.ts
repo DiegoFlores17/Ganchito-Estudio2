@@ -1,19 +1,17 @@
 "use server";
 
-import { ProductOrigin, SyncRunStatus } from "@prisma/client";
+import { ProductOrigin } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin, requireSuperAdmin } from "@/lib/admin-auth";
-import { syncZecatBatch } from "@/lib/zecat/sync";
 import {
-  acquireSyncRun,
-  failSyncRun,
-  finishSyncRun,
+  origenDeCorrida,
   pausarAusentesDeCorrida,
-  recordBatch,
-  SyncLockError,
   type SyncRunSummary,
 } from "@/lib/sync-run";
+import { conectorDe } from "@/lib/sync/conectores";
+import { avanzarCorrida } from "@/lib/sync/motor";
+import { revisarAlertas } from "@/lib/sync/alertas";
 import { sendSyncAlert, type EnvioResultado } from "@/lib/email";
 
 /// Manda una alerta de prueba REAL a ALERT_EMAIL. Existe para poder
@@ -32,147 +30,100 @@ export async function sendTestSyncAlert(): Promise<EnvioResultado> {
   });
 }
 
-/// Batch chico a proposito: cada invocacion tiene que quedar lejos del
-/// limite de duracion de Vercel. El navegador conduce el loop.
-const BATCH_LIMIT = 10;
-
-export interface SyncProgress {
-  runId: string;
-  done: boolean;
-  page: number;
-  totalPages: number | null;
-  totalRemote: number | null;
-  created: number;
-  updated: number;
-  paused: number;
-  failed: number;
-  usdWarnings: number;
-  /// Solo cuando done: el resumen fijo de la corrida, el MISMO que guarda
-  /// SyncRun.summary y lee el historial. La card y la fila no pueden decir
-  /// cosas distintas porque leen lo mismo.
-  summary?: SyncRunSummary;
-  errors: Array<{ externalId: string; message: string }>;
-}
-
-export interface StartSyncResult {
-  success: boolean;
-  error?: string;
+export interface SyncTickResult {
+  /// "ocupado": otra invocacion (el cron, otra pestaña, la consola) tiene la
+  /// corrida en este momento — el navegador espera y reintenta.
+  estado: "ocupado" | "avanzo" | "completa" | "fallo" | "sin-corrida";
   runId?: string;
-  /// Pagina desde la que arranca el loop (1, o cursor+1 si se retoma).
-  nextPage?: number;
-  resumed?: boolean;
+  /// Quien empezo la corrida, para mostrar ("panel, alguien@…", "consola",
+  /// "automática").
+  origen?: string;
+  procesados?: number;
+  total?: number | null;
+  /// Solo en "completa": el resumen fijo, el MISMO que lee el historial.
+  summary?: SyncRunSummary;
+  error?: string;
 }
 
-/// Toma el lock (o retoma una corrida muerta) y devuelve desde donde seguir.
-/// El lock real es el indice unico parcial de la base — el disabled del
-/// boton es UX, nunca seguridad.
-export async function startSync(
-  provider: ProductOrigin
-): Promise<StartSyncResult> {
+/// Un tick del sync desde el panel: avanza la corrida abierta del proveedor
+/// (o arranca una) durante ~45 s y corta. El navegador lo llama en loop; ya
+/// no le pasa una pagina: el cursor vive en la base, asi que el panel, el
+/// cron y la consola pueden intercalarse sobre la misma corrida.
+///
+/// El panel arranca SIEMPRE (sin el tope ni la regla de 6 h del cron): lo
+/// dispara una persona.
+///
+/// `siguiendo`: la corrida que el navegador viene acompañando. Si mientras
+/// tanto la termino otro (el cron, otra pestaña), se devuelve su resultado en
+/// vez de arrancar una corrida nueva: sin esto, el siguiente tick del panel
+/// no encontraria ninguna abierta y empezaria otra corrida completa.
+export async function syncTick(
+  provider: ProductOrigin,
+  siguiendo?: string
+): Promise<SyncTickResult> {
   const admin = await requireAdmin();
-
-  // v1: solo Zecat corre. La firma ya es agnostica para no re-disenar
-  // cuando se sume CDO.
-  if (provider !== ProductOrigin.ZECAT) {
-    return { success: false, error: "Proveedor todavía no soportado." };
+  if (!conectorDe(provider)) {
+    return { estado: "fallo", error: "Este proveedor todavía no se puede sincronizar desde el panel." };
   }
 
-  try {
-    const run = await acquireSyncRun(provider, admin.email);
-    return {
-      success: true,
-      runId: run.id,
-      nextPage: (run.cursor ?? 0) + 1,
-      resumed: run.cursor !== null,
-    };
-  } catch (error) {
-    if (error instanceof SyncLockError) {
-      return { success: false, error: error.message };
+  const tick = await avanzarCorrida(provider, admin.email, { esCron: false, siguiendo });
+
+  if (tick.estado === "completa") {
+    // Los costos pueden haber cambiado: el catalogo publico se refresca.
+    revalidatePath("/catalogo");
+    revalidatePath("/");
+  }
+  if (tick.estado === "completa" || tick.estado === "fallo") {
+    // Mismo criterio que el cron: avisa por cambio de estado, no repite. Si
+    // falla, no tapa el resultado de la corrida.
+    try {
+      await revisarAlertas(provider);
+    } catch (error) {
+      console.error("[proveedores] No se pudieron revisar las alertas:", error);
     }
-    throw error;
+  }
+
+  switch (tick.estado) {
+    case "ocupado":
+    case "avanzo":
+      return {
+        estado: tick.estado,
+        runId: tick.runId,
+        origen: origenDeCorrida(tick.startedBy),
+        procesados: tick.procesados,
+        total: tick.total,
+      };
+    case "completa":
+      return { estado: "completa", runId: tick.runId, summary: tick.summary };
+    case "fallo":
+      return { estado: "fallo", runId: tick.runId, error: `La sincronización falló: ${tick.mensaje}` };
+    default:
+      return { estado: "sin-corrida", error: tick.motivo };
   }
 }
 
-/// Procesa UNA pagina del proveedor y registra el avance. El cliente la
-/// llama en loop hasta done: true.
-export async function advanceSync(
-  runId: string,
-  page: number
-): Promise<SyncProgress> {
-  await requireAdmin();
-
-  const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
-  const provider = run.provider;
-  if (run.status !== SyncRunStatus.RUNNING) {
-    throw new Error("La corrida ya no está activa.");
+/// Interruptor del sync automatico. Solo super-admin: cambia como funciona
+/// el sistema (que corra solo dos veces por dia o no), no es operacion del
+/// dia a dia.
+export async function setAutoSync(
+  provider: ProductOrigin,
+  activado: boolean
+): Promise<{ success: boolean; error?: string }> {
+  await requireSuperAdmin();
+  if (!conectorDe(provider)) {
+    return { success: false, error: "Este proveedor todavía no tiene sincronización automática." };
   }
-
-  try {
-    const batch = await syncZecatBatch(page, BATCH_LIMIT);
-    const updated = await recordBatch(runId, {
-      cursor: page,
-      totalRemote: batch.totalRemote,
-      counters: batch.counters,
-      seenExternalIds: batch.seenExternalIds,
-      errors: batch.errors,
-    });
-
-    if (batch.isLast) {
-      const fin = await finishSyncRun(runId);
-      if (fin.aborted) {
-        throw new Error(
-          "La sincronización se abortó: el proveedor devolvió una respuesta anómala (muy pocos productos). No se pausó nada — reintentá más tarde."
-        );
-      }
-      const { run: done, summary } = fin;
-      // Los costos pueden haber cambiado: el catalogo publico se refresca.
-      revalidatePath("/catalogo");
-      revalidatePath("/");
-      return {
-        runId,
-        done: true,
-        page,
-        totalPages: batch.totalPages,
-        totalRemote: done.totalRemote,
-        created: done.created,
-        updated: done.updated,
-        paused: done.paused,
-        failed: done.failed,
-        usdWarnings: done.usdWarnings,
-        summary,
-        errors: done.errors as Array<{ externalId: string; message: string }>,
-      };
-    }
-
-    return {
-      runId,
-      done: false,
-      page,
-      totalPages: batch.totalPages,
-      totalRemote: updated.totalRemote,
-      created: updated.created,
-      updated: updated.updated,
-      paused: updated.paused,
-      failed: updated.failed,
-      usdWarnings: updated.usdWarnings,
-      errors: updated.errors as Array<{ externalId: string; message: string }>,
-    };
-  } catch (error) {
-    // Error del LOOP (la API de Zecat caida, la base inaccesible) — no de
-    // un producto puntual, esos ya quedaron en errors y la corrida siguio.
-    const message = error instanceof Error ? error.message : String(error);
-    await failSyncRun(runId, message);
-    // Con el boton hay alguien mirando la pantalla, pero el cron va a usar
-    // este mismo camino sin nadie delante: el mail es lo que hace que una
-    // corrida fallida no pase desapercibida.
-    await sendSyncAlert({
-      provider,
-      motivo: "fallo",
-      detalle: `La corrida se cortó con: ${message}`,
-      runId,
-    });
-    throw new Error(`La sincronización falló: ${message}`);
-  }
+  await prisma.supplier.upsert({
+    where: { origin: provider },
+    update: { autoSyncEnabled: activado },
+    create: {
+      origin: provider,
+      name: conectorDe(provider)!.nombre,
+      autoSyncEnabled: activado,
+    },
+  });
+  revalidatePath("/admin/proveedores");
+  return { success: true };
 }
 
 export interface PausarAusentesResult {

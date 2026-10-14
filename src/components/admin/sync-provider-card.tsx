@@ -4,19 +4,24 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ProductOrigin } from "@prisma/client";
 import {
-  advanceSync,
-  startSync,
-  type SyncProgress,
+  syncTick,
+  type SyncTickResult,
 } from "@/app/admin/(panel)/proveedores/actions";
 import { SyncRunSummaryLine } from "@/components/admin/sync-run-summary";
 
-/// Card de un proveedor con su boton de sincronizacion. El NAVEGADOR
-/// conduce el loop de batches: cada llamada a advanceSync procesa una
-/// pagina y devuelve el progreso. Cerrar la pestaña detiene el loop y la
-/// corrida queda retomable (el proximo click sigue desde el cursor).
+/// Cuanto esperar antes de reintentar cuando otro (el cron, otra pestaña,
+/// la consola) tiene la corrida en este momento.
+const ESPERA_SI_OCUPADO_MS = 5_000;
+
+/// Card de un proveedor con su boton de sincronizacion. El navegador llama
+/// a syncTick en loop: cada llamada avanza ~45 s de la corrida y devuelve el
+/// progreso. El trabajo vive en la base (lista congelada + cursor), no aca:
+/// cerrar la pestaña no pierde nada, y lo que falte lo sigue el proximo
+/// click o el sync automatico (si esta activado).
 ///
 /// El disabled del boton es UX. La proteccion real contra doble click, dos
-/// pestañas o boton + consola es el lock en la base (ver lib/sync-run.ts).
+/// pestañas o boton + cron + consola es el lease de la corrida (ver
+/// lib/sync/motor.ts).
 export function SyncProviderCard({
   provider,
   nombre,
@@ -28,8 +33,8 @@ export function SyncProviderCard({
 }) {
   const router = useRouter();
   const [corriendo, setCorriendo] = useState(false);
-  const [progreso, setProgreso] = useState<SyncProgress | null>(null);
-  const [resultado, setResultado] = useState<SyncProgress | null>(null);
+  const [progreso, setProgreso] = useState<SyncTickResult | null>(null);
+  const [resultado, setResultado] = useState<SyncTickResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Evita que un loop viejo siga escribiendo estado si el componente se
   // desmonta o se lanza otro.
@@ -41,27 +46,29 @@ export function SyncProviderCard({
     setProgreso(null);
     setCorriendo(true);
     const miLoop = ++loopActivo.current;
+    let siguiendo: string | undefined;
 
     try {
-      const inicio = await startSync(provider);
-      if (!inicio.success || !inicio.runId) {
-        setError(inicio.error ?? "No se pudo iniciar la sincronización.");
-        setCorriendo(false);
-        return;
-      }
-
-      let page = inicio.nextPage ?? 1;
       for (;;) {
-        const p = await advanceSync(inicio.runId, page);
+        const r = await syncTick(provider, siguiendo);
         if (loopActivo.current !== miLoop) return; // desmonte o loop nuevo
-        setProgreso(p);
-        if (p.done) {
-          setResultado(p);
+        if (r.runId) siguiendo = r.runId;
+
+        if (r.estado === "completa") {
+          setResultado(r);
           break;
         }
-        page++;
+        if (r.estado === "fallo" || r.estado === "sin-corrida") {
+          setError(r.error ?? "La sincronización falló.");
+          break;
+        }
+        setProgreso(r);
+        if (r.estado === "ocupado") {
+          await new Promise((resolve) => setTimeout(resolve, ESPERA_SI_OCUPADO_MS));
+          if (loopActivo.current !== miLoop) return;
+        }
       }
-      // Refresca el historial server-rendered de abajo.
+      // Refresca el estado y el historial server-rendered.
       router.refresh();
     } catch (e) {
       if (loopActivo.current !== miLoop) return;
@@ -73,8 +80,8 @@ export function SyncProviderCard({
   }
 
   const pct =
-    progreso?.totalPages && progreso.totalPages > 0
-      ? Math.round((progreso.page / progreso.totalPages) * 100)
+    progreso?.total && progreso.total > 0
+      ? Math.round(((progreso.procesados ?? 0) / progreso.total) * 100)
       : 0;
 
   return (
@@ -103,14 +110,14 @@ export function SyncProviderCard({
             />
           </div>
           <p className="mt-2 text-xs text-foreground/60">
-            Página {progreso.page} de {progreso.totalPages ?? "?"} — creados{" "}
-            {progreso.created}, actualizados {progreso.updated}
-            {progreso.paused > 0 && <>, pausados {progreso.paused}</>}
-            {progreso.failed > 0 && <>, fallidos {progreso.failed}</>}
+            {progreso.estado === "ocupado" ? "En curso" : "Sincronizando"} (
+            {progreso.origen}): {progreso.procesados ?? 0} de{" "}
+            {progreso.total ?? "?"} productos
+            {progreso.estado === "ocupado" && " — la está procesando otro, esperando…"}
           </p>
           <p className="mt-1 text-xs text-foreground/40">
-            No cierres esta pestaña. Si se corta, el próximo click retoma
-            desde donde quedó.
+            Podés cerrar esta pestaña: el avance queda guardado y lo que falte
+            lo sigue el próximo click o la sincronización automática.
           </p>
         </div>
       )}

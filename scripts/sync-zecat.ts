@@ -1,20 +1,12 @@
 import "dotenv/config";
 import { ProductOrigin } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
-import { syncZecatBatch } from "../src/lib/zecat/sync";
-import {
-  acquireSyncRun,
-  failSyncRun,
-  finishSyncRun,
-  recordBatch,
-  SyncLockError,
-} from "../src/lib/sync-run";
-import { sendSyncAlert } from "../src/lib/email";
+import { avanzarCorrida } from "../src/lib/sync/motor";
+import { revisarAlertas } from "../src/lib/sync/alertas";
 
-// Mismo camino de codigo que el boton del panel: batches + SyncRun. Eso
-// hace que la consola RESPETE EL LOCK — si alguien esta sincronizando desde
-// el panel, este script se niega a arrancar en vez de pisarlo (y viceversa).
-const BATCH_LIMIT = 25; // en consola no hay limite de duracion por batch
+// Mismo motor que el cron y el boton del panel: lista congelada, ticks y el
+// mismo lease. Si el cron o el panel tienen la corrida, la consola espera su
+// turno y sigue la MISMA corrida (y viceversa).
 
 /// La consola lee el .env LOCAL, que a proposito no tiene las credenciales
 /// de Resend de produccion (un secreto mas dando vueltas, para un camino que
@@ -53,68 +45,49 @@ async function main() {
   avisarSiNoHayAlertas();
   const start = Date.now();
 
-  let run;
-  try {
-    run = await acquireSyncRun(ProductOrigin.ZECAT, "consola");
-  } catch (error) {
-    if (error instanceof SyncLockError) {
-      console.error(`ABORTADO: ${error.message}`);
-      process.exitCode = 1;
-      return;
-    }
-    throw error;
-  }
-
-  // Retome: si la corrida venia de antes (muerta y retomada), arranca de la
-  // pagina siguiente a la ultima completada. Ojo: el cursor es en paginas
-  // del MISMO limit; la consola y el panel usan limits distintos, asi que
-  // una corrida del panel retomada por consola re-procesa algo — inocuo,
-  // el upsert es idempotente.
-  let page = (run.cursor ?? 0) + 1;
-  if (run.cursor) {
-    console.log(`Retomando corrida ${run.id} desde la pagina ${page}...`);
-  }
-
-  try {
-    for (;;) {
-      const batch = await syncZecatBatch(page, BATCH_LIMIT);
-      run = await recordBatch(run.id, {
-        cursor: page,
-        totalRemote: batch.totalRemote,
-        counters: batch.counters,
-        seenExternalIds: batch.seenExternalIds,
-        errors: batch.errors,
-      });
-      console.log(
-        `  pagina ${page}/${batch.totalPages} — creados ${run.created}, actualizados ${run.updated}, pausados ${run.paused}, fallidos ${run.failed}`
-      );
-      if (batch.isLast) break;
-      page++;
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await failSyncRun(run.id, message);
-    // Mismo aviso que el camino del panel (proveedores/actions.ts). Sin
-    // credenciales en el entorno, solo loguea — ver avisarSiNoHayAlertas.
-    await sendSyncAlert({
-      provider: ProductOrigin.ZECAT,
-      motivo: "fallo",
-      detalle: `La corrida se cortó con: ${message}`,
-      runId: run.id,
+  // Mismo motor que el cron y el boton del panel (lib/sync/motor.ts): ticks
+  // de ~45 s sobre la lista congelada, con el mismo lease. Si el cron o el
+  // panel tienen la corrida en este momento, la consola espera su turno y
+  // sigue la MISMA corrida: no hay dos corridas a la vez.
+  let fin: Awaited<ReturnType<typeof avanzarCorrida>>;
+  let siguiendo: string | null = null;
+  for (;;) {
+    fin = await avanzarCorrida(ProductOrigin.ZECAT, "consola", {
+      esCron: false,
+      siguiendo: siguiendo ?? undefined,
     });
-    console.error(`\nCorrida FALLIDA (queda retomable via SyncRun): ${message}`);
-    process.exitCode = 1;
-    return;
+    if (fin.estado === "ocupado") {
+      console.log(`  en curso por ${fin.startedBy}: ${fin.procesados} de ${fin.total ?? "?"} — esperando el lease...`);
+      siguiendo = fin.runId;
+      await new Promise((r) => setTimeout(r, 5000));
+      continue;
+    }
+    if (fin.estado === "avanzo") {
+      siguiendo = fin.runId;
+      console.log(`  ${fin.procesados} de ${fin.total} productos`);
+      continue;
+    }
+    // completa o fallo (propia, o de la corrida que seguiamos y termino otro).
+    break;
   }
 
-  const fin = await finishSyncRun(run.id);
-  if (fin.aborted) {
-    console.error("\nCorrida ABORTADA: respuesta anomala del proveedor (ver SyncRun.errors). No se pauso nada.");
+  // Alertas por cambio de estado, igual que el cron (sin RESEND_API_KEY en
+  // el .env local solo se loguean: ver avisarSiNoHayAlertas).
+  await revisarAlertas(ProductOrigin.ZECAT);
+
+  if (fin.estado === "fallo") {
+    console.error(`\nCorrida FALLIDA: ${fin.mensaje}`);
     process.exitCode = 1;
     return;
   }
-  // Mismo resumen fijo que guarda la corrida y muestra el panel.
-  const { run: done, summary: s } = fin;
+  if (fin.estado === "sin-corrida") {
+    console.error(`\nNo se pudo tomar ninguna corrida: ${fin.motivo}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (fin.estado !== "completa") return;
+  const s = fin.summary;
+  const done = await prisma.syncRun.findUniqueOrThrow({ where: { id: fin.runId } });
   const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
   const nombre = (id: string) => `${id} ${s.nombres[id] ?? ""}`.trim();
 
@@ -156,7 +129,12 @@ async function main() {
   const errors = done.errors as Array<{ externalId: string; message: string }>;
   if (errors.length) {
     console.log("\nErrores:");
-    for (const e of errors) console.log(`  - producto ${e.externalId}: ${e.message}`);
+    // "-" son notas de la corrida (retome, cortes) y "alerta" los avisos
+    // mandados; el resto, errores de un producto.
+    for (const e of errors) {
+      const quien = e.externalId === "-" ? "nota" : e.externalId === "alerta" ? "alerta" : `producto ${e.externalId}`;
+      console.log(`  - ${quien}: ${e.message}`);
+    }
   }
 
   if (done.failed > 0) process.exitCode = 1;

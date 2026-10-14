@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
+import { ProductOrigin } from "@prisma/client";
 import { refreshUsdRate } from "@/lib/usd-rate";
+import { vigilarFrescura } from "@/lib/sync/alertas";
 
 /// Actualiza la cotización del dólar. Lo llama Vercel Cron.
 ///
@@ -41,6 +44,26 @@ export async function GET(request: Request) {
   }
 
   const resultado = await refreshUsdRate();
+
+  // El dolar mueve el precio de todo CDO: la home (cacheada, revalidate =
+  // 300) se refresca ya, sin esperar los 5 minutos.
+  if (resultado.status === "aplicado") {
+    try {
+      revalidatePath("/");
+    } catch (error) {
+      console.error("[usd-rate] No se pudo revalidar la home:", error);
+    }
+  }
+
+  // Vigilante de frescura del sync de productos, desde AFUERA de su propio
+  // cron: si el cron del sync dejo de disparar, este sigue y avisa (mas de
+  // 26 h sin una corrida completa). Con el sync automatico apagado no hace
+  // nada. Nunca tumba la cotizacion: es un aviso.
+  try {
+    await vigilarFrescura(ProductOrigin.ZECAT);
+  } catch (error) {
+    console.error("[usd-rate] No se pudo revisar la frescura del sync:", error);
+  }
 
   // Siempre 200 salvo que no se haya podido consultar: que la API de terceros
   // esté caída no es un error NUESTRO, y devolver 500 haría que Vercel marque

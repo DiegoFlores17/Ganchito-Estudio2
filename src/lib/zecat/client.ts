@@ -25,27 +25,47 @@ function getConfig() {
   return { token, baseUrl: baseUrl.replace(/\/$/, "") };
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
+/// Error HTTP de Zecat con el status a mano: quien llama necesita distinguir
+/// un 404 (el producto no existe: ausente) de un 5xx (falla: reintentar).
+export class ZecatHttpError extends Error {
+  constructor(
+    public status: number,
+    statusText: string,
+    path: string
+  ) {
+    super(`Zecat respondió ${status} ${statusText} en ${path}`);
+    this.name = "ZecatHttpError";
+  }
+}
+
+async function fetchJson<T>(
+  path: string,
+  opciones: { timeoutMs?: number; reintentos?: number } = {}
+): Promise<T> {
   const { token, baseUrl } = getConfig();
   const url = `${baseUrl}${path}`;
+  const reintentos = opciones.reintentos ?? MAX_RETRIES;
 
   let lastError: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= reintentos; attempt++) {
     try {
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
+        ...(opciones.timeoutMs
+          ? { signal: AbortSignal.timeout(opciones.timeoutMs) }
+          : {}),
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Zecat respondió ${response.status} ${response.statusText} en ${path}`
-        );
+        throw new ZecatHttpError(response.status, response.statusText, path);
       }
 
       return (await response.json()) as T;
     } catch (error) {
       lastError = error;
-      if (attempt < MAX_RETRIES) {
+      // Un 404 no se arregla reintentando: es la respuesta.
+      if (error instanceof ZecatHttpError && error.status === 404) break;
+      if (attempt < reintentos) {
         await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
       }
     }
@@ -54,10 +74,67 @@ async function fetchJson<T>(path: string): Promise<T> {
   throw lastError;
 }
 
+/// Timeout del listado completo de un solo request (limit=1000): medido en
+/// 22 s para 582 productos (5,5 MB), asi que 60 s deja margen.
+const TIMEOUT_LISTADO_COMPLETO_MS = 60_000;
+/// Timeout de cada pagina del listado paginado (limit=100): medido en ~7 s.
+const TIMEOUT_PAGINA_MS = 30_000;
+/// Timeout del detalle de un producto en el motor del cron.
+export const TIMEOUT_DETALLE_MS = 15_000;
+
+/// La lista congelada de una corrida: los ids de TODO el catalogo, y el
+/// total que la API dice tener. Se valida que cierren (ids distintos ==
+/// total declarado); si no, la lista no sirve para detectar ausentes.
+///
+/// Primero un solo request con limit=1000 (no esta documentado, pero se
+/// midio que funciona): es una foto atomica del listado, sin el riesgo de
+/// que se corran las posiciones entre paginas. Si no cierra, se arma
+/// paginando de a 100 con la misma validacion. Si tampoco cierra, tira.
+export async function listarIdsCongelados(): Promise<{
+  ids: string[];
+  total: number;
+}> {
+  const motivos: string[] = [];
+  try {
+    const r = await fetchJson<ZecatGenericProductListResponse>(
+      "/generic_product?page=1&limit=1000",
+      { timeoutMs: TIMEOUT_LISTADO_COMPLETO_MS, reintentos: 0 }
+    );
+    const ids = [...new Set(r.generic_products.map((p) => String(p.id)))];
+    if (r.count !== undefined && ids.length === r.count && (r.total_pages ?? 1) <= 1) {
+      return { ids, total: r.count };
+    }
+    motivos.push(`un solo request trajo ${ids.length} ids contra ${r.count} declarados`);
+  } catch (error) {
+    motivos.push(`un solo request fallo: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // Fallback: paginado de a 100, con la misma validacion.
+  // Sin reintentos: el tick tiene 120 s en total, y 30 s por pagina con
+  // reintentos podria pasarse (la funcion moriria con el lease tomado).
+  const primera = await fetchJson<ZecatGenericProductListResponse>(
+    "/generic_product?page=1&limit=100",
+    { timeoutMs: TIMEOUT_PAGINA_MS, reintentos: 0 }
+  );
+  const vistos = new Set(primera.generic_products.map((p) => String(p.id)));
+  for (let page = 2; page <= (primera.total_pages ?? 1); page++) {
+    const r = await fetchJson<ZecatGenericProductListResponse>(
+      `/generic_product?page=${page}&limit=100`,
+      { timeoutMs: TIMEOUT_PAGINA_MS, reintentos: 0 }
+    );
+    for (const p of r.generic_products) vistos.add(String(p.id));
+  }
+  if (primera.count !== undefined && vistos.size === primera.count) {
+    console.warn(`[zecat] Lista congelada armada paginando (${motivos.join("; ")}).`);
+    return { ids: [...vistos], total: primera.count };
+  }
+  throw new Error(
+    `La lista de Zecat no cierra contra el total declarado: ${vistos.size} ids paginando contra ${primera.count} declarados (${motivos.join("; ")}).`
+  );
+}
+
 export async function fetchGenericProductPage(
   page: number,
-  // El sync por batches del panel usa paginas mas chicas (10) para que cada
-  // invocacion quede lejos del limite de duracion de Vercel.
   limit: number = PAGE_LIMIT
 ): Promise<ZecatGenericProductListResponse> {
   return fetchJson<ZecatGenericProductListResponse>(
@@ -66,13 +143,17 @@ export async function fetchGenericProductPage(
 }
 
 export async function fetchGenericProductDetail(
-  id: string | number
+  id: string | number,
+  opciones: { timeoutMs?: number; reintentos?: number } = {}
 ): Promise<ZecatGenericProduct> {
   // El detalle viene envuelto en { "generic_product": {...} }, a diferencia
   // del listado y la búsqueda que devuelven los productos planos.
   const { generic_product } = await fetchJson<{
     generic_product: ZecatGenericProduct;
-  }>(`/generic_product/${id}`);
+  }>(`/generic_product/${id}`, opciones);
+  if (!generic_product) {
+    throw new Error(`Zecat respondió sin el detalle del producto ${id}.`);
+  }
   return generic_product;
 }
 

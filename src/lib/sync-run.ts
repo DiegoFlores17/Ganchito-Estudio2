@@ -1,141 +1,19 @@
 import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSyncAlert, type AusenteAlerta } from "@/lib/email";
-import { confirmarAusencia, type Confirmacion } from "@/lib/zecat/client";
+import { conectorDe } from "@/lib/sync/conectores";
 
-/// Lock + progreso de las corridas de sincronización. Agnóstico de
-/// proveedor: lo usan el botón del panel Y los scripts de consola, así un
-/// `npm run sync:zecat` y un click del cliente no se pisan.
+/// Lock + progreso + historial de las corridas de sincronizacion. El lock
+/// ahora es el LEASE de cada corrida (lib/sync/motor.ts): lo toman el cron,
+/// el boton del panel y la consola por igual.
 
-/// RUNNING sin latido por este tiempo = corrida muerta (pestaña cerrada,
-/// script matado). Un solo umbral: muerta se RETOMA, viva se respeta.
-export const HEARTBEAT_STALE_MS = 5 * 60 * 1000;
-
-export class SyncLockError extends Error {
-  constructor(
-    public startedBy: string,
-    public startedAt: Date
-  ) {
-    const min = Math.round((Date.now() - startedAt.getTime()) / 60000);
-    super(
-      `Ya hay una sincronización corriendo, la inició ${startedBy} hace ${min} min.`
-    );
-  }
-}
-
+/// Contadores de una corrida (los acumula el motor producto por producto).
 export interface SyncCounters {
   created: number;
   updated: number;
   paused: number;
   failed: number;
   usdWarnings: number;
-}
-
-/// Toma el lock del proveedor, o retoma una corrida muerta.
-///
-/// El orden importa y es a propósito:
-/// 1. Si hay una RUNNING con latido fresco -> SyncLockError (se respeta).
-/// 2. Si hay una RUNNING muerta -> se RETOMA esa misma fila (cursor,
-///    contadores e ids vistos incluidos), no se arranca de cero.
-/// 3. Si no hay ninguna -> se crea. El índice único parcial de la base
-///    (una sola RUNNING por proveedor) es quien decide las carreras: si dos
-///    llegan juntos al create, uno recibe P2002 y pierde — nunca
-///    consultar-y-crear como única defensa.
-export async function acquireSyncRun(
-  provider: ProductOrigin,
-  startedBy: string
-) {
-  const running = await prisma.syncRun.findFirst({
-    where: { provider, status: SyncRunStatus.RUNNING },
-  });
-
-  if (running) {
-    const viva =
-      Date.now() - running.heartbeatAt.getTime() < HEARTBEAT_STALE_MS;
-    if (viva) throw new SyncLockError(running.startedBy, running.startedAt);
-    // Muerta: retomarla. El heartbeat se renueva ya mismo para que otro
-    // acquire concurrente la vea viva.
-    //
-    // startedBy NO se pisa: es quien la EMPEZO, y de eso sale el origen que
-    // muestra el panel (panel / consola / automatico). Quien la retomo queda
-    // como nota en errors, con la hora y desde cuando estaba muerta.
-    const muertaDesde = running.heartbeatAt.toISOString();
-    return prisma.syncRun.update({
-      where: { id: running.id },
-      data: {
-        heartbeatAt: new Date(),
-        errors: [
-          ...(running.errors as Array<{ externalId: string; message: string }>),
-          {
-            externalId: "-",
-            message: `Retomada por ${startedBy} el ${new Date().toISOString()} (sin latido desde ${muertaDesde}).`,
-          },
-        ],
-      },
-    });
-  }
-
-  try {
-    return await prisma.syncRun.create({
-      data: { provider, startedBy },
-    });
-  } catch (error) {
-    // Otro acquire gano la carrera entre nuestro findFirst y el create.
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      const ganador = await prisma.syncRun.findFirst({
-        where: { provider, status: SyncRunStatus.RUNNING },
-      });
-      throw new SyncLockError(
-        ganador?.startedBy ?? "otro proceso",
-        ganador?.startedAt ?? new Date()
-      );
-    }
-    throw error;
-  }
-}
-
-/// Registra el avance de un batch: cursor completado, contadores ACUMULADOS
-/// (suma, no reemplaza), ids vistos y errores, y renueva el latido.
-export async function recordBatch(
-  runId: string,
-  batch: {
-    cursor: number;
-    totalRemote?: number;
-    counters: SyncCounters;
-    seenExternalIds: string[];
-    errors: Array<{ externalId: string; message: string }>;
-  }
-) {
-  const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
-  const seen = [
-    ...(run.seenExternalIds as string[]),
-    ...batch.seenExternalIds,
-  ];
-  const errors = [
-    ...(run.errors as Array<{ externalId: string; message: string }>),
-    ...batch.errors,
-  ];
-
-  return prisma.syncRun.update({
-    where: { id: runId },
-    data: {
-      cursor: batch.cursor,
-      ...(batch.totalRemote !== undefined
-        ? { totalRemote: batch.totalRemote }
-        : {}),
-      created: run.created + batch.counters.created,
-      updated: run.updated + batch.counters.updated,
-      paused: run.paused + batch.counters.paused,
-      failed: run.failed + batch.counters.failed,
-      usdWarnings: run.usdWarnings + batch.counters.usdWarnings,
-      seenExternalIds: seen,
-      errors,
-      heartbeatAt: new Date(),
-    },
-  });
 }
 
 /// Piso absoluto del umbral de auto-pausado: por debajo de esta cantidad de
@@ -187,16 +65,9 @@ export interface SyncRunSummary {
   nombres: Record<string, string>;
 }
 
-/// Pregunta al proveedor por cada ausente antes de pausarlo. Por proveedor:
-/// hoy solo Zecat corre sobre SyncRun. Uno sin confirmador no confirma nada
-/// (todo queda "no-verificado") — nunca se pausa a ciegas.
-type Confirmador = (
-  externalId: string
-) => Promise<{ resultado: Confirmacion; motivo: string }>;
-
-const CONFIRMADORES: Partial<Record<ProductOrigin, Confirmador>> = {
-  [ProductOrigin.ZECAT]: confirmarAusencia,
-};
+/// Pregunta al proveedor por cada ausente antes de pausarlo, via su
+/// conector (lib/sync/conectores.ts). Un proveedor sin conector no confirma
+/// nada (todo queda "no-verificado"): nunca se pausa a ciegas.
 
 /// De a cuantos se confirman en paralelo.
 const CONFIRMACIONES_EN_PARALELO = 8;
@@ -223,7 +94,7 @@ export async function confirmarYPausar(
   noVerificados: string[];
   sinIntentar: string[];
 }> {
-  const confirmar = CONFIRMADORES[provider];
+  const confirmar = conectorDe(provider)?.confirmarAusente;
   const bajas: string[] = [];
   const aRevisar: string[] = [];
   const noVerificados: string[] = [];
@@ -340,13 +211,9 @@ export async function finishSyncRun(runId: string) {
   // Sin esta guarda, un estornudo de la API pausaria el catalogo entero.
   if (activos > 0 && seen.size < activos * SANITY_MIN_SEEN_RATIO) {
     const motivo = `Respuesta anómala del proveedor: devolvió ${seen.size} productos contra ${activos} activos nuestros. No se calculó ausencia ni se pausó nada.`;
+    // El mail lo manda la maquina de estados (lib/sync/alertas.ts) al ver
+    // la corrida FAILED: asi una racha de fallos es UN mail, no uno por vez.
     const aborted = await failSyncRun(runId, motivo);
-    await sendSyncAlert({
-      provider: run.provider,
-      motivo: "fallo",
-      detalle: motivo,
-      runId,
-    });
     return { run: aborted, summary: null, aborted: true as const };
   }
 
@@ -395,20 +262,10 @@ export async function finishSyncRun(runId: string) {
   const umbralFrenado = missing.length > umbral;
   if (missing.length > 0 && !umbralFrenado) {
     confirmacion = await confirmarYPausar(run.provider, missing, runId);
-  } else if (umbralFrenado) {
-    // ESTE mail es lo que hace posible el cron: con corridas desatendidas,
-    // un umbral frenado no lo ve nadie hasta que alguien entra al panel de
-    // casualidad. Nunca tira (ver lib/email.ts). La confirmacion de cada
-    // ausente la hace el boton "Pausar estos N", cuando alguien decide.
-    await sendSyncAlert({
-      provider: run.provider,
-      motivo: "umbral",
-      runId,
-      umbral,
-      activos,
-      ausentes: await describirAusentes(run.provider, missing),
-    });
   }
+  // Umbral frenado: el mail lo manda la maquina de estados (BLOQUEADO), que
+  // no lo repite en cada corrida mientras el bloqueo sea el mismo. La
+  // confirmacion de cada ausente la hace el boton "Pausar estos N".
 
   // Un conteo y una alerta: si fallan, la corrida igual se marca DONE (el
   // auto-pausado de arriba ya se aplico; quedar RUNNING por esto seria peor).
@@ -694,7 +551,7 @@ export async function umbralDeSeguridad(provider: ProductOrigin) {
 /// producto se escribe en su transaccion, durante la corrida), y se
 /// revierte sola en la proxima corrida sana. El caso que no puede esperar
 /// —una respuesta rota del proveedor, con TODO vacio— lo corta antes de
-/// escribir la guarda por pagina de syncZecatBatch.
+/// escribir la guarda por tanda del motor (lib/sync/motor.ts).
 async function revisarVariantes(
   run: { id: string; provider: ProductOrigin; startedAt: Date },
   umbralProductos: number,
@@ -771,7 +628,7 @@ async function revisarVariantes(
 /// Nombre y ultimo stock disponible conocido de los ausentes, para que la
 /// alerta del umbral se pueda revisar sin abrir la base. El stock es el de
 /// la ultima corrida que los vio (stock - reservado, sumado por producto).
-async function describirAusentes(
+export async function describirAusentes(
   provider: ProductOrigin,
   externalIds: string[]
 ): Promise<AusenteAlerta[]> {

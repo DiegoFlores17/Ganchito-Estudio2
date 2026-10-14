@@ -98,14 +98,31 @@ model SyncRun {
   startedBy   String
   startedAt   DateTime      @default(now())
   finishedAt  DateTime?
-  /// Cada batch lo actualiza. RUNNING sin latido por 5 min = corrida muerta:
-  /// no se pisa, se RETOMA desde `cursor`.
+  /// Ultima actividad de la corrida (cada producto y cada renovacion del
+  /// lease la actualizan). Solo informa: quien puede escribir lo decide el
+  /// lease (leaseUntil), no el latido.
   heartbeatAt DateTime      @default(now())
 
-  /// Última página del proveedor COMPLETADA (null = ninguna). Retomar =
-  /// arrancar de cursor + 1.
+  /// Cuántos productos de la lista congelada (plannedExternalIds) ya se
+  /// procesaron: es un ÍNDICE sobre esa lista, no un número de página. Las
+  /// corridas anteriores a la etapa C guardaban la última página completada.
   cursor      Int?
-  /// Total de productos que reporta el proveedor (se sabe en la página 1).
+  /// Lista de ids externos congelada al arrancar la corrida (la "lista
+  /// congelada"): la corrida recorre ESTA lista, no páginas del listado vivo,
+  /// así un producto que el proveedor saca o agrega a mitad de camino no
+  /// corre las posiciones. Null = todavía no se bajó (o corrida anterior a C).
+  plannedExternalIds Json?
+  /// Hasta cuándo una invocación tiene derecho a escribir en esta corrida. Se
+  /// toma con la fila bloqueada (SELECT … FOR UPDATE: la base decide quién
+  /// gana) y se libera al terminar el tick. Su valor es la ficha del dueño:
+  /// toda escritura exige que siga igual (fencing, ver lib/sync/motor.ts).
+  /// Vencido y sin liberar = la invocación murió.
+  leaseUntil  DateTime?
+  /// Cuándo se mandó el último mail de alerta SOBRE esta corrida (el tipo
+  /// queda como nota en errors). Sirve para no repetir alertas: se avisa al
+  /// cambiar de estado, no en cada corrida.
+  alertedAt   DateTime?
+  /// Total de productos que declara el proveedor (al congelar la lista).
   totalRemote Int?
 
   created     Int @default(0)
@@ -115,10 +132,11 @@ model SyncRun {
   failed      Int @default(0)
   usdWarnings Int @default(0)
 
-  /// Ids EXTERNOS vistos en esta corrida. Al completar la última página se
-  /// comparan contra los activos de la base: la diferencia son los AUSENTES
-  /// (candidatos a zombie). Se reescribe entero por batch — con miles de
-  /// productos pasar a tabla hija (ver PENDIENTES).
+  /// Ids EXTERNOS vistos en esta corrida (los de la lista congelada cuyo
+  /// detalle respondio; un 404 no cuenta). Al cerrar se comparan contra los
+  /// activos de la base: la diferencia son los AUSENTES. Se agrega de a un
+  /// id por producto — con miles de productos, pasar a tabla hija (ver
+  /// PENDIENTES).
   seenExternalIds    Json @default("[]")
   /// [{ externalId, message }] de los fallidos.
   errors             Json @default("[]")
@@ -730,6 +748,12 @@ model Supplier {
   /// una caida masiva es casi seguro un error del proveedor, no cien
   /// discontinuaciones juntas. Editable sin deploy (UPDATE a esta fila).
   autoPauseMaxPercent Decimal @default(5) @db.Decimal(5, 2)
+
+  /// Interruptor del sync automático (cron) de este proveedor. Apagado, el
+  /// endpoint del cron responde sin tocar nada: así el cron puede estar
+  /// declarado en vercel.json y frenarse o arrancarse sin deploy. Lo cambia
+  /// un super-admin desde /admin/proveedores.
+  autoSyncEnabled Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

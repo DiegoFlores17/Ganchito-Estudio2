@@ -8,8 +8,10 @@
 import "dotenv/config";
 import { ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
-import { syncProduct, syncZecatBatch } from "../src/lib/zecat/sync";
-import { acquireSyncRun, finishSyncRun, recordBatch } from "../src/lib/sync-run";
+import { syncProduct } from "../src/lib/zecat/sync";
+import { finishSyncRun } from "../src/lib/sync-run";
+import { avanzarCorrida } from "../src/lib/sync/motor";
+import { crearCorrida, registrarAvance } from "./_pruebas-sync";
 import { getProductById } from "../src/lib/product";
 import { getCatalogFilterOptions, getFeaturedProducts, getProducts } from "../src/lib/catalog";
 import { syncCdoProduct, vaciosQueSeApagarian, type CdoSyncSummary } from "../src/lib/cdo/sync";
@@ -28,6 +30,7 @@ delete process.env.RESEND_API_KEY;
 process.env.ALERT_EMAIL = "alertas@ejemplo.test";
 
 const PREFIJO = "a2test-";
+const AUTOR_VARIANTS = "audit-verify-variants";
 // Color que SOLO tiene la variante C: si aparece en busqueda o filtros
 // despues de desactivarla, la lectura no esta filtrando.
 const COLOR_UNICO = "Zafiroprueba";
@@ -88,6 +91,7 @@ async function limpiar() {
   await prisma.quoteItem.deleteMany({ where: { productId: { in: ids } } });
   await prisma.quote.deleteMany({ where: { customerEmail: "a2test@ejemplo.test" } });
   await prisma.product.deleteMany({ where: { id: { in: ids } } });
+  await prisma.syncRun.deleteMany({ where: { startedBy: AUTOR_VARIANTS } });
 }
 
 async function main() {
@@ -165,7 +169,13 @@ async function main() {
   ({ producto, porSku } = await variantes(id));
   check("vuelve con una variante: producto activo de nuevo, solo A activa", producto.active && porSku.get(A)!.active && !porSku.get(B)!.active && !porSku.get(C)!.active);
 
-  console.log("\n=========== GUARDA: pagina entera sin variantes (no escribe) ===========");
+  console.log("\n=========== GUARDA: tanda entera sin variantes (no escribe) ===========");
+  // ANTES de llamar al motor: si la base local tiene una corrida real
+  // abierta, el motor la retomaria con el Zecat falso. Se frena aca.
+  const abiertaReal = await prisma.syncRun.findFirst({ where: { provider: ProductOrigin.ZECAT, status: SyncRunStatus.RUNNING } });
+  if (abiertaReal) throw new Error(`Hay una corrida RUNNING real en la base local (${abiertaReal.id}): no se corre la prueba de la guarda.`);
+  // La guarda de A2, rediseñada en C sobre la lista congelada: el motor carga
+  // de a 5 detalles y, si TODOS vienen sin variantes, corta antes de escribir.
   const fetchOriginal = globalThis.fetch;
   const idsAnomalos = Array.from({ length: 6 }, (_, i) => `${PREFIJO}anomalo-${i}`);
   globalThis.fetch = (async (input: string | URL | Request) => {
@@ -181,15 +191,14 @@ async function main() {
   process.env.ZECAT_API_TOKEN = "falso";
   let mensaje = "";
   try {
-    await syncZecatBatch(1, 10);
-  } catch (e) {
-    mensaje = e instanceof Error ? e.message : String(e);
+    const t = await avanzarCorrida(ProductOrigin.ZECAT, AUTOR_VARIANTS, { esCron: false });
+    mensaje = t.estado === "fallo" ? t.mensaje : JSON.stringify(t);
   } finally {
     globalThis.fetch = fetchOriginal;
   }
   const escritos = await prisma.product.count({ where: { zecatId: { in: idsAnomalos } } });
-  check("tira 'Respuesta anómala'", mensaje.includes("Respuesta anómala de Zecat"), mensaje);
-  check("no escribio NINGUN producto de esa pagina", escritos === 0, `escritos: ${escritos}`);
+  check("la corrida falla con 'Respuesta anómala'", mensaje.includes("Respuesta anómala de Zecat"), mensaje);
+  check("no escribio NINGUN producto de esa tanda", escritos === 0, `escritos: ${escritos}`);
 
   console.log("\n=========== GUARDA: umbral de variantes en finishSyncRun (alerta) ===========");
   const yaCorriendo = await prisma.syncRun.findFirst({ where: { provider: ProductOrigin.ZECAT, status: SyncRunStatus.RUNNING } });
@@ -200,13 +209,13 @@ async function main() {
     // de productos (max(10, 5% de los activos locales)).
     const masivos = Array.from({ length: 40 }, (_, i) => `${PREFIJO}masivo-${i}`);
     for (const m of masivos) await syncProduct(detalle(m, [`${m}-v`]));
-    const run = await acquireSyncRun(ProductOrigin.ZECAT, "audit-verify-variants");
+    const run = await crearCorrida(ProductOrigin.ZECAT, AUTOR_VARIANTS);
     try {
       for (const m of masivos) await syncProduct(detalle(m, []));
       // Vistos = TODOS los zecat locales: asi no hay ausentes ni auto-pausado
       // de productos reales de la base local.
       const todos = await prisma.product.findMany({ where: { origin: ProductOrigin.ZECAT, zecatId: { not: null } }, select: { zecatId: true } });
-      await recordBatch(run.id, {
+      await registrarAvance(run.id, {
         cursor: 1,
         counters: { created: 0, updated: 0, paused: 0, failed: 0, usdWarnings: 0 },
         seenExternalIds: todos.map((t) => t.zecatId!),
@@ -227,11 +236,11 @@ async function main() {
     // Segunda corrida: los 40 siguen vacios. Es ESTADO, no transicion: no
     // tienen que volver a contarse ni disparar la alerta otra vez.
     const alertasAntes = logs.filter((l) => l.includes("variantes desactivadas")).length;
-    const run2 = await acquireSyncRun(ProductOrigin.ZECAT, "audit-verify-variants");
+    const run2 = await crearCorrida(ProductOrigin.ZECAT, AUTOR_VARIANTS);
     try {
       for (const m of masivos) await syncProduct(detalle(m, []));
       const todos = await prisma.product.findMany({ where: { origin: ProductOrigin.ZECAT, zecatId: { not: null } }, select: { zecatId: true } });
-      await recordBatch(run2.id, {
+      await registrarAvance(run2.id, {
         cursor: 1,
         counters: { created: 0, updated: 0, paused: 0, failed: 0, usdWarnings: 0 },
         seenExternalIds: todos.map((t) => t.zecatId!),

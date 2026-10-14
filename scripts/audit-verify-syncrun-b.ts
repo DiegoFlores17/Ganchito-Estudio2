@@ -12,17 +12,16 @@ import { ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
 import { confirmarAusencia } from "../src/lib/zecat/client";
 import {
-  acquireSyncRun,
   confirmarYPausar,
   estadoDelProveedor,
   finishSyncRun,
   leerSummary,
   pausarAusentesDeCorrida,
-  recordBatch,
   umbralDeSeguridad,
   DESACTUALIZADO_MS,
-  SyncLockError,
 } from "../src/lib/sync-run";
+import { tomarLease } from "../src/lib/sync/motor";
+import { crearCorrida, registrarAvance } from "./_pruebas-sync";
 
 // Guarda de entorno: este script ESCRIBE. Solo contra localhost.
 const destino = new URL(process.env.DATABASE_URL ?? "postgres://x").hostname;
@@ -97,13 +96,13 @@ async function crearProductos(ids: string[]) {
 /// Una corrida completa donde el proveedor NO devolvio `ausentes`. Vistos =
 /// todos los zecat locales menos esos, para no tocar los reales.
 async function correrConAusentes(ausentes: string[], startedBy = AUTOR) {
-  const run = await acquireSyncRun(ProductOrigin.ZECAT, startedBy);
+  const run = await crearCorrida(ProductOrigin.ZECAT, startedBy);
   corridasDePrueba.push(run.id);
   const todos = await prisma.product.findMany({
     where: { origin: ProductOrigin.ZECAT, zecatId: { not: null } },
     select: { zecatId: true },
   });
-  await recordBatch(run.id, {
+  await registrarAvance(run.id, {
     cursor: 1,
     counters: { created: 1, updated: 2, paused: 0, failed: 0, usdWarnings: 0 },
     seenExternalIds: todos.map((t) => t.zecatId!).filter((id) => !ausentes.includes(id)),
@@ -159,16 +158,13 @@ async function main() {
   const sinConfirmador = await confirmarYPausar(ProductOrigin.CDO, ["x1", "x2"], "sin-corrida");
   check("proveedor sin confirmador: nada se confirma ni se pausa", sinConfirmador.bajas.length === 0 && sinConfirmador.noVerificados.length === 2);
 
-  console.log("\n=========== LOCK, CARRERA Y PROGRESO (del script viejo) ===========");
-  const lockRun = await acquireSyncRun(ProductOrigin.ZECAT, AUTOR);
+  console.log("\n=========== LEASE E INDICE PARCIAL ===========");
+  const lockRun = await crearCorrida(ProductOrigin.ZECAT, AUTOR);
   corridasDePrueba.push(lockRun.id);
-  let rechazado = false;
-  try {
-    await acquireSyncRun(ProductOrigin.ZECAT, AUTOR);
-  } catch (e) {
-    rechazado = e instanceof SyncLockError;
-  }
-  check("doble arranque con latido fresco: SyncLockError", rechazado);
+  const primero = await tomarLease(lockRun.id);
+  const segundo = await tomarLease(lockRun.id);
+  check("el lease deja entrar a una sola invocacion", primero.ok && !segundo.ok);
+  await prisma.syncRun.update({ where: { id: lockRun.id }, data: { leaseUntil: null } });
   let indiceCorta = false;
   try {
     await prisma.syncRun.create({ data: { provider: ProductOrigin.ZECAT, startedBy: AUTOR } });
@@ -176,9 +172,7 @@ async function main() {
     indiceCorta = true;
   }
   check("el indice parcial corta un segundo RUNNING insertado directo", indiceCorta);
-  await recordBatch(lockRun.id, { cursor: 1, counters: { created: 1, updated: 9, paused: 0, failed: 0, usdWarnings: 0 }, seenExternalIds: ["a", "b"], errors: [] });
-  const prog = await recordBatch(lockRun.id, { cursor: 2, counters: { created: 0, updated: 10, paused: 1, failed: 0, usdWarnings: 0 }, seenExternalIds: ["c"], errors: [] });
-  check("el progreso se acumula entre batches", prog.created === 1 && prog.updated === 19 && prog.paused === 1 && (prog.seenExternalIds as string[]).length === 3 && prog.cursor === 2);
+  await registrarAvance(lockRun.id, { cursor: 3, counters: { created: 1, updated: 2, paused: 0, failed: 0, usdWarnings: 0 }, seenExternalIds: ["a", "b", "c"], errors: [] });
 
   console.log("\n=========== CORDURA: respuesta anomala aborta sin calcular ausencia ===========");
   const finCordura = await finishSyncRun(lockRun.id); // 3 vistos contra cientos de activos
@@ -309,18 +303,21 @@ async function main() {
   check("completa despues de la fallida: OK", (await estadoDelProveedor(ProductOrigin.ZECAT)).estado === "OK");
 
   console.log("\n=========== RETOME: startedBy se conserva ===========");
+  // Corrida cuya invocacion murio: lease vencido y sin liberar.
   const muerta = await prisma.syncRun.create({
     data: {
       provider: ProductOrigin.ZECAT,
       startedBy: "quien-la-empezo@ejemplo.test",
       heartbeatAt: new Date(Date.now() - 10 * 60 * 1000),
+      leaseUntil: new Date(Date.now() - 60 * 1000),
     },
   });
   corridasDePrueba.push(muerta.id);
-  const retomada = await acquireSyncRun(ProductOrigin.ZECAT, "consola");
-  check("retoma la misma fila", retomada.id === muerta.id);
+  const toma = await tomarLease(muerta.id);
+  const retomada = await prisma.syncRun.findUniqueOrThrow({ where: { id: muerta.id } });
+  check("retoma la misma fila y detecta la muerte", toma.ok && toma.murioAnterior);
   check("startedBy NO se pisa", retomada.startedBy === "quien-la-empezo@ejemplo.test", retomada.startedBy);
-  check("quien la retomo queda en errors", (retomada.errors as Array<{ message: string }>).some((e) => e.message.startsWith("Retomada por consola")));
+  check("la muerte queda anotada en errors", (retomada.errors as Array<{ message: string }>).some((e) => e.message.startsWith("Invocación cortada")));
   await prisma.syncRun.update({ where: { id: muerta.id }, data: { status: SyncRunStatus.FAILED, finishedAt: new Date() } });
 }
 

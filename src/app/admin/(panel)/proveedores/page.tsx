@@ -11,14 +11,15 @@ import {
   type EstadoProveedor,
 } from "@/lib/sync-run";
 import { SyncAlertStatus } from "@/components/admin/sync-alert-status";
+import { AutoSyncToggle } from "@/components/admin/auto-sync-toggle";
 import { SyncProviderCard } from "@/components/admin/sync-provider-card";
 import { SyncRunHistory } from "@/components/admin/sync-run-history";
 
 // Tope explicito de las invocaciones de este segmento — cubre a las server
 // actions de la sincronizacion (un archivo "use server" no puede exportar
-// config, va aca). Cada batch procesa 10 productos (~16s esperados): 120s
-// deja 7x de margen. "Pausar estos N" confirma de a 8 con 15 s de timeout:
-// el peor caso de ~30 ausentes son ~60 s.
+// config, va aca). Cada tick del panel trabaja ~45 s (ver lib/sync/motor.ts)
+// y el cierre de una corrida puede sumar hasta ~75 s confirmando ausentes.
+// "Pausar estos N" confirma de a 8, con tope de 40 por click: ~75 s.
 export const maxDuration = 120;
 
 const ESTILO_ESTADO: Record<EstadoProveedor, { caja: string; titulo: string }> = {
@@ -37,13 +38,14 @@ export default async function ProveedoresPage() {
   const alertas = alertConfigStatus();
   const ahora = new Date();
 
-  const [recientes, estado] = await Promise.all([
+  const [recientes, estado, supplier] = await Promise.all([
     prisma.syncRun.findMany({
       where: { provider: ProductOrigin.ZECAT },
       orderBy: { startedAt: "desc" },
       take: 5,
     }),
     estadoDelProveedor(ProductOrigin.ZECAT, ahora),
+    prisma.supplier.findUnique({ where: { origin: ProductOrigin.ZECAT } }),
   ]);
   // La ultima corrida COMPLETA siempre se muestra, aunque haya quedado
   // fuera de las 5 mas recientes (varias fallidas despues): es donde vive
@@ -158,7 +160,16 @@ export default async function ProveedoresPage() {
         <SyncProviderCard
           provider={ProductOrigin.ZECAT}
           nombre="Zecat"
-          descripcion={`API oficial${ultimoTotal ? ` · ${ultimoTotal} productos` : ""} · 5-10 minutos con la pestaña abierta`}
+          descripcion={`API oficial${ultimoTotal ? ` · ${ultimoTotal} productos` : ""}`}
+        />
+      </div>
+
+      <div className="mt-4 max-w-2xl">
+        <AutoSyncToggle
+          provider={ProductOrigin.ZECAT}
+          activado={supplier?.autoSyncEnabled ?? false}
+          horarios="06:00 y 18:00"
+          puedeCambiar={admin.role === AdminRole.SUPER_ADMIN}
         />
       </div>
 

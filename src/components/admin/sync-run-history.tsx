@@ -1,24 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import type { SyncRunSummary } from "@/lib/sync-run";
+import { pausarAusentes } from "@/app/admin/(panel)/proveedores/actions";
+import {
+  SyncRunSummaryDetail,
+  SyncRunSummaryLine,
+} from "@/components/admin/sync-run-summary";
 
-interface RunView {
+export interface RunView {
   id: string;
   status: string;
-  startedBy: string;
+  /// Origen legible: "panel, alguien@…", "consola", "automática".
+  origen: string;
   startedAt: string;
   finishedAt: string | null;
-  created: number;
-  updated: number;
-  paused: number;
-  failed: number;
-  usdWarnings: number;
-  missing: Array<{ id: string; nombre: string; activo: boolean }>;
-  autoPausedIds: string[];
-  autoPauseSkipped: boolean;
-  /// Ya pausados que siguen fuera de la API (informativo, calculado al
-  /// renderizar contra el estado actual).
-  pausedMissing: Array<{ id: string; nombre: string }>;
+  /// Resumen fijo de la corrida. Null en las anteriores a ese registro: se
+  /// muestra "no registrado" y NO se recalcula desde el estado actual.
+  summary: SyncRunSummary | null;
+  /// Ids pausados despues del cierre con "Pausar estos N".
+  pausadosDespues: string[];
+  /// Solo en la ultima corrida completa con el umbral frenado: cuantos
+  /// ausentes siguen sin resolver (el boton aparece si es > 0).
+  pendientesDePausar: number;
   errors: Array<{ externalId: string; message: string }>;
 }
 
@@ -28,9 +33,8 @@ const STATUS_LABEL: Record<string, string> = {
   FAILED: "Fallida",
 };
 
-/// Historial de corridas con el detalle (ausentes y errores) expandible.
-/// Client component solo por el toggle de expansion — los datos llegan del
-/// server ya formateados.
+/// Historial de corridas con el detalle expandible. Cada corrida tiene un
+/// ancla (#corrida-{id}): el mail del umbral linkea directo a la suya.
 export function SyncRunHistory({ runs }: { runs: RunView[] }) {
   const [abierta, setAbierta] = useState<string | null>(null);
 
@@ -45,20 +49,16 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
   return (
     <div className="mt-3 flex flex-col gap-2">
       {runs.map((run) => {
-        const tieneDetalle =
-          run.missing.length > 0 ||
-          run.pausedMissing.length > 0 ||
-          run.errors.length > 0 ||
-          run.usdWarnings > 0;
         const expandida = abierta === run.id;
         return (
           <div
             key={run.id}
-            className="rounded-lg border border-foreground/10 bg-background px-4 py-3 text-sm"
+            id={`corrida-${run.id}`}
+            className="scroll-mt-6 rounded-lg border border-foreground/10 bg-background px-4 py-3 text-sm target:border-primary target:ring-2 target:ring-primary/30"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-foreground/70">
-                {run.startedAt} · {run.startedBy}
+                {run.startedAt} · {run.origen}
               </span>
               <span
                 className={
@@ -72,39 +72,31 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
                 {STATUS_LABEL[run.status] ?? run.status}
               </span>
             </div>
-            <p className="mt-1 text-xs text-foreground/60">
-              {run.created} creados · {run.updated} actualizados
-              {run.paused > 0 && (
-                <> · {run.paused} pausados por falta de precio del proveedor</>
-              )}
-              {run.failed > 0 && <> · {run.failed} fallidos</>}
-              {run.autoPausedIds.length > 0 && (
-                <span className="text-primary-dark">
-                  {" "}
-                  · {run.autoPausedIds.length} pausados automáticamente (el
-                  proveedor ya no los ofrece)
-                </span>
-              )}
-              {run.autoPauseSkipped && (
-                <span className="font-medium text-primary-dark">
-                  {" "}
-                  · ⚠ {run.missing.length} ausentes de golpe: umbral de
-                  seguridad, no se pausó ninguno
-                </span>
-              )}
-              {run.missing.length > 0 &&
-                run.autoPausedIds.length === 0 &&
-                !run.autoPauseSkipped && (
-                  <span className="text-primary-dark">
-                    {" "}
-                    · {run.missing.length} ausentes nuevos
-                  </span>
-                )}
-              {run.pausedMissing.length > 0 && (
-                <> · {run.pausedMissing.length} ya pausados siguen fuera de la API</>
-              )}
-            </p>
-            {tieneDetalle && (
+
+            {run.summary ? (
+              <SyncRunSummaryLine
+                summary={run.summary}
+                pausadosDespues={run.pausadosDespues.length}
+              />
+            ) : (
+              run.status === "DONE" && (
+                <p className="mt-1 text-xs text-foreground/40">
+                  Resumen no registrado (corrida anterior a este registro).
+                  {run.pausadosDespues.length > 0 && (
+                    <span className="text-primary-dark">
+                      {" "}
+                      {run.pausadosDespues.length} pausados desde el panel.
+                    </span>
+                  )}
+                </p>
+              )
+            )}
+
+            {run.pendientesDePausar > 0 && (
+              <PausarAusentes runId={run.id} pendientes={run.pendientesDePausar} />
+            )}
+
+            {(run.summary || run.errors.length > 0 || run.pausadosDespues.length > 0) && (
               <button
                 type="button"
                 onClick={() => setAbierta(expandida ? null : run.id)}
@@ -115,48 +107,34 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
             )}
             {expandida && (
               <div className="mt-2 flex flex-col gap-2 border-t border-foreground/10 pt-2 text-xs">
-                {run.missing.length > 0 && (
-                  <div>
-                    <p className="font-medium text-foreground/70">
-                      El proveedor ya no los devuelve:
-                    </p>
-                    {run.missing.map((m) => (
-                      <p key={m.id} className="text-foreground/60">
-                        [{m.id}] {m.nombre}
-                        {run.autoPausedIds.includes(m.id)
-                          ? " — pausado automáticamente"
-                          : m.activo
-                            ? " — SIGUE A LA VENTA, revisar"
-                            : " — ya pausado"}
+                {run.summary ? (
+                  <SyncRunSummaryDetail
+                    summary={run.summary}
+                    pausadosDespues={run.pausadosDespues}
+                  />
+                ) : (
+                  run.pausadosDespues.length > 0 && (
+                    <div>
+                      <p className="font-medium text-foreground/70">
+                        Pausados desde el panel:
                       </p>
-                    ))}
-                  </div>
-                )}
-                {run.pausedMissing.length > 0 && (
-                  <div>
-                    <p className="font-medium text-foreground/70">
-                      Ya pausados que siguen fuera de la API:
-                    </p>
-                    {run.pausedMissing.map((m) => (
-                      <p key={m.id} className="text-foreground/60">
-                        [{m.id}] {m.nombre}
+                      <p className="text-foreground/60">
+                        {run.pausadosDespues.join(", ")}
                       </p>
-                    ))}
-                  </div>
-                )}
-                {run.usdWarnings > 0 && (
-                  <p className="text-foreground/60">
-                    {run.usdWarnings} productos con moneda mal informada por el
-                    proveedor — se ignora y se toman como pesos (dato sucio
-                    conocido de Zecat).
-                  </p>
+                    </div>
+                  )
                 )}
                 {run.errors.length > 0 && (
                   <div>
-                    <p className="font-medium text-foreground/70">Errores:</p>
+                    {/* Errores de productos, el error que corto la corrida,
+                        y notas de lo que paso despues (retome, "Pausar
+                        estos N"). */}
+                    <p className="font-medium text-foreground/70">
+                      Errores y notas:
+                    </p>
                     {run.errors.map((e, i) => (
                       <p key={i} className="break-all text-foreground/60">
-                        [{e.externalId}] {e.message.slice(0, 200)}
+                        [{e.externalId}] {e.message.slice(0, 300)}
                       </p>
                     ))}
                   </div>
@@ -166,6 +144,54 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/// Boton "Pausar estos N". Antes de pausar, el servidor vuelve a consultar
+/// cada producto al proveedor: solo pausa los que confirma como baja.
+function PausarAusentes({ runId, pendientes }: { runId: string; pendientes: number }) {
+  const router = useRouter();
+  const [pausando, startTransition] = useTransition();
+  const [mensaje, setMensaje] = useState<string | null>(null);
+
+  function pausar() {
+    setMensaje(null);
+    startTransition(async () => {
+      const r = await pausarAusentes(runId);
+      if (!r.success) {
+        setMensaje(r.error ?? "No se pudo pausar.");
+        return;
+      }
+      setMensaje(
+        `${r.pausados} pausados.` +
+          (r.aRevisar ? ` ${r.aRevisar} siguen publicados en el proveedor: quedan a revisar.` : "") +
+          (r.noVerificados
+            ? ` ${r.noVerificados} no se pudieron verificar: no se pausaron, probá de nuevo más tarde.`
+            : "") +
+          (r.restantes
+            ? ` Quedan ${r.restantes} pendientes: volvé a tocar el botón para seguir.`
+            : "")
+      );
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="mt-2 rounded-lg bg-primary/5 px-3 py-2 text-xs">
+      <p className="text-foreground/70">
+        Antes de pausar se consulta cada producto al proveedor: solo se pausan
+        los que confirma como dados de baja.
+      </p>
+      <button
+        type="button"
+        onClick={pausar}
+        disabled={pausando}
+        className="mt-2 rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-dark disabled:opacity-60"
+      >
+        {pausando ? "Verificando y pausando..." : `Pausar estos ${pendientes}`}
+      </button>
+      {mensaje && <p className="mt-2 text-foreground/70">{mensaje}</p>}
     </div>
   );
 }

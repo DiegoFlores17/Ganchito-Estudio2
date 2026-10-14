@@ -113,34 +113,43 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const { run: done, pausedMissingExternalIds, variantesDesactivadas, productosSinVariantes } = fin;
+  // Mismo resumen fijo que guarda la corrida y muestra el panel.
+  const { run: done, summary: s } = fin;
   const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
+  const nombre = (id: string) => `${id} ${s.nombres[id] ?? ""}`.trim();
 
   console.log("\nResumen de la sincronizacion:");
-  console.log(`  Vistos:           ${(done.seenExternalIds as string[]).length}`);
-  console.log(`  Creados:          ${done.created}`);
-  console.log(`  Actualizados:     ${done.updated}`);
-  console.log(`  Pausados:         ${done.paused}`);
-  console.log(`  Fallidos:         ${done.failed}`);
-  console.log(`  Variantes desact: ${variantesDesactivadas} (el proveedor dejo de mandarlas)`);
-  console.log(`  Sin variantes:    ${productosSinVariantes} producto(s), quedan inactivos`);
-  console.log(`  Currency "USD":   ${done.usdWarnings}`);
+  console.log(`  Vistos:           ${s.vistos}`);
+  console.log(`  Creados:          ${s.creados}`);
+  console.log(`  Actualizados:     ${s.actualizados}`);
+  console.log(`  Pausados:         ${s.pausadosSinPrecio} (sin precio del proveedor)`);
+  console.log(`  Fallidos:         ${s.fallidos}`);
+  console.log(`  Variantes desact: ${s.variantesDesactivadas} (el proveedor dejo de mandarlas)`);
+  console.log(`  Sin variantes:    ${s.productosSinVariantes} producto(s), quedan inactivos`);
+  console.log(`  Currency "USD":   ${s.monedaSospechosa}`);
   console.log(`  Tiempo:           ${elapsedSeconds}s`);
 
-  const missing = done.missingExternalIds as string[];
-  if (missing.length) {
-    const auto = done.autoPausedExternalIds as string[];
-    console.log(`\nAUSENTES: ${missing.length} producto(s) que la API ya no devuelve:`);
-    for (const id of missing) console.log(`  - ${id}${auto.includes(id) ? " (pausado automaticamente)" : ""}`);
-    if (done.autoPauseSkipped) {
+  if (s.ausentes.length) {
+    console.log(`\nAUSENTES: ${s.ausentes.length} producto(s) que la API ya no devuelve (umbral ${s.umbral}):`);
+    for (const id of s.ausentes) {
+      const estado = s.autoPausados.includes(id)
+        ? " (baja confirmada, pausado)"
+        : s.aRevisar.includes(id)
+          ? " (A REVISAR: el detalle sigue publicado, no se pauso)"
+          : s.noVerificados.includes(id)
+            ? " (no se pudo verificar, no se pauso)"
+            : "";
+      console.log(`  - ${nombre(id)}${estado}`);
+    }
+    if (s.umbralFrenado) {
       console.log(
-        `UMBRAL DE SEGURIDAD: ${missing.length} ausentes superan el limite — NO se pauso ninguno. Revisar manualmente.`
+        `UMBRAL DE SEGURIDAD: ${s.ausentes.length} ausentes superan el limite de ${s.umbral} — NO se pauso ninguno. Usar "Pausar estos N" en el panel.`
       );
     }
   }
-  if (pausedMissingExternalIds.length) {
+  if (s.yaPausadosFueraDeApi.length) {
     console.log(
-      `Ya pausados que siguen fuera de la API: ${pausedMissingExternalIds.length} (${pausedMissingExternalIds.join(", ")})`
+      `Ya pausados que siguen fuera de la API: ${s.yaPausadosFueraDeApi.length} (${s.yaPausadosFueraDeApi.join(", ")})`
     );
   }
 

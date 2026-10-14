@@ -9,8 +9,10 @@ import {
   acquireSyncRun,
   failSyncRun,
   finishSyncRun,
+  pausarAusentesDeCorrida,
   recordBatch,
   SyncLockError,
+  type SyncRunSummary,
 } from "@/lib/sync-run";
 import { sendSyncAlert, type EnvioResultado } from "@/lib/email";
 
@@ -45,17 +47,10 @@ export interface SyncProgress {
   paused: number;
   failed: number;
   usdWarnings: number;
-  /// Solo cuando done: activos nuestros que el proveedor no devolvio
-  /// (accionables) y ya-pausados que siguen fuera de la API (informativo).
-  missingExternalIds?: string[];
-  alreadyPausedMissing?: number;
-  /// Cuantos pauso automaticamente esta corrida, y si el umbral lo freno.
-  autoPaused?: number;
-  autoPauseSkipped?: boolean;
-  /// Solo cuando done: variantes que esta corrida desactivo (el proveedor
-  /// dejo de mandarlas) y productos que quedaron sin ninguna variante.
-  variantesDesactivadas?: number;
-  productosSinVariantes?: number;
+  /// Solo cuando done: el resumen fijo de la corrida, el MISMO que guarda
+  /// SyncRun.summary y lee el historial. La card y la fila no pueden decir
+  /// cosas distintas porque leen lo mismo.
+  summary?: SyncRunSummary;
   errors: Array<{ externalId: string; message: string }>;
 }
 
@@ -129,12 +124,7 @@ export async function advanceSync(
           "La sincronización se abortó: el proveedor devolvió una respuesta anómala (muy pocos productos). No se pausó nada — reintentá más tarde."
         );
       }
-      const {
-        run: done,
-        pausedMissingExternalIds,
-        variantesDesactivadas,
-        productosSinVariantes,
-      } = fin;
+      const { run: done, summary } = fin;
       // Los costos pueden haber cambiado: el catalogo publico se refresca.
       revalidatePath("/catalogo");
       revalidatePath("/");
@@ -149,12 +139,7 @@ export async function advanceSync(
         paused: done.paused,
         failed: done.failed,
         usdWarnings: done.usdWarnings,
-        missingExternalIds: done.missingExternalIds as string[],
-        alreadyPausedMissing: pausedMissingExternalIds.length,
-        autoPaused: (done.autoPausedExternalIds as string[]).length,
-        autoPauseSkipped: done.autoPauseSkipped,
-        variantesDesactivadas,
-        productosSinVariantes,
+        summary,
         errors: done.errors as Array<{ externalId: string; message: string }>,
       };
     }
@@ -187,5 +172,44 @@ export async function advanceSync(
       runId,
     });
     throw new Error(`La sincronización falló: ${message}`);
+  }
+}
+
+export interface PausarAusentesResult {
+  success: boolean;
+  error?: string;
+  pausados?: number;
+  aRevisar?: number;
+  noVerificados?: number;
+  /// Pendientes que superaron el tope de este click: quedan para el proximo.
+  restantes?: number;
+}
+
+/// "Pausar estos N" de una corrida con el umbral frenado. Cualquier admin:
+/// es la misma operacion que el auto-pausado (aplica la verdad del
+/// proveedor y es reversible), solo que con una persona decidiendo. Antes
+/// de pausar, cada ausente se vuelve a confirmar contra el proveedor — ver
+/// pausarAusentesDeCorrida en lib/sync-run.ts.
+export async function pausarAusentes(runId: string): Promise<PausarAusentesResult> {
+  // Gate propio: una Server Action es un endpoint, se puede invocar sin
+  // pasar por la pantalla.
+  const admin = await requireAdmin();
+  try {
+    const r = await pausarAusentesDeCorrida(runId, admin.email);
+    revalidatePath("/admin/proveedores");
+    revalidatePath("/catalogo");
+    revalidatePath("/");
+    return {
+      success: true,
+      pausados: r.pausados.length,
+      aRevisar: r.aRevisar.length,
+      noVerificados: r.noVerificados.length,
+      restantes: r.restantes,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "No se pudo pausar.",
+    };
   }
 }

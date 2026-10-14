@@ -330,7 +330,7 @@ export async function sendSyncAlert(
 <div style="${ESTILO_BASE} max-width: 640px;">
   <h1 style="font-size: 20px; margin: 0 0 12px;">${escapar(titulo)}</h1>
   ${alerta.cuerpo}
-  <a href="${siteUrl()}/admin/proveedores" style="${ESTILO_BOTON}">Ver en el panel</a>
+  <a href="${alerta.link ?? `${siteUrl()}/admin/proveedores`}" style="${ESTILO_BOTON}">Ver en el panel</a>
 </div>`.trim();
   } catch (error) {
     console.error("[email] No se pudo armar la alerta de sync:", error);
@@ -344,12 +344,18 @@ const ESTILO_PARRAFO = "margin: 0 0 16px;";
 const ESTILO_SUBTITULO = "font-size: 15px; margin: 24px 0 8px;";
 const ESTILO_NOTA = "margin: 0 0 20px; color: #666; font-size: 13px;";
 
+/// Link directo a una corrida en el historial del panel (cada fila tiene el
+/// ancla #corrida-{id}).
+function linkCorrida(runId: string): string {
+  return `${siteUrl()}/admin/proveedores#corrida-${encodeURIComponent(runId)}`;
+}
+
 /// Titulo y cuerpo de cada tipo de alerta. Exportado para verificar el texto
 /// sin enviar nada (scripts/audit-verify-email.ts).
 export function armarAlerta(
   input: SyncAlertInput,
   ahora: Date = new Date()
-): { titulo: string; cuerpo: string } {
+): { titulo: string; cuerpo: string; link?: string } {
   const proveedor = nombreProveedor(input.provider);
   const cuando = formatDateTime(ahora);
 
@@ -430,6 +436,7 @@ export function armarAlerta(
 
   return {
     titulo: `Sync de ${proveedor}: ${n} productos dejaron de venir y no se pausó ninguno (${cuando})`,
+    link: linkCorrida(input.runId),
     cuerpo: `
   <p style="${ESTILO_PARRAFO}">En esta sincronización, <strong>${n} productos</strong> que están a la venta en la tienda ya no aparecen en el listado de ${proveedor}. El límite de seguridad es ${input.umbral} (sobre ${input.activos} productos activos), así que el sistema <strong>no pausó ninguno</strong>: cuando desaparecen tantos juntos puede ser una baja real o una falla de ${proveedor}, y eso lo decide una persona.</p>
   <p style="${ESTILO_PARRAFO}">Mientras tanto, estos productos siguen visibles en la tienda con el último precio y stock conocidos.</p>
@@ -438,7 +445,7 @@ export function armarAlerta(
   <p style="${ESTILO_PARRAFO}">Buscá 2 o 3 productos de la lista en la web de ${proveedor}, por nombre. Si no aparecen, es una baja real. Si aparecen normalmente, probablemente fue una falla momentánea de ${proveedor}: no hagas nada, la próxima sincronización los vuelve a ver y quedan como estaban.</p>
 
   <h2 style="${ESTILO_SUBTITULO}">Cómo resolver, si es una baja real</h2>
-  <p style="${ESTILO_PARRAFO}">Por ahora no se puede resolver desde el panel: los productos de ${proveedor} no se pausan desde Productos. Avisale a quien opera el sistema, con este mail, para que los pause. Si alguno vuelve a ${proveedor} más adelante, la sincronización lo reactiva sola.</p>
+  <p style="${ESTILO_PARRAFO}">Abrí <a href="${linkCorrida(input.runId)}" style="color: #750098;">esta sincronización en el panel</a> y tocá <strong>«Pausar estos ${n}»</strong>. Antes de pausar, el sistema vuelve a consultar cada producto a ${proveedor}: solo pausa los que ${proveedor} confirma que dio de baja. Los que siguen publicados quedan marcados «a revisar» y no se tocan. Si alguno vuelve a ${proveedor} más adelante, la sincronización lo reactiva sola.</p>
 
   <h2 style="${ESTILO_SUBTITULO}">Los ${n} productos</h2>
   <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;">

@@ -59,6 +59,18 @@ export function formatDate(value: Date): string {
   return dateFormatter.format(value);
 }
 
+/// "hace 5 min", "hace 3 h", "hace 2 días". Para el estado del catálogo en
+/// el panel: lo que importa es cuánto hace, no la hora exacta (que se
+/// muestra al lado con formatDateTime).
+export function formatHace(value: Date, ahora: Date = new Date()): string {
+  const minutos = Math.max(0, Math.floor((ahora.getTime() - value.getTime()) / 60000));
+  if (minutos < 1) return "hace menos de un minuto";
+  if (minutos < 60) return `hace ${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  if (horas < 48) return `hace ${horas} h`;
+  return `hace ${Math.floor(horas / 24)} días`;
+}
+
 /// Siglas y marcas que se escriben en mayuscula SIEMPRE. Sin esta lista,
 /// "BPA FREE" quedaria como "Bpa Free" y "RPET" como "Rpet".
 const SIGLAS = new Set([

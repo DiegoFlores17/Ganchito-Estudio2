@@ -5,6 +5,16 @@ import { signOut } from "@/auth";
 import { requireAdmin } from "@/lib/admin-auth";
 import { AdminMobileNav } from "@/components/admin/admin-mobile-nav";
 import { countPendingReview } from "@/lib/admin-categories";
+import { ProductOrigin } from "@prisma/client";
+import { estadoDelProveedor } from "@/lib/sync-run";
+
+const ETIQUETA_ESTADO = {
+  OK: "al día",
+  BLOQUEADO: "pausado frenado, hay productos para revisar",
+  FALLANDO: "la última sincronización falló",
+  DESACTUALIZADO: "desactualizado",
+  A_REVISAR: "productos a revisar",
+} as const;
 
 export default async function AdminPanelLayout({
   children,
@@ -17,7 +27,25 @@ export default async function AdminPanelLayout({
   // no en la pantalla de Categorias a proposito: nacen ocultas, asi que si el
   // aviso viviera solo adentro de esa pantalla habria que entrar para
   // enterarse de que hay algo que mirar.
-  const categoriasPendientes = await countPendingReview();
+  // Mismo criterio para el catalogo: si esta bloqueado, fallando o viejo, se
+  // ve desde cualquier pantalla del panel, sin entrar a Proveedores. Si el
+  // calculo falla, el panel sigue andando sin el punto: es un aviso, no
+  // puede tirar abajo todas las pantallas.
+  const [categoriasPendientes, estadoZecat] = await Promise.all([
+    countPendingReview(),
+    estadoDelProveedor(ProductOrigin.ZECAT)
+      .then((e) => e.estado)
+      .catch((error) => {
+        console.error("[admin] No se pudo calcular el estado de Zecat:", error);
+        return "OK" as const;
+      }),
+  ]);
+  const avisoProveedores =
+    estadoZecat === "FALLANDO"
+      ? ("rojo" as const)
+      : estadoZecat === "OK"
+        ? undefined
+        : ("ambar" as const);
 
   // Una sola lista para los dos menús: si el de escritorio y el de mobile
   // arman sus links por separado, tarde o temprano uno queda con una pantalla
@@ -36,7 +64,13 @@ export default async function AdminPanelLayout({
     },
     // Sincronizar es operacion del dia a dia (aplica la verdad del
     // proveedor, reversible), no configuracion de negocio: cualquier admin.
-    { label: "Proveedores", href: "/admin/proveedores" },
+    {
+      label: "Proveedores",
+      href: "/admin/proveedores",
+      aviso: avisoProveedores,
+      avisoTexto:
+        estadoZecat === "OK" ? undefined : `Catálogo de Zecat: ${ETIQUETA_ESTADO[estadoZecat]}`,
+    },
     ...(isSuperAdmin
       ? [
           { label: "Equipo", href: "/admin/equipo" },
@@ -78,6 +112,16 @@ export default async function AdminPanelLayout({
                     >
                       {link.badge}
                     </span>
+                  ) : null}
+                  {/* Punto de color, no numero: el estado del catalogo no se
+                      cuenta, se mira. */}
+                  {"aviso" in link && link.aviso ? (
+                    <span
+                      role="img"
+                      aria-label={link.avisoTexto}
+                      title={link.avisoTexto}
+                      className={`h-2 w-2 rounded-full ${link.aviso === "rojo" ? "bg-red-600" : "bg-amber-500"}`}
+                    />
                   ) : null}
                 </Link>
               ))}

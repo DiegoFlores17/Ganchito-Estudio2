@@ -72,10 +72,11 @@ async function main() {
   check("asunto con cantidad y fecha en hora ART", umbral.titulo === "Sync de Zecat: 54 productos dejaron de venir y no se pausó ninguno (08/10/2026, 14:16)", umbral.titulo);
   check("lista COMPLETA, sin cortar en 30", ausentes.every((a) => umbral.cuerpo.includes(`>${a.externalId}<`)));
   check("dice como verificar y como resolver", umbral.cuerpo.includes("Cómo verificar") && umbral.cuerpo.includes("Cómo resolver"));
-  // Hasta que exista "Pausar estos N", los productos de proveedor NO se
-  // pueden pausar desde el panel (toggleProductActive solo acepta MANUAL):
-  // el texto no puede mandar a hacer algo imposible.
-  check("no manda a pausar desde Productos (imposible hoy)", !umbral.cuerpo.includes("tocá Pausar") && umbral.cuerpo.includes("Avisale a quien opera el sistema"));
+  // "Como resolver" apunta al boton de la corrida, con link directo a ella.
+  // Nunca a Productos: ahi los de proveedor no se pueden pausar.
+  check("resolver: boton «Pausar estos 54»", umbral.cuerpo.includes("«Pausar estos 54»") && !umbral.cuerpo.includes("desde Productos"));
+  check("resolver: link directo a la corrida", umbral.cuerpo.includes('href="https://ganchitoestudio.com/admin/proveedores#corrida-run-1"') && umbral.link === "https://ganchitoestudio.com/admin/proveedores#corrida-run-1");
+  check("resolver: aclara que confirma antes de pausar", umbral.cuerpo.includes("vuelve a consultar cada producto"));
   check("nombres escapados", umbral.cuerpo.includes("Mochila &quot;Dual&quot; &lt;test&gt;") && !umbral.cuerpo.includes("<test>"));
   check("umbral y activos en el texto", umbral.cuerpo.includes("límite de seguridad es 31 (sobre 636"));
 

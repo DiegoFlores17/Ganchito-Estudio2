@@ -8,6 +8,7 @@ import {
   startSync,
   type SyncProgress,
 } from "@/app/admin/(panel)/proveedores/actions";
+import { SyncRunSummaryLine } from "@/components/admin/sync-run-summary";
 
 /// Card de un proveedor con su boton de sincronizacion. El NAVEGADOR
 /// conduce el loop de batches: cada llamada a advanceSync procesa una
@@ -119,52 +120,13 @@ export function SyncProviderCard({
           <p className="font-medium text-foreground">
             Sincronización completa
           </p>
-          <p className="mt-1">
-            {resultado.created} creados · {resultado.updated} actualizados
-            {resultado.paused > 0 && (
-              <> · {resultado.paused} pausados por falta de precio del proveedor</>
-            )}
-            {resultado.failed > 0 && <> · {resultado.failed} fallidos</>}
-          </p>
-          {((resultado.variantesDesactivadas ?? 0) > 0 ||
-            (resultado.productosSinVariantes ?? 0) > 0) && (
-            <p className="mt-1">
-              {resultado.variantesDesactivadas ?? 0} variantes desactivadas
-              (el proveedor dejó de mandarlas) ·{" "}
-              {resultado.productosSinVariantes ?? 0} productos sin variantes
-            </p>
-          )}
-          {resultado.autoPauseSkipped && (
-            <p className="mt-1 font-medium text-primary-dark">
-              ⚠ {resultado.missingExternalIds?.length} productos dejaron de
-              venir en la API de golpe — supera el umbral de seguridad, así
-              que NO se pausó ninguno. Revisalos en el historial.
-            </p>
-          )}
-          {((resultado.missingExternalIds?.length ?? 0) > 0 ||
-            (resultado.alreadyPausedMissing ?? 0) > 0) &&
-            !resultado.autoPauseSkipped && (
-              <p className="mt-1 text-primary-dark">
-                {(resultado.autoPaused ?? 0) > 0 && (
-                  <>
-                    {resultado.autoPaused} pausado(s) automáticamente — el
-                    proveedor ya no los ofrece
-                  </>
-                )}
-                {(resultado.alreadyPausedMissing ?? 0) > 0 && (
-                  <>
-                    {(resultado.autoPaused ?? 0) > 0 && " · "}
-                    {resultado.alreadyPausedMissing} ya pausados siguen fuera
-                    de la API
-                  </>
-                )}{" "}
-                — el detalle está en el historial de abajo.
-              </p>
-            )}
-          {resultado.usdWarnings > 0 && (
+          {/* Mismo resumen fijo que guarda la corrida y lee el historial de
+              abajo: la card y la fila no pueden mostrar cifras distintas. */}
+          {resultado.summary ? (
+            <SyncRunSummaryLine summary={resultado.summary} />
+          ) : (
             <p className="mt-1 text-xs text-foreground/50">
-              {resultado.usdWarnings} productos con moneda mal informada por el
-              proveedor (se ignora y se toman como pesos).
+              El detalle está en el historial de abajo.
             </p>
           )}
         </div>

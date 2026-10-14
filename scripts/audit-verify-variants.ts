@@ -215,8 +215,8 @@ async function main() {
       const fin = await finishSyncRun(run.id);
       check("la corrida termina DONE", !fin.aborted && fin.run.status === SyncRunStatus.DONE);
       if (!fin.aborted) {
-        check("cuenta los 40 productos sin variantes", fin.productosSinVariantes >= 40, String(fin.productosSinVariantes));
-        check("cuenta las 40 variantes desactivadas (updatedAt renovado por updateMany)", fin.variantesDesactivadas >= 40, String(fin.variantesDesactivadas));
+        check("cuenta los 40 productos sin variantes", fin.summary.productosSinVariantes >= 40, String(fin.summary.productosSinVariantes));
+        check("cuenta las 40 variantes desactivadas (updatedAt renovado por updateMany)", fin.summary.variantesDesactivadas >= 40, String(fin.summary.variantesDesactivadas));
         check("no hubo ausentes ni auto-pausado de productos reales", (fin.run.missingExternalIds as string[]).length === 0);
       }
       check("salio la alerta de variantes", logs.some((l) => l.includes("asunto: Sync de Zecat:") && l.includes("variantes desactivadas")));
@@ -240,8 +240,8 @@ async function main() {
       const fin2 = await finishSyncRun(run2.id);
       check(
         "segunda corrida con los mismos vacios: 0 productos y 0 variantes nuevas",
-        !fin2.aborted && fin2.productosSinVariantes === 0 && fin2.variantesDesactivadas === 0,
-        fin2.aborted ? "abortada" : `${fin2.productosSinVariantes} / ${fin2.variantesDesactivadas}`
+        !fin2.aborted && fin2.summary.productosSinVariantes === 0 && fin2.summary.variantesDesactivadas === 0,
+        fin2.aborted ? "abortada" : `${fin2.summary.productosSinVariantes} / ${fin2.summary.variantesDesactivadas}`
       );
       check("segunda corrida: NO repite la alerta", logs.filter((l) => l.includes("variantes desactivadas")).length === alertasAntes);
     } finally {

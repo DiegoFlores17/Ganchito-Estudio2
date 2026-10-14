@@ -132,6 +132,14 @@ model SyncRun {
   /// true si el umbral de seguridad FRENÓ el auto-pausado (demasiados
   /// ausentes de golpe). La UI lo muestra como advertencia prominente.
   autoPauseSkipped Boolean @default(false)
+  /// Resumen de la corrida TAL COMO QUEDO al terminar: conteos, ausentes,
+  /// pausados, ya pausados fuera de la API, variantes, umbral. Se escribe
+  /// UNA vez en finishSyncRun y no se recalcula nunca: antes el historial
+  /// derivaba cifras del estado actual y una corrida vieja "cambiaba" de 34 a
+  /// 88 ya pausados despues de pausar otros productos. Null en las corridas
+  /// anteriores a este campo: el panel muestra "no registrado". Forma en
+  /// lib/sync-run.ts (SyncRunSummary).
+  summary Json?
 
   @@index([provider, status])
   @@map("sync_runs")

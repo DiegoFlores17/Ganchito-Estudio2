@@ -2,6 +2,7 @@ import type {
   ZecatGenericProduct,
   ZecatGenericProductListResponse,
 } from "./types";
+import { flattenVariants } from "./normalize";
 
 const PAGE_LIMIT = 25;
 const MAX_RETRIES = 2;
@@ -73,6 +74,73 @@ export async function fetchGenericProductDetail(
     generic_product: ZecatGenericProduct;
   }>(`/generic_product/${id}`);
   return generic_product;
+}
+
+/// Resultado de confirmar un ausente contra el detalle de Zecat.
+/// - "baja": Zecat lo confirma (404, despublicado o sin variantes).
+/// - "presente": el detalle esta sano; falta del listado por otra razon.
+/// - "no-verificado": no hubo respuesta limpia (timeout, 5xx, red, otro
+///   status). NO confirma nada: ese producto no se pausa.
+export type Confirmacion = "baja" | "presente" | "no-verificado";
+
+/// Timeout del detalle al confirmar. Propio y corto: es una pregunta puntual
+/// por producto, y un request colgado no puede comerse la invocacion.
+const TIMEOUT_CONFIRMACION_MS = 15_000;
+
+/// Pregunta a Zecat por un producto que falto del listado, ANTES de pausarlo.
+///
+/// Solo una respuesta limpia confirma la baja. La asimetria es a proposito:
+/// pausar por un timeout convertiria una falla de red de Zecat en productos
+/// sanos fuera de la tienda; no pausar deja un ausente para la proxima
+/// corrida, que lo vuelve a intentar.
+///
+/// Un solo intento, sin reintentos: lo que no responde limpio queda
+/// "no-verificado" y se reintenta en la corrida siguiente, no en esta.
+export async function confirmarAusencia(
+  id: string
+): Promise<{ resultado: Confirmacion; motivo: string }> {
+  try {
+    const { token, baseUrl } = getConfig();
+    const response = await fetch(`${baseUrl}/generic_product/${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(TIMEOUT_CONFIRMACION_MS),
+    });
+
+    if (response.status === 404) {
+      return { resultado: "baja", motivo: "Zecat responde que el producto no existe." };
+    }
+    if (!response.ok) {
+      return {
+        resultado: "no-verificado",
+        motivo: `Zecat respondió ${response.status} ${response.statusText}.`,
+      };
+    }
+
+    const body = (await response.json()) as { generic_product?: ZecatGenericProduct };
+    const detail = body.generic_product;
+    if (!detail) {
+      return { resultado: "no-verificado", motivo: "Zecat respondió sin el detalle del producto." };
+    }
+    if (detail.published === false) {
+      return { resultado: "baja", motivo: "Zecat lo tiene despublicado." };
+    }
+    if (!flattenVariants(detail.variants).some((v) => v.active ?? true)) {
+      return { resultado: "baja", motivo: "Zecat lo publica sin ninguna variante." };
+    }
+    return {
+      resultado: "presente",
+      motivo: "El detalle sigue publicado y con variantes, pero no vino en el listado.",
+    };
+  } catch (error) {
+    const timeout =
+      error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return {
+      resultado: "no-verificado",
+      motivo: timeout
+        ? `Zecat no respondió en ${TIMEOUT_CONFIRMACION_MS / 1000} s.`
+        : `No se pudo consultar a Zecat: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 export async function searchGenericProducts(

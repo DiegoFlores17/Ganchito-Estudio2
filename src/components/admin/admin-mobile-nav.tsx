@@ -6,6 +6,9 @@ import Link from "next/link";
 interface AdminNavLink {
   label: string;
   href: string;
+  /// Estado que pide atencion (hoy: el catalogo de un proveedor).
+  aviso?: "rojo" | "ambar";
+  avisoTexto?: string;
 }
 
 /// Menú del panel para pantallas chicas.
@@ -29,15 +32,24 @@ export function AdminMobileNav({
 }) {
   const [open, setOpen] = useState(false);
 
+  const avisoGeneral = navLinks.find((l) => l.aviso);
+
   return (
     <div className="md:hidden">
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="Abrir menú"
-        className="flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
+        aria-label={avisoGeneral ? `Abrir menú (${avisoGeneral.avisoTexto})` : "Abrir menú"}
+        className="relative flex h-10 w-10 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5"
       >
         <HamburgerIcon />
+        {/* Con el menu cerrado, el aviso del catalogo tiene que verse igual:
+            en el celular el menu esta cerrado casi siempre. */}
+        {avisoGeneral && (
+          <span
+            className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${avisoGeneral.aviso === "rojo" ? "bg-red-600" : "bg-amber-500"}`}
+          />
+        )}
       </button>
 
       {open && (
@@ -64,7 +76,16 @@ export function AdminMobileNav({
                 onClick={() => setOpen(false)}
                 className="rounded-lg px-2 py-3 text-2xl font-medium text-foreground transition-colors hover:text-primary"
               >
-                {link.label}
+                <span className="flex items-center gap-2">
+                  {link.label}
+                  {link.aviso && (
+                    <span
+                      role="img"
+                      aria-label={link.avisoTexto}
+                      className={`h-2.5 w-2.5 rounded-full ${link.aviso === "rojo" ? "bg-red-600" : "bg-amber-500"}`}
+                    />
+                  )}
+                </span>
               </Link>
             ))}
           </nav>

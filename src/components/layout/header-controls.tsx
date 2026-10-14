@@ -43,6 +43,10 @@ export function HeaderControls({
   const [abierto, setAbierto] = useState<null | "buscar" | "menu">(null);
   const open = abierto === "menu";
   const inputRef = useRef<HTMLInputElement>(null);
+  // La lupa del header: al cerrar la fila de busqueda, el foco vuelve aca.
+  // Sin esto, cerrar desmonta el campo enfocado y el foco cae al <body> —
+  // un lector de pantalla queda "en ningun lado".
+  const lupaRef = useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   // Mismo criterio que el buscador de desktop: en /catalogo manda el buscador
   // propio de esa pagina. Ver el comentario largo en header-search-desktop.
@@ -80,7 +84,9 @@ export function HeaderControls({
       // Se mira defaultPrevented y no se confia en stopPropagation: React
       // escucha en el mismo `document` que este listener, y frenar la
       // propagacion no corta a otro listener del mismo nodo.
-      if (e.key === "Escape" && !e.defaultPrevented) setAbierto(null);
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (abierto === "buscar") cerrarBuscador();
+      else setAbierto(null);
     }
     document.addEventListener("keydown", alTecla);
     return () => document.removeEventListener("keydown", alTecla);
@@ -99,24 +105,41 @@ export function HeaderControls({
     inputRef.current?.focus();
   }
 
+  /// Cierra la fila de busqueda (y con ella el teclado del telefono: el
+  /// campo se desmonta) y devuelve el foco a la lupa.
+  function cerrarBuscador() {
+    setAbierto(null);
+    lupaRef.current?.focus();
+  }
+
   return (
     <>
       {hayBuscador && (
         <button
+          ref={lupaRef}
           type="button"
           onClick={() =>
-            abierto === "buscar" ? setAbierto(null) : abrirBuscador()
+            abierto === "buscar" ? cerrarBuscador() : abrirBuscador()
           }
-          aria-label={abierto === "buscar" ? "Cerrar búsqueda" : "Buscar"}
+          // Siempre la LUPA, nunca una cruz: con la fila abierta habia tres
+          // cruces iguales (esta, la de borrar el texto y la de cerrar la
+          // fila), dos cerraban y una borraba. El estado se comunica con el
+          // fondo activo y aria-expanded; tocarla con la fila abierta cierra.
+          aria-label="Buscar"
           aria-expanded={abierto === "buscar"}
           aria-controls="fila-busqueda"
           // lg:hidden y no md:hidden: desde 1024px el input entra entero en la
           // barra (hay 238px libres) y la lupa sobra. Entre 768 y 1024 el nav
           // de desktop ya ocupa todo el ancho disponible, asi que ahi tambien
           // se busca por lupa.
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground transition-colors hover:bg-foreground/5 lg:hidden"
+          className={
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors lg:hidden " +
+            (abierto === "buscar"
+              ? "bg-primary/10 text-primary"
+              : "text-foreground hover:bg-foreground/5")
+          }
         >
-          {abierto === "buscar" ? <CloseIcon /> : <SearchIcon />}
+          <SearchIcon />
         </button>
       )}
 
@@ -137,20 +160,23 @@ export function HeaderControls({
           id="fila-busqueda"
           className="absolute inset-x-0 top-full z-50 border-b border-black/5 bg-background shadow-sm"
         >
-          <div className="mx-auto flex max-w-6xl items-center gap-2 px-6 py-3">
+          {/* px-4 y no px-6: "Cancelar" ocupa mas que la cruz que habia, y a
+              360px el campo no puede perder ese ancho. */}
+          <div className="mx-auto flex max-w-6xl items-center gap-1 px-4 py-3">
             <SearchForm
               inputId="header-search-mobile"
               inputRef={inputRef}
               onSubmitted={() => setAbierto(null)}
               className="min-w-0 flex-1"
             />
+            {/* Texto y no una cruz: la unica cruz de la fila es la de adentro
+                del campo, que BORRA. Esta cierra, y tiene que verse distinta. */}
             <button
               type="button"
-              onClick={() => setAbierto(null)}
-              aria-label="Cerrar búsqueda"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-foreground/60 transition-colors hover:bg-foreground/5"
+              onClick={cerrarBuscador}
+              className="h-10 shrink-0 rounded-full px-3 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
             >
-              <CloseIcon />
+              Cancelar
             </button>
           </div>
         </div>

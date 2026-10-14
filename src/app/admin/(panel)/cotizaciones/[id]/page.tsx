@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { formatDateTime, formatPriceArs } from "@/lib/format";
+import { formatDate, formatDateTime, formatPriceArs } from "@/lib/format";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
@@ -126,7 +126,7 @@ export default async function CotizacionDetallePage({
                     className="flex items-center justify-between rounded-lg border border-foreground/10 bg-background px-4 py-3 text-sm transition-colors hover:border-primary"
                   >
                     <span className="text-foreground/70">
-                      {h.createdAt.toLocaleDateString("es-AR")} ·{" "}
+                      {formatDate(h.createdAt)} ·{" "}
                       {h.items.length} item(s)
                     </span>
                     <StatusBadge status={h.status} />

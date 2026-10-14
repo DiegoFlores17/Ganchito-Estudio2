@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { formatDateTime } from "@/lib/format";
 
 /// Envio de mails transaccionales (Resend). Dos usos hoy: aviso de
 /// cotizacion nueva al equipo de Ganchito, y alertas tecnicas del sync.
@@ -17,22 +18,30 @@ const FROM_ALERTAS = "Ganchito Estudio <alertas@send.ganchitoestudio.com>";
 
 interface EnviarInput {
   from: string;
-  to: string;
+  to: string | string[];
   subject: string;
   html: string;
   replyTo?: string;
 }
 
-/// Devuelve true si se envio, false si no se pudo (o si no hay API key).
-/// Nunca tira.
+/// Resultado de un envio. `id` es el de Resend: es lo que permite cruzar un
+/// log de Vercel con el registro del mensaje en el panel de Resend.
+export type EnvioResultado =
+  | { ok: true; id: string | null }
+  | { ok: false; motivo: string };
+
+/// Nunca tira. Loguea SIEMPRE, tambien el exito: sin esa linea, "salio" y
+/// "no se intento" se ven igual en los logs (ya costo una vuelta de
+/// diagnostico con la primera alerta real del umbral).
 async function enviar({
   from,
   to,
   subject,
   html,
   replyTo,
-}: EnviarInput): Promise<boolean> {
+}: EnviarInput): Promise<EnvioResultado> {
   const apiKey = process.env.RESEND_API_KEY;
+  const destino = Array.isArray(to) ? to.join(", ") : to;
 
   // Sin API key NO se manda: se loguea el mail entero. Es lo que hace que
   // en local se pueda verificar el contenido sin quemar cuota ni mandar
@@ -41,16 +50,16 @@ async function enviar({
   if (!apiKey) {
     console.warn(
       `[email] SIN RESEND_API_KEY — no se envia. Habria mandado:\n` +
-        `  para: ${to}\n  asunto: ${subject}\n` +
+        `  para: ${destino}\n  asunto: ${subject}\n` +
         (replyTo ? `  responder-a: ${replyTo}\n` : "") +
         `  cuerpo:\n${html}`
     );
-    return false;
+    return { ok: false, motivo: "Falta RESEND_API_KEY en el entorno." };
   }
 
   try {
     const resend = new Resend(apiKey);
-    const { error } = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from,
       to,
       subject,
@@ -58,14 +67,62 @@ async function enviar({
       ...(replyTo ? { replyTo } : {}),
     });
     if (error) {
-      console.error(`[email] Resend rechazo el envio a ${to}:`, error);
-      return false;
+      console.error(`[email] Resend rechazo el envio a ${destino}:`, error);
+      return { ok: false, motivo: `Resend rechazó el envío: ${error.message}` };
     }
-    return true;
+    const id = data?.id ?? null;
+    console.log(`[email] Enviado a ${destino} (id ${id ?? "?"}): ${subject}`);
+    return { ok: true, id };
   } catch (error) {
-    console.error(`[email] Fallo el envio a ${to}:`, error);
-    return false;
+    console.error(`[email] Fallo el envio a ${destino}:`, error);
+    return {
+      ok: false,
+      motivo: `Falló el envío: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
+}
+
+/// Destinatarios de las alertas del sync, desde ALERT_EMAIL. Acepta varios
+/// separados por coma o punto y coma: Resend NO entiende una lista dentro de
+/// un string ("a@x.com, b@y.com") — pide un array — asi que se parte aca.
+/// Lo que no parece un email se descarta (y se informa en `invalidos`), en
+/// vez de dejar que Resend rechace el envio entero por una entrada mal tipeada.
+export function parseRecipients(raw: string | undefined): {
+  validos: string[];
+  invalidos: string[];
+} {
+  const partes = (raw ?? "")
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const pareceEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  return {
+    validos: partes.filter(pareceEmail),
+    invalidos: partes.filter((s) => !pareceEmail(s)),
+  };
+}
+
+/// "diego@gmail.com" -> "d•••@gmail.com". Para mostrar en el panel A QUIEN
+/// van las alertas sin exponer la direccion completa.
+function enmascarar(email: string): string {
+  const [usuario, dominio] = email.split("@");
+  return `${usuario.slice(0, 1)}•••@${dominio}`;
+}
+
+/// Estado de la configuracion de alertas, para el panel. Lee la variable
+/// del lado del servidor (que sea "Sensitive" en Vercel no afecta: oculta
+/// el valor en el dashboard, no al runtime).
+export function alertConfigStatus(): {
+  destinatarios: string[];
+  invalidos: number;
+  tieneApiKey: boolean;
+} {
+  const { validos, invalidos } = parseRecipients(process.env.ALERT_EMAIL);
+  return {
+    destinatarios: validos.map(enmascarar),
+    invalidos: invalidos.length,
+    tieneApiKey: Boolean(process.env.RESEND_API_KEY),
+  };
 }
 
 function escapar(texto: string): string {
@@ -185,7 +242,7 @@ export async function sendQuoteNotification(
   <a href="${detalleUrl}" style="${ESTILO_BOTON}">Ver en el panel</a>
 </div>`.trim();
 
-  return enviar({
+  const resultado = await enviar({
     from: FROM_NEGOCIO,
     to: input.to,
     // El shortCode en el asunto: es la referencia que el cliente menciona
@@ -194,15 +251,36 @@ export async function sendQuoteNotification(
     html,
     replyTo: input.customerEmail,
   });
+  return resultado.ok;
 }
 
-export interface SyncAlertInput {
-  provider: string;
-  /// "umbral" = el auto-pausado se freno por demasiados ausentes.
-  /// "fallo"  = la corrida termino FAILED.
-  motivo: "umbral" | "fallo";
-  detalle: string;
-  runId: string;
+/// Un producto ausente, como se lo muestra en la alerta del umbral.
+export interface AusenteAlerta {
+  externalId: string;
+  nombre: string | null;
+  /// Ultimo stock disponible conocido (de la corrida anterior). Ayuda a
+  /// leer la lista: casi todo en 0-10 unidades es perfil de liquidacion.
+  stockDisponible: number | null;
+}
+
+export type SyncAlertInput =
+  /// El auto-pausado se freno por demasiados ausentes de golpe.
+  | {
+      motivo: "umbral";
+      provider: string;
+      runId: string;
+      ausentes: AusenteAlerta[];
+      umbral: number;
+      activos: number;
+    }
+  /// La corrida termino FAILED (error del loop o guarda de cordura).
+  | { motivo: "fallo"; provider: string; runId: string; detalle: string }
+  /// Envio de prueba pedido desde el panel.
+  | { motivo: "prueba"; provider: string; pedidoPor: string };
+
+/// Nombre visible del proveedor en los mails ("Zecat", no "ZECAT").
+function nombreProveedor(provider: string): string {
+  return provider === "ZECAT" ? "Zecat" : provider;
 }
 
 /// Alerta tecnica del sync. Va a ALERT_EMAIL (variable de entorno), no a
@@ -211,27 +289,118 @@ export interface SyncAlertInput {
 /// Es lo que hace posible el cron: con corridas desatendidas, sin este mail
 /// un umbral frenado o una corrida fallida no se entera nadie hasta que
 /// alguien entra al panel por casualidad.
-export async function sendSyncAlert(input: SyncAlertInput): Promise<boolean> {
-  const to = process.env.ALERT_EMAIL;
-  if (!to) {
+///
+/// El asunto lleva fecha y hora A PROPOSITO: Gmail agrupa en un hilo los
+/// mails con el mismo asunto, y asi una alerta nueva quedo escondida debajo
+/// de una vieja y no se vio.
+export async function sendSyncAlert(
+  input: SyncAlertInput
+): Promise<EnvioResultado> {
+  const { validos, invalidos } = parseRecipients(process.env.ALERT_EMAIL);
+  if (invalidos.length) {
+    console.warn(
+      `[email] ALERT_EMAIL tiene ${invalidos.length} entrada(s) que no parecen un email; se ignoran.`
+    );
+  }
+  if (!validos.length) {
     console.warn(
       "[email] Falta ALERT_EMAIL: la alerta de sync no se envía a nadie."
     );
-    return false;
+    return { ok: false, motivo: "ALERT_EMAIL no está configurada." };
   }
 
-  const titulo =
-    input.motivo === "umbral"
-      ? `Sync de ${input.provider}: no se pausó nada por el umbral de seguridad`
-      : `Sync de ${input.provider}: la corrida falló`;
-
-  const html = `
+  // Armar el texto tambien va protegido: "nunca tira" tiene que ser una
+  // garantia de la funcion, no depender de que armarAlerta siga siendo pura.
+  let titulo: string;
+  let html: string;
+  try {
+    const alerta = armarAlerta(input);
+    titulo = alerta.titulo;
+    html = `
 <div style="${ESTILO_BASE} max-width: 640px;">
   <h1 style="font-size: 20px; margin: 0 0 12px;">${escapar(titulo)}</h1>
-  <p style="margin: 0 0 16px; white-space: pre-wrap;">${escapar(input.detalle)}</p>
-  <p style="margin: 0 0 20px; color: #666; font-size: 13px;">Corrida ${escapar(input.runId)}</p>
+  ${alerta.cuerpo}
   <a href="${siteUrl()}/admin/proveedores" style="${ESTILO_BOTON}">Ver en el panel</a>
 </div>`.trim();
+  } catch (error) {
+    console.error("[email] No se pudo armar la alerta de sync:", error);
+    return { ok: false, motivo: "No se pudo armar el texto de la alerta." };
+  }
 
-  return enviar({ from: FROM_ALERTAS, to, subject: titulo, html });
+  return enviar({ from: FROM_ALERTAS, to: validos, subject: titulo, html });
+}
+
+const ESTILO_PARRAFO = "margin: 0 0 16px;";
+const ESTILO_SUBTITULO = "font-size: 15px; margin: 24px 0 8px;";
+const ESTILO_NOTA = "margin: 0 0 20px; color: #666; font-size: 13px;";
+
+/// Titulo y cuerpo de cada tipo de alerta. Exportado para verificar el texto
+/// sin enviar nada (scripts/audit-verify-email.ts).
+export function armarAlerta(
+  input: SyncAlertInput,
+  ahora: Date = new Date()
+): { titulo: string; cuerpo: string } {
+  const proveedor = nombreProveedor(input.provider);
+  const cuando = formatDateTime(ahora);
+
+  if (input.motivo === "prueba") {
+    return {
+      titulo: `Alerta de prueba del sync (${cuando})`,
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">Si estás leyendo esto, las alertas de la sincronización de proveedores llegan a esta dirección.</p>
+  <p style="${ESTILO_NOTA}">La pidió ${escapar(input.pedidoPor)} desde el panel. No pasó nada con el catálogo.</p>`,
+    };
+  }
+
+  if (input.motivo === "fallo") {
+    return {
+      titulo: `Sync de ${proveedor}: la corrida falló (${cuando})`,
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO} white-space: pre-wrap;">${escapar(input.detalle)}</p>
+  <p style="${ESTILO_PARRAFO}">Esta corrida no pausó ni borró nada. Los productos que alcanzó a actualizar antes del fallo quedan con los datos nuevos; el resto, con los de la corrida anterior. La próxima sincronización completa los pone al día.</p>
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+    };
+  }
+
+  // Umbral. El texto tiene que alcanzar para verificar y resolver sin
+  // consultar a nadie: que paso, que significa, como verificar, como
+  // resolver. Y la lista COMPLETA — cortarla deja a quien la recibe sin
+  // poder revisar justo los que no ve.
+  const n = input.ausentes.length;
+  const filas = input.ausentes
+    .map(
+      (a) => `
+      <tr>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(a.externalId)}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee;">${escapar(a.nombre ?? "(sin nombre)")}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; text-align: right;">${a.stockDisponible ?? "—"}</td>
+      </tr>`
+    )
+    .join("");
+
+  return {
+    titulo: `Sync de ${proveedor}: ${n} productos dejaron de venir y no se pausó ninguno (${cuando})`,
+    cuerpo: `
+  <p style="${ESTILO_PARRAFO}">En esta sincronización, <strong>${n} productos</strong> que están a la venta en la tienda ya no aparecen en el listado de ${proveedor}. El límite de seguridad es ${input.umbral} (sobre ${input.activos} productos activos), así que el sistema <strong>no pausó ninguno</strong>: cuando desaparecen tantos juntos puede ser una baja real o una falla de ${proveedor}, y eso lo decide una persona.</p>
+  <p style="${ESTILO_PARRAFO}">Mientras tanto, estos productos siguen visibles en la tienda con el último precio y stock conocidos.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo verificar</h2>
+  <p style="${ESTILO_PARRAFO}">Buscá 2 o 3 productos de la lista en la web de ${proveedor}, por nombre. Si no aparecen, es una baja real. Si aparecen normalmente, probablemente fue una falla momentánea de ${proveedor}: no hagas nada, la próxima sincronización los vuelve a ver y quedan como estaban.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo resolver, si es una baja real</h2>
+  <p style="${ESTILO_PARRAFO}">Por ahora no se puede resolver desde el panel: los productos de ${proveedor} no se pausan desde Productos. Avisale a quien opera el sistema, con este mail, para que los pause. Si alguno vuelve a ${proveedor} más adelante, la sincronización lo reactiva sola.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Los ${n} productos</h2>
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;">
+    <thead>
+      <tr style="text-align: left; color: #666; font-size: 13px;">
+        <th style="padding: 6px 10px;">Id</th>
+        <th style="padding: 6px 10px;">Producto</th>
+        <th style="padding: 6px 10px; text-align: right;">Último stock</th>
+      </tr>
+    </thead>
+    <tbody>${filas}</tbody>
+  </table>
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+  };
 }

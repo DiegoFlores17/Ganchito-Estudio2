@@ -1,4 +1,5 @@
 import { requireSuperAdmin } from "@/lib/admin-auth";
+import { formatDateTime } from "@/lib/format";
 import { getPricingConfig } from "@/lib/pricing";
 import { FUENTE_OFICIAL } from "@/lib/usd-rate";
 import { formatWhatsappLabel, getSiteConfig } from "@/lib/site-config";
@@ -70,13 +71,8 @@ export default async function ConfiguracionPage() {
   );
 }
 
-/// Fecha corta en horario argentino. Se hace en el servidor para que el texto
-/// sea el mismo antes y después de hidratar.
+/// Se hace en el servidor para que el texto sea el mismo antes y después de
+/// hidratar. Mismo formato y zona que el resto del panel (lib/format).
 function formatearFecha(fecha: Date | null): string | null {
-  if (!fecha) return null;
-  return new Intl.DateTimeFormat("es-AR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "America/Argentina/Buenos_Aires",
-  }).format(fecha);
+  return fecha ? formatDateTime(fecha) : null;
 }

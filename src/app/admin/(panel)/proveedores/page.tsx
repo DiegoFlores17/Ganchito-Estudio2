@@ -1,7 +1,9 @@
-import { ProductOrigin } from "@prisma/client";
+import { AdminRole, ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
+import { alertConfigStatus } from "@/lib/email";
 import { formatDateTime } from "@/lib/format";
+import { SyncAlertStatus } from "@/components/admin/sync-alert-status";
 import { SyncProviderCard } from "@/components/admin/sync-provider-card";
 import { SyncRunHistory } from "@/components/admin/sync-run-history";
 
@@ -15,7 +17,8 @@ export default async function ProveedoresPage() {
   // requireAdmin y NO requireSuperAdmin, por principio: sincronizar aplica
   // la verdad del proveedor y es reversible corriendo de nuevo — operacion
   // del dia a dia, no decision de negocio. Mismo criterio que Categorias.
-  await requireAdmin();
+  const admin = await requireAdmin();
+  const alertas = alertConfigStatus();
 
   const runs = await prisma.syncRun.findMany({
     where: { provider: ProductOrigin.ZECAT },
@@ -66,6 +69,15 @@ export default async function ProveedoresPage() {
           provider={ProductOrigin.ZECAT}
           nombre="Zecat"
           descripcion={`API oficial${ultimoTotal ? ` · ${ultimoTotal} productos` : ""} · 5-10 minutos con la pestaña abierta`}
+        />
+      </div>
+
+      <div className="mt-4 max-w-2xl">
+        <SyncAlertStatus
+          destinatarios={alertas.destinatarios}
+          invalidos={alertas.invalidos}
+          tieneApiKey={alertas.tieneApiKey}
+          puedeProbar={admin.role === AdminRole.SUPER_ADMIN}
         />
       </div>
 

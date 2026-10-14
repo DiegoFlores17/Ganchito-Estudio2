@@ -4,6 +4,7 @@ import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AdminRole } from "@prisma/client";
 import { addAdmin, removeAdmin } from "@/app/admin/(panel)/equipo/actions";
+import { formatDate } from "@/lib/format";
 
 interface AdminRow {
   id: string;
@@ -158,7 +159,7 @@ export function TeamManagement({
                   {admin.role === AdminRole.SUPER_ADMIN ? "Super admin" : "Admin"}
                 </td>
                 <td className="px-4 py-3 text-foreground/50">
-                  {admin.createdAt.toLocaleDateString("es-AR")}
+                  {formatDate(admin.createdAt)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button

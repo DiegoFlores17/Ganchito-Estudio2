@@ -1,5 +1,6 @@
 import { QuoteStatus } from "@prisma/client";
 import { requireAdmin } from "@/lib/admin-auth";
+import { formatDate } from "@/lib/format";
 import { getQuotes } from "@/lib/admin-quotes";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { QuoteFilters } from "@/components/admin/quote-filters";
@@ -65,7 +66,7 @@ export default async function CotizacionesPage({
                 href={`/admin/cotizaciones/${quote.id}`}
               >
                 <td className="px-4 py-3 text-foreground/70">
-                  {quote.createdAt.toLocaleDateString("es-AR")}
+                  {formatDate(quote.createdAt)}
                 </td>
                 <td className="px-4 py-3 font-medium text-foreground">
                   {quote.customerName}

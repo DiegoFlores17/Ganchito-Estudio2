@@ -1,6 +1,6 @@
 import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendSyncAlert } from "@/lib/email";
+import { sendSyncAlert, type AusenteAlerta } from "@/lib/email";
 
 /// Lock + progreso de las corridas de sincronización. Agnóstico de
 /// proveedor: lo usan el botón del panel Y los scripts de consola, así un
@@ -222,11 +222,10 @@ export async function finishSyncRun(runId: string) {
     await sendSyncAlert({
       provider: run.provider,
       motivo: "umbral",
-      detalle:
-        `${missing.length} productos activos dejaron de venir en la API de golpe, y el umbral de seguridad es ${umbral}. ` +
-        `NO se pausó ninguno: puede ser un problema del proveedor y no ${missing.length} discontinuaciones reales. ` +
-        `Ids: ${missing.slice(0, 30).join(", ")}${missing.length > 30 ? "…" : ""}`,
-      runId: runId,
+      runId,
+      umbral,
+      activos,
+      ausentes: await describirAusentes(run.provider, missing),
     });
   }
 
@@ -247,6 +246,55 @@ export async function finishSyncRun(runId: string) {
     pausedMissingExternalIds: pausedMissing,
     aborted: false as const,
   };
+}
+
+/// Nombre y ultimo stock disponible conocido de los ausentes, para que la
+/// alerta del umbral se pueda revisar sin abrir la base. El stock es el de
+/// la ultima corrida que los vio (stock - reservado, sumado por producto).
+async function describirAusentes(
+  provider: ProductOrigin,
+  externalIds: string[]
+): Promise<AusenteAlerta[]> {
+  const idField = provider === ProductOrigin.ZECAT ? "zecatId" : "cdoId";
+  // El detalle es un extra del mail: si la consulta falla, la alerta sale
+  // igual con los ids pelados. Tirar aca rompería finishSyncRun antes de
+  // marcar DONE, y una corrida completa quedaría FAILED por un adorno.
+  let productos;
+  try {
+    productos = await prisma.product.findMany({
+      where: { origin: provider, [idField]: { in: externalIds } },
+      select: {
+        zecatId: true,
+        cdoId: true,
+        name: true,
+        variants: { select: { stock: true, reservedStock: true } },
+      },
+    });
+  } catch (error) {
+    console.error("[sync-run] No se pudo describir los ausentes para la alerta:", error);
+    return externalIds.map((externalId) => ({
+      externalId,
+      nombre: null,
+      stockDisponible: null,
+    }));
+  }
+  const porId = new Map(
+    productos.map((p) => [
+      provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId,
+      {
+        nombre: p.name,
+        stock: p.variants.reduce(
+          (total, v) => total + Math.max(v.stock - v.reservedStock, 0),
+          0
+        ),
+      },
+    ])
+  );
+  return externalIds.map((externalId) => ({
+    externalId,
+    nombre: porId.get(externalId)?.nombre ?? null,
+    stockDisponible: porId.get(externalId)?.stock ?? null,
+  }));
 }
 
 /// Marca FAILED. NO manda alerta por si sola: quien la llama decide, porque

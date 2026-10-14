@@ -23,8 +23,17 @@ export function formatPriceArs(value: Prisma.Decimal | number): string {
 /// medianoche aparece como si hubiera sido al mediodia. Ya nos costo una
 /// vuelta de diagnostico creyendo que `lastSyncedAt` no se actualizaba.
 ///
-/// Cualquier fecha CON HORA que vea una persona pasa por aca. Las que son
-/// solo fecha (`toLocaleDateString`) no tienen el problema.
+/// Cualquier fecha CON HORA que vea una persona pasa por aca; las de solo
+/// fecha, por formatDate.
+///
+/// La zona horaria va SIEMPRE explicita. Sin ella, Intl usa la del proceso:
+/// en Vercel es UTC, asi que una corrida de las 14:10 ART se mostraba como
+/// "17:10". Y en un componente de cliente seria la del navegador, distinta
+/// de la del servidor: el texto cambiaria al hidratar. Tambien afecta a las
+/// fechas sin hora — entre las 21:00 y las 23:59 ART, en UTC ya es el dia
+/// siguiente.
+export const APP_TIME_ZONE = "America/Argentina/Buenos_Aires";
+
 const dateTimeFormatter = new Intl.DateTimeFormat("es-AR", {
   day: "2-digit",
   month: "2-digit",
@@ -32,10 +41,22 @@ const dateTimeFormatter = new Intl.DateTimeFormat("es-AR", {
   hour: "2-digit",
   minute: "2-digit",
   hour12: false,
+  timeZone: APP_TIME_ZONE,
+});
+
+const dateFormatter = new Intl.DateTimeFormat("es-AR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  timeZone: APP_TIME_ZONE,
 });
 
 export function formatDateTime(value: Date): string {
   return dateTimeFormatter.format(value);
+}
+
+export function formatDate(value: Date): string {
+  return dateFormatter.format(value);
 }
 
 /// Siglas y marcas que se escriben en mayuscula SIEMPRE. Sin esta lista,

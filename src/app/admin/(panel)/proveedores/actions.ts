@@ -3,7 +3,7 @@
 import { ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/admin-auth";
+import { requireAdmin, requireSuperAdmin } from "@/lib/admin-auth";
 import { syncZecatBatch } from "@/lib/zecat/sync";
 import {
   acquireSyncRun,
@@ -12,7 +12,23 @@ import {
   recordBatch,
   SyncLockError,
 } from "@/lib/sync-run";
-import { sendSyncAlert } from "@/lib/email";
+import { sendSyncAlert, type EnvioResultado } from "@/lib/email";
+
+/// Manda una alerta de prueba REAL a ALERT_EMAIL. Existe para poder
+/// verificar la cadena entera (variable, API key, dominio, bandeja) sin
+/// esperar a un incidente: la primera alerta real del umbral llego y no se
+/// vio, y no habia forma de probarla a voluntad.
+///
+/// Solo super-admin: manda un mail de verdad, y quien recibe las alertas es
+/// configuracion tecnica, no operacion del dia a dia.
+export async function sendTestSyncAlert(): Promise<EnvioResultado> {
+  const admin = await requireSuperAdmin();
+  return sendSyncAlert({
+    motivo: "prueba",
+    provider: ProductOrigin.ZECAT,
+    pedidoPor: admin.email,
+  });
+}
 
 /// Batch chico a proposito: cada invocacion tiene que quedar lejos del
 /// limite de duracion de Vercel. El navegador conduce el loop.

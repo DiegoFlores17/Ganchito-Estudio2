@@ -75,7 +75,12 @@ export function HeaderControls({
   useEffect(() => {
     if (abierto === null) return;
     function alTecla(e: KeyboardEvent) {
-      if (e.key === "Escape") setAbierto(null);
+      // Un Escape que ya atendio otro (el buscador lo usa para borrar el
+      // texto) no cierra nada: primero se borra, el segundo Escape cierra.
+      // Se mira defaultPrevented y no se confia en stopPropagation: React
+      // escucha en el mismo `document` que este listener, y frenar la
+      // propagacion no corta a otro listener del mismo nodo.
+      if (e.key === "Escape" && !e.defaultPrevented) setAbierto(null);
     }
     document.addEventListener("keydown", alTecla);
     return () => document.removeEventListener("keydown", alTecla);

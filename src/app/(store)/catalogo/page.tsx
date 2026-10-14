@@ -69,7 +69,6 @@ export default async function CatalogoPage({
         <SearchInput
           basePath="/catalogo"
           initialValue={filtros.q}
-          extraParams={extraParamsDeBusqueda(filtros)}
           placeholder="Buscar productos..."
         />
       </div>
@@ -129,18 +128,6 @@ export default async function CatalogoPage({
       </div>
     </div>
   );
-}
-
-/// Lo que el buscador de texto tiene que preservar al navegar. Va como
-/// `Record<string, string | undefined>` porque es la forma que espera
-/// SearchInput; las multi-selecciones no entran ahi y por eso ese componente
-/// arma su URL con buildCatalogHref (ver su propio comentario).
-function extraParamsDeBusqueda(filtros: ReturnType<typeof parseCatalogParams>) {
-  return {
-    categoria: filtros.categoria,
-    precioMin: filtros.precioMin?.toString(),
-    precioMax: filtros.precioMax?.toString(),
-  };
 }
 
 /// Cero resultados.

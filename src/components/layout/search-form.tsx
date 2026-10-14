@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { FormEvent, Ref } from "react";
+import { useRef, useState, type FormEvent, type Ref } from "react";
+import { ClearSearchButton, SIN_CRUZ_NATIVA } from "@/components/clear-search-button";
 
 /// El formulario de búsqueda de la barra. Lleva al catálogo con la búsqueda
 /// ya aplicada.
@@ -31,6 +32,22 @@ export function SearchForm({
   inputId: string;
 }) {
   const router = useRouter();
+  // El campo se encuentra por el FORMULARIO (no con una ref propia): la ref
+  // del input ya es la de afuera (inputRef), que la fila mobile usa para
+  // enfocarlo al abrirse.
+  const formRef = useRef<HTMLFormElement>(null);
+  const [tieneTexto, setTieneTexto] = useState(false);
+
+  /// Borra el campo. Aca no hay busqueda aplicada que deshacer: este
+  /// buscador solo navega al enviar, asi que borrar es vaciar el texto.
+  function borrar() {
+    const campo = formRef.current?.elements.namedItem("q");
+    if (campo instanceof HTMLInputElement) {
+      campo.value = "";
+      campo.focus();
+    }
+    setTieneTexto(false);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,6 +69,7 @@ export function SearchForm({
     // (o falla), el buscador igual funciona; el onSubmit solo lo mejora a
     // navegacion blanda con la entrada de historial correcta.
     <form
+      ref={formRef}
       action="/catalogo"
       method="get"
       onSubmit={handleSubmit}
@@ -66,9 +84,10 @@ export function SearchForm({
       <input
         ref={inputRef}
         id={inputId}
-        // type="search" da el campo con la X para limpiar; enterkeyhint es el
-        // que cambia la tecla de Enter del teclado del telefono a "Buscar"
-        // (inputmode sola no lo hace).
+        // type="search" por la semantica (y el teclado del telefono); su X
+        // nativa se oculta y la reemplaza ClearSearchButton, con los colores
+        // de la tienda. enterkeyhint es el que cambia la tecla de Enter del
+        // teclado del telefono a "Buscar" (inputmode sola no lo hace).
         type="search"
         name="q"
         inputMode="search"
@@ -76,8 +95,25 @@ export function SearchForm({
         autoComplete="off"
         autoFocus={autoFocus}
         placeholder="Buscá un producto"
-        className="w-full rounded-full border border-foreground/15 bg-background py-2.5 pl-4 pr-11 text-sm text-foreground outline-none placeholder:text-foreground/45 focus:border-primary"
+        onInput={(event) => setTieneTexto(event.currentTarget.value !== "")}
+        onKeyDown={(event) => {
+          // Escape con texto: borra y NO cierra la fila mobile. Un segundo
+          // Escape, ya con el campo vacio, si la cierra.
+          if (event.key === "Escape" && event.currentTarget.value) {
+            // preventDefault es la señal que mira header-controls para no
+            // cerrar la fila (ver alTecla ahi).
+            event.preventDefault();
+            borrar();
+          }
+        }}
+        className={`w-full rounded-full border border-foreground/15 bg-background py-2.5 pl-4 pr-[5.5rem] text-sm text-foreground outline-none placeholder:text-foreground/45 focus:border-primary sm:pr-20 ${SIN_CRUZ_NATIVA}`}
       />
+      {tieneTexto && (
+        <ClearSearchButton
+          onClick={borrar}
+          className="absolute right-11 top-1/2 -translate-y-1/2 sm:right-10"
+        />
+      )}
       <button
         type="submit"
         // El icono solo no dice nada a un lector de pantalla.

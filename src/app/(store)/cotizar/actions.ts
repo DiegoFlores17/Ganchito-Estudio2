@@ -159,6 +159,9 @@ export async function getQuoteItemsSummary(
         take: 1,
       },
       variants: {
+        // Solo ACTIVAS: un sku que el proveedor dejo de mandar se trata igual
+        // que uno que no existe — la linea se omite y va al aviso.
+        where: { active: true },
         select: {
           sku: true,
           colorName: true,
@@ -386,6 +389,9 @@ export async function submitQuote(
       name: true,
       currency: true,
       variants: {
+        // Mismo criterio que el resumen: un sku desactivado (el proveedor ya
+        // no lo manda) no se cotiza — la linea se omite como si no existiera.
+        where: { active: true },
         select: {
           sku: true,
           costPrice: true,

@@ -79,6 +79,21 @@ async function main() {
   check("nombres escapados", umbral.cuerpo.includes("Mochila &quot;Dual&quot; &lt;test&gt;") && !umbral.cuerpo.includes("<test>"));
   check("umbral y activos en el texto", umbral.cuerpo.includes("límite de seguridad es 31 (sobre 636"));
 
+  const variantes = armarAlerta(
+    {
+      motivo: "variantes",
+      provider: "ZECAT",
+      runId: "run-3",
+      desactivadas: 120,
+      umbralVariantes: 93,
+      umbralProductos: 29,
+      productosSinVariantes: [{ externalId: "5699", nombre: "Neceser <Weg>", stockDisponible: null }],
+    },
+    fecha
+  );
+  check("asunto de variantes con conteos y fecha", variantes.titulo === "Sync de Zecat: 120 variantes desactivadas y 1 productos sin variantes (08/10/2026, 14:16)", variantes.titulo);
+  check("variantes: dice que se revierte solo y escapa nombres", variantes.cuerpo.includes("las vuelve a activar solas") && variantes.cuerpo.includes("Neceser &lt;Weg&gt;"));
+
   const fallo = armarAlerta({ motivo: "fallo", provider: "ZECAT", runId: "run-2", detalle: "Zecat respondió 503" }, fecha);
   check("asunto del fallo con fecha", fallo.titulo === "Sync de Zecat: la corrida falló (08/10/2026, 14:16)", fallo.titulo);
   const prueba = armarAlerta({ motivo: "prueba", provider: "ZECAT", pedidoPor: "admin@ejemplo.test" }, fecha);

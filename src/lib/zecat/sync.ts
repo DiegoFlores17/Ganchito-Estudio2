@@ -90,16 +90,30 @@ async function resolveCategoryId(
   }
 }
 
+export interface SyncProductResult {
+  outcome: "created" | "updated";
+  /// Variantes que estaban activas y esta corrida ya no trajo.
+  variantesDesactivadas: number;
+  /// true si el producto vino sin ninguna variante vendible y quedo inactivo.
+  sinVariantes: boolean;
+}
+
 /// Sincroniza un solo producto (detalle completo) contra la base.
-/// Devuelve si fue creado o actualizado.
 /// Todo el sync de un producto (producto, variantes, imágenes, áreas y
 /// tipos de impresión) corre dentro de una única transacción: si algo
 /// falla a mitad de camino, no queda el producto con imágenes borradas
 /// y sin recrear.
 export async function syncProduct(
   detail: ZecatGenericProduct
-): Promise<"created" | "updated"> {
+): Promise<SyncProductResult> {
   const variants = flattenVariants(detail.variants);
+
+  // Un producto sin ninguna variante vendible no se puede cotizar: queda
+  // inactivo. Paso con el 5699 (Neceser Weg): Zecat lo sigue publicando,
+  // pero con `variants: {}` mientras espera reposicion. Se recalcula en cada
+  // corrida, asi que se reactiva solo cuando vuelven las variantes — mismo
+  // mecanismo que `published`.
+  const sinVariantes = !variants.some((v) => v.active ?? true);
 
   // El costo se calcula POR VARIANTE (price publico x descuento de partner
   // de esa variante) y ANTES de la transaccion: si alguna variante no tiene
@@ -163,7 +177,7 @@ export async function syncProduct(
       widthCm: toDecimalOrNull(detail.dimensions?.width),
       lengthCm: toDecimalOrNull(detail.dimensions?.length),
       weightG: toDecimalOrNull(detail.dimensions?.weight),
-      active: detail.published ?? true,
+      active: (detail.published ?? true) && !sinVariantes,
       categoryId,
       lastSyncedAt: new Date(),
     };
@@ -231,6 +245,21 @@ export async function syncProduct(
         },
       });
     }
+
+    // Las variantes que el proveedor dejo de mandar se DESACTIVAN, no se
+    // borran: el sku sigue existiendo para las cotizaciones ya emitidas
+    // (QuoteItem guarda el sku como texto y el precio congelado). Sin esto
+    // quedaban a la venta con el stock de la ultima vez que vinieron — en
+    // produccion habia 33 variantes cotizables que Zecat ya no ofrecia. Si
+    // vuelven, el upsert de arriba las reactiva.
+    const desactivadas = await tx.productVariant.updateMany({
+      where: {
+        productId: product.id,
+        sku: { notIn: variants.map((v) => v.sku) },
+        active: true,
+      },
+      data: { active: false },
+    });
 
     // Imágenes, áreas y tipos de impresión no tienen una clave estable en
     // nuestro schema: se borran (scoped a este producto) y se recrean,
@@ -314,7 +343,11 @@ export async function syncProduct(
       });
     }
 
-    return existing ? "updated" : "created";
+    return {
+      outcome: existing ? "updated" : "created",
+      variantesDesactivadas: desactivadas.count,
+      sinVariantes,
+    } satisfies SyncProductResult;
   });
 }
 
@@ -367,6 +400,11 @@ export interface ZecatBatchResult {
   isLast: boolean;
 }
 
+/// Minimo de productos en una pagina para que "todos sin variantes" se lea
+/// como respuesta rota y no como casualidad. Por debajo (la ultima pagina,
+/// que puede traer 1 o 2) no se aplica la guarda.
+const MIN_PAGINA_ANOMALA = 5;
+
 export async function syncZecatBatch(
   page: number,
   limit: number
@@ -382,10 +420,54 @@ export async function syncZecatBatch(
     isLast: page >= (lista.total_pages ?? page),
   };
 
+  // Primera pasada: bajar los detalles SIN escribir nada, para poder mirar
+  // la tanda entera antes de tocar la base (ver la guarda de abajo).
+  const detalles: Array<{
+    externalId: string;
+    detail?: ZecatGenericProduct;
+    error?: unknown;
+  }> = [];
   for (const listItem of lista.generic_products) {
-    result.seenExternalIds.push(String(listItem.id));
+    const externalId = String(listItem.id);
+    // Visto ANTES de pedir el detalle, a proposito: un producto cuyo
+    // detalle falla sigue estando en el listado, y no puede terminar
+    // contado como ausente (y auto-pausado) por un error de red.
+    result.seenExternalIds.push(externalId);
     try {
-      const detail = await fetchGenericProductDetail(listItem.id);
+      detalles.push({
+        externalId,
+        detail: await fetchGenericProductDetail(listItem.id),
+      });
+    } catch (error) {
+      detalles.push({ externalId, error });
+    }
+  }
+
+  // Guarda de variantes vacias: un producto sin variantes queda inactivo
+  // (syncProduct), y eso no pasa por la cordura ni por el umbral de
+  // ausentes. Si Zecat devolviera `variants: {}` por una falla, apagaria el
+  // catalogo producto por producto. Una pagina ENTERA sin variantes no es
+  // una reposicion pendiente, es una respuesta rota: se corta antes de
+  // escribir, y la corrida termina FAILED con alerta. El caso intermedio
+  // (muchos, pero no todos) lo cubre el umbral de finishSyncRun.
+  const conDetalle = detalles.filter((d) => d.detail);
+  const vacios = conDetalle.filter(
+    (d) => !flattenVariants(d.detail!.variants).some((v) => v.active ?? true)
+  );
+  if (
+    conDetalle.length >= MIN_PAGINA_ANOMALA &&
+    vacios.length === conDetalle.length
+  ) {
+    throw new Error(
+      `Respuesta anómala de Zecat: los ${conDetalle.length} productos de la página ${page} vinieron sin variantes. No se escribió nada de esa página.`
+    );
+  }
+
+  for (const { externalId, detail, error: errorDetalle } of detalles) {
+    try {
+      if (!detail) {
+        throw errorDetalle ?? new Error("Zecat no devolvió el detalle del producto.");
+      }
 
       if (detail.currency === "USD") {
         result.counters.usdWarnings++;
@@ -394,25 +476,35 @@ export async function syncZecatBatch(
         );
       }
 
-      const outcome = await syncProduct(detail);
-      if (outcome === "created") result.counters.created++;
+      const r = await syncProduct(detail);
+      if (r.outcome === "created") result.counters.created++;
       else result.counters.updated++;
+      if (r.variantesDesactivadas > 0) {
+        console.warn(
+          `[zecat-sync] Producto ${externalId}: ${r.variantesDesactivadas} variante(s) desactivada(s), ya no vienen en el detalle.`
+        );
+      }
+      if (r.sinVariantes) {
+        console.warn(
+          `[zecat-sync] Producto ${externalId} (${detail.name}) vino SIN variantes: queda inactivo hasta que vuelvan.`
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      result.errors.push({ externalId: String(listItem.id), message });
+      result.errors.push({ externalId, message });
 
       // Sin costo calculable NO puede quedar a la venta el precio viejo:
       // si el producto ya existia, se pausa. "Un producto faltante y
       // visible es preferible a uno con precio inflado que nadie detecta."
       if (error instanceof ZecatPricingError) {
         const paused = await prisma.product.updateMany({
-          where: { zecatId: String(listItem.id), active: true },
+          where: { zecatId: externalId, active: true },
           data: { active: false },
         });
         if (paused.count > 0) {
           result.counters.paused++;
           console.warn(
-            `[zecat-sync] Producto ${listItem.id} PAUSADO: existia con el costo viejo y no se pudo recalcular.`
+            `[zecat-sync] Producto ${externalId} PAUSADO: existia con el costo viejo y no se pudo recalcular.`
           );
           continue;
         }

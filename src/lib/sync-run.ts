@@ -229,6 +229,16 @@ export async function finishSyncRun(runId: string) {
     });
   }
 
+  // Un conteo y una alerta: si fallan, la corrida igual se marca DONE (el
+  // auto-pausado de arriba ya se aplico; quedar RUNNING por esto seria peor).
+  let variantes: Awaited<ReturnType<typeof revisarVariantes>>;
+  try {
+    variantes = await revisarVariantes(run, umbral, supplier);
+  } catch (error) {
+    console.error("[sync-run] No se pudo revisar las variantes de la corrida:", error);
+    variantes = { desactivadas: 0, productosSinVariantes: [] };
+  }
+
   const updated = await prisma.syncRun.update({
     where: { id: runId },
     data: {
@@ -240,12 +250,129 @@ export async function finishSyncRun(runId: string) {
     },
   });
   // pausedMissing no se persiste (es derivable del estado actual); se
-  // devuelve para el resumen inmediato.
+  // devuelve para el resumen inmediato. Los conteos de variantes tampoco
+  // (todavia): se persisten con el resumen de la corrida, en la etapa B.
   return {
     run: updated,
     pausedMissingExternalIds: pausedMissing,
+    variantesDesactivadas: variantes.desactivadas,
+    productosSinVariantes: variantes.productosSinVariantes.length,
     aborted: false as const,
   };
+}
+
+/// Umbral de seguridad de un proveedor: max(piso, X% de sus activos), con X
+/// de Supplier.autoPauseMaxPercent (5 si la fila todavia no existe, el mismo
+/// default del schema). Solo lee: lo usa tambien el sync de CDO, que no
+/// tiene SyncRun, para frenar ANTES de escribir.
+export async function umbralDeSeguridad(provider: ProductOrigin) {
+  const [activos, supplier] = await Promise.all([
+    prisma.product.count({
+      where: { origin: provider, active: true, deletedAt: null },
+    }),
+    prisma.supplier.findUnique({ where: { origin: provider } }),
+  ]);
+  const porcentaje = supplier ? Number(supplier.autoPauseMaxPercent) : 5;
+  return {
+    umbral: Math.max(AUTO_PAUSE_FLOOR, Math.floor((activos * porcentaje) / 100)),
+    activos,
+    porcentaje,
+  };
+}
+
+/// Lo que esta corrida hizo con las variantes, y alerta si fue demasiado.
+///
+/// Se DERIVA de la base en vez de acumularse por batch: una variante
+/// desactivada en esta corrida es una inactiva cuyo updatedAt es posterior
+/// al inicio (el updateMany del sync lo renueva; las que ya estaban
+/// inactivas no se tocan). Asi no hace falta una columna nueva.
+///
+/// Limite conocido: una variante que el PROVEEDOR manda con active:false
+/// tambien queda inactiva con updatedAt renovado (el upsert lo renueva en
+/// cada corrida), y se cuenta aunque no se haya "dejado de mandar". Hoy no
+/// pasa: en produccion no hay una sola variante inactiva (medido el
+/// 2026-10-14). El conteo exacto, por transicion, llega con el resumen
+/// persistido de la corrida (etapa B).
+///
+/// Nunca tira: es un conteo y una alerta. Si falla, finishSyncRun tiene que
+/// seguir y marcar la corrida DONE igual.
+///
+/// Por que solo alerta y no frena: a esta altura ya se aplico (cada
+/// producto se escribe en su transaccion, durante la corrida), y se
+/// revierte sola en la proxima corrida sana. El caso que no puede esperar
+/// —una respuesta rota del proveedor, con TODO vacio— lo corta antes de
+/// escribir la guarda por pagina de syncZecatBatch.
+async function revisarVariantes(
+  run: { id: string; provider: ProductOrigin; startedAt: Date },
+  umbralProductos: number,
+  supplier: { autoPauseMaxPercent: Prisma.Decimal }
+) {
+  const desde = run.startedAt;
+  const [desactivadas, variantesActivas, productosSinVariantes] =
+    await Promise.all([
+      prisma.productVariant.count({
+        where: {
+          active: false,
+          updatedAt: { gte: desde },
+          product: { origin: run.provider },
+        },
+      }),
+      prisma.productVariant.count({
+        where: {
+          active: true,
+          product: { origin: run.provider, active: true, deletedAt: null },
+        },
+      }),
+      // VACIADOS por esta corrida: sin ninguna variante activa, y con alguna
+      // variante escrita en esta corrida (la que se desactivo). Un producto
+      // que ya estaba vacio desde antes no tiene variantes tocadas — el
+      // updateMany del sync solo toca las activas — asi que no suma: contar
+      // el estado en vez de la transicion haria que un grupo estable de
+      // vacios disparara la alerta en cada corrida.
+      prisma.product.findMany({
+        where: {
+          origin: run.provider,
+          deletedAt: null,
+          lastSyncedAt: { gte: desde },
+          variants: {
+            none: { active: true },
+            some: { updatedAt: { gte: desde } },
+          },
+        },
+        select: { zecatId: true, cdoId: true, name: true },
+      }),
+    ]);
+
+  // Mismo criterio que los ausentes: piso absoluto y el % del proveedor,
+  // aplicado a lo que se mide (productos por un lado, variantes por otro).
+  const umbralVariantes = Math.max(
+    AUTO_PAUSE_FLOOR,
+    Math.floor(
+      (variantesActivas * Number(supplier.autoPauseMaxPercent)) / 100
+    )
+  );
+
+  if (
+    productosSinVariantes.length > umbralProductos ||
+    desactivadas > umbralVariantes
+  ) {
+    await sendSyncAlert({
+      provider: run.provider,
+      motivo: "variantes",
+      runId: run.id,
+      desactivadas,
+      umbralVariantes,
+      umbralProductos,
+      productosSinVariantes: productosSinVariantes.map((p) => ({
+        externalId:
+          (run.provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId) ?? "?",
+        nombre: p.name,
+        stockDisponible: null,
+      })),
+    });
+  }
+
+  return { desactivadas, productosSinVariantes };
 }
 
 /// Nombre y ultimo stock disponible conocido de los ausentes, para que la

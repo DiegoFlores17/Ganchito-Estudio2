@@ -40,6 +40,8 @@ export async function runCdoSync(etiquetaEntorno: string) {
   console.log(`  Actualizados:       ${summary.updated}`);
   console.log(`  Fallidos:           ${summary.failed}`);
   console.log(`  Inactivos sin foto: ${summary.sinImagen.length}`);
+  console.log(`  Sin variantes:      ${summary.sinVariantes.length} (quedan inactivos)`);
+  console.log(`  Variantes desact.:  ${summary.variantesDesactivadas} (CDO dejo de mandarlas)`);
   console.log(`  SKU sintetico:      ${summary.skuSintetico}`);
   console.log(`  Sin net_price:      ${summary.variantesSinPrecio.length}`);
   console.log(`  Tiempo:             ${elapsedSeconds}s`);

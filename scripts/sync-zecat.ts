@@ -113,7 +113,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const { run: done, pausedMissingExternalIds } = fin;
+  const { run: done, pausedMissingExternalIds, variantesDesactivadas, productosSinVariantes } = fin;
   const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
 
   console.log("\nResumen de la sincronizacion:");
@@ -122,6 +122,8 @@ async function main() {
   console.log(`  Actualizados:     ${done.updated}`);
   console.log(`  Pausados:         ${done.paused}`);
   console.log(`  Fallidos:         ${done.failed}`);
+  console.log(`  Variantes desact: ${variantesDesactivadas} (el proveedor dejo de mandarlas)`);
+  console.log(`  Sin variantes:    ${productosSinVariantes} producto(s), quedan inactivos`);
   console.log(`  Currency "USD":   ${done.usdWarnings}`);
   console.log(`  Tiempo:           ${elapsedSeconds}s`);
 

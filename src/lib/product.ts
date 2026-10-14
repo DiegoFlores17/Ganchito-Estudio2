@@ -12,6 +12,10 @@ export async function getProductById(id: string) {
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
       },
       variants: {
+        // Solo las ACTIVAS: una variante que el proveedor dejo de mandar no
+        // se muestra, no entra en el rango de precio ni se puede elegir.
+        // (El filtro del panel de compra queda como redundante.)
+        where: { active: true },
         orderBy: { sku: "asc" },
         select: {
           id: true,

@@ -156,7 +156,10 @@ async function searchProductIds(search: string): Promise<string[]> {
     SELECT DISTINCT p.id
     FROM products p
     LEFT JOIN categories c ON c.id = p."categoryId"
-    LEFT JOIN product_variants v ON v."productId" = p.id
+    -- Solo variantes ACTIVAS: buscar "rojo" no puede traer un producto cuyo
+    -- unico rojo el proveedor dejo de mandar. Va en el ON y no en el WHERE
+    -- para que el LEFT JOIN siga trayendo productos por nombre o categoria.
+    LEFT JOIN product_variants v ON v."productId" = p.id AND v.active
     WHERE p.active = true
       AND p."deletedAt" IS NULL
       AND (
@@ -205,8 +208,10 @@ async function priceWhere(
     if ((priceMin !== undefined && !min) || (priceMax !== undefined && !max)) return null;
 
     const condiciones: Prisma.ProductWhereInput[] = [{ currency }];
-    if (max) condiciones.push({ variants: { some: { costPrice: { lte: max } } } });
-    if (min) condiciones.push({ variants: { none: { costPrice: { lt: min } } } });
+    // Solo variantes ACTIVAS: una que el proveedor dejo de mandar no puede
+    // hacer entrar (ni sacar) a un producto de un rango de precio.
+    if (max) condiciones.push({ variants: { some: { active: true, costPrice: { lte: max } } } });
+    if (min) condiciones.push({ variants: { none: { active: true, costPrice: { lt: min } } } });
     return { AND: condiciones };
   };
 
@@ -235,7 +240,7 @@ async function facetaWhere(
     // Varios colores son un OR entre si (azul O negro), no un AND: pedir un
     // producto que venga en los dos a la vez no es lo que significa marcar
     // dos chips.
-    pedidos.push({ variants: { some: { colorName: { in: grafias } } } });
+    pedidos.push({ variants: { some: { active: true, colorName: { in: grafias } } } });
   }
 
   if (tecnicas?.length) {
@@ -316,6 +321,9 @@ export async function getProducts({
         // card necesita todas para saber si muestra un precio exacto o un
         // "Desde" (ver computePriceRange).
         variants: {
+          // Solo las ACTIVAS: el precio "Desde" y el aviso de stock no pueden
+          // salir de una variante que el proveedor ya no vende.
+          where: { active: true },
           select: {
             stock: true,
             reservedStock: true,
@@ -349,6 +357,8 @@ export async function getFeaturedProducts(take: number) {
     include: {
       images: { where: { isMain: true }, take: 1 },
       variants: {
+          // Mismo criterio que la grilla del catalogo: solo las activas.
+          where: { active: true },
           select: {
             stock: true,
             reservedStock: true,
@@ -391,7 +401,7 @@ const PERCENTIL_PISO = 0.05;
 
 async function grafiasDeColor(): Promise<string[]> {
   const filas = await prisma.productVariant.findMany({
-    where: { product: VIVOS, colorName: { not: null } },
+    where: { product: VIVOS, active: true, colorName: { not: null } },
     select: { colorName: true },
     distinct: ["colorName"],
   });
@@ -462,7 +472,7 @@ export async function getCatalogFilterOptions(): Promise<CatalogFilterOptions> {
              MAX(v."colorHex") AS hex
       FROM product_variants v
       JOIN products p ON p.id = v."productId"
-      WHERE p.active AND p."deletedAt" IS NULL AND v."colorName" IS NOT NULL
+      WHERE p.active AND p."deletedAt" IS NULL AND v.active AND v."colorName" IS NOT NULL
       GROUP BY v."colorName"
     `,
     prisma.$queryRaw<{ nombre: string; productos: bigint }[]>`
@@ -499,7 +509,7 @@ async function rangoDePrecios(config: Awaited<ReturnType<typeof getPricingConfig
   // el orden por costo cuando hay dos monedas. Se traen los costos por moneda
   // y se convierten en memoria: son ~2700 numeros, una sola consulta.
   const variantes = await prisma.productVariant.findMany({
-    where: { product: VIVOS },
+    where: { product: VIVOS, active: true },
     select: { costPrice: true, product: { select: { currency: true } } },
   });
 

@@ -275,6 +275,16 @@ export type SyncAlertInput =
     }
   /// La corrida termino FAILED (error del loop o guarda de cordura).
   | { motivo: "fallo"; provider: string; runId: string; detalle: string }
+  /// Demasiadas variantes desactivadas o productos sin variantes de golpe.
+  | {
+      motivo: "variantes";
+      provider: string;
+      runId: string;
+      desactivadas: number;
+      umbralVariantes: number;
+      umbralProductos: number;
+      productosSinVariantes: AusenteAlerta[];
+    }
   /// Envio de prueba pedido desde el panel.
   | { motivo: "prueba"; provider: string; pedidoPor: string };
 
@@ -358,6 +368,46 @@ export function armarAlerta(
       cuerpo: `
   <p style="${ESTILO_PARRAFO} white-space: pre-wrap;">${escapar(input.detalle)}</p>
   <p style="${ESTILO_PARRAFO}">Esta corrida no pausó ni borró nada. Los productos que alcanzó a actualizar antes del fallo quedan con los datos nuevos; el resto, con los de la corrida anterior. La próxima sincronización completa los pone al día.</p>
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+    };
+  }
+
+  if (input.motivo === "variantes") {
+    const m = input.productosSinVariantes.length;
+    const filas = input.productosSinVariantes
+      .map(
+        (p) => `
+      <tr>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(p.externalId)}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee;">${escapar(p.nombre ?? "(sin nombre)")}</td>
+      </tr>`
+      )
+      .join("");
+    return {
+      titulo: `Sync de ${proveedor}: ${input.desactivadas} variantes desactivadas y ${m} productos sin variantes (${cuando})`,
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">En esta sincronización, ${proveedor} dejó de mandar <strong>${input.desactivadas} variantes</strong> (colores o talles) que estaban a la venta, y <strong>${m} productos</strong> vinieron sin ninguna variante. Es más de lo normal: los límites de seguridad son ${input.umbralVariantes} variantes y ${input.umbralProductos} productos.</p>
+  <p style="${ESTILO_PARRAFO}">Ya se aplicó: esas variantes no se muestran ni se pueden cotizar, y los productos sin variantes salieron de la tienda. Las cotizaciones ya enviadas no cambian.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo verificar</h2>
+  <p style="${ESTILO_PARRAFO}">Buscá 2 o 3 productos de la lista en la web de ${proveedor}. Si ahí tampoco tienen colores o talles disponibles, es real (falta de stock o reposición pendiente) y no hay nada que hacer. Si en la web se ven normales, probablemente fue una falla momentánea de ${proveedor}.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo resolver</h2>
+  <p style="${ESTILO_PARRAFO}">No hace falta hacer nada para revertirlo: la próxima sincronización que reciba las variantes las vuelve a activar solas. Si fue una falla y no querés esperar, corré una sincronización desde el panel. Si el problema se repite en varias corridas seguidas, avisale a quien opera el sistema.</p>
+  ${
+    m
+      ? `<h2 style="${ESTILO_SUBTITULO}">Los ${m} productos sin variantes</h2>
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;">
+    <thead>
+      <tr style="text-align: left; color: #666; font-size: 13px;">
+        <th style="padding: 6px 10px;">Id</th>
+        <th style="padding: 6px 10px;">Producto</th>
+      </tr>
+    </thead>
+    <tbody>${filas}</tbody>
+  </table>`
+      : ""
+  }
   <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
     };
   }

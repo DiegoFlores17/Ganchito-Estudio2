@@ -1,5 +1,7 @@
 import { Currency, ProductOrigin, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { AUTO_PAUSE_FLOOR, umbralDeSeguridad } from "@/lib/sync-run";
+import { sendSyncAlert } from "@/lib/email";
 import { iterateAllProducts } from "./client";
 import {
   buildSku,
@@ -47,6 +49,12 @@ export interface CdoSyncSummary {
   /// 2026-08-25, 300 de 301 portadas estan bien (0,3% con problema). El 15,2%
   /// que habiamos visto era del entorno de PRUEBAS.
   portadas: { ok: number; deformes: number; chicas: number; rotas: number };
+  /// Variantes que estaban activas y esta corrida ya no trajo (o trajo sin
+  /// net_price): quedan inactivas, no se borran.
+  variantesDesactivadas: number;
+  /// Productos que vinieron sin ninguna variante vendible: quedan inactivos
+  /// hasta que vuelvan.
+  sinVariantes: Array<{ cdoId: number; name: string }>;
   errors: Array<{ cdoId: number; message: string }>;
 }
 
@@ -111,7 +119,7 @@ export async function syncCdoProduct(
   product: CdoProduct,
   summary: CdoSyncSummary,
   probes: Map<string, ImageProbe>
-): Promise<"created" | "updated"> {
+): Promise<{ outcome: "created" | "updated"; variantesDesactivadas: number }> {
   const variants = product.variants ?? [];
   const icons = splitIcons(product.icons);
 
@@ -132,6 +140,14 @@ export async function syncCdoProduct(
     summary.sinImagen.push({ cdoId: product.id, name: product.name });
   }
 
+  // Sin ninguna variante vendible (con net_price) el producto no se puede
+  // cotizar: queda inactivo. Se recalcula en cada corrida, igual que la
+  // regla de las fotos, asi que se reactiva solo.
+  const sinVariantes = !tieneVariantesVendibles(product);
+  if (sinVariantes) {
+    summary.sinVariantes.push({ cdoId: product.id, name: product.name });
+  }
+
   return prisma.$transaction(async (tx) => {
     const categoryId = await resolveCategoryId(tx, product.categories?.[0]);
 
@@ -149,8 +165,8 @@ export async function syncCdoProduct(
       // Ademas viene null en 160 de 207 casos.
       //
       // CDO tampoco tiene flag de publicado, asi que active sale de si el
-      // producto tiene alguna foto usable.
-      active: !sinImagen,
+      // producto tiene alguna foto usable — y alguna variante vendible.
+      active: !sinImagen && !sinVariantes,
       categoryId,
       lastSyncedAt: new Date(),
     };
@@ -167,6 +183,7 @@ export async function syncCdoProduct(
     });
 
     // Variantes: upsert por sku, que es la clave real.
+    const skusRecibidos: string[] = [];
     for (const variant of variants) {
       const costPrice = extractCostPrice(variant);
       // Sin net_price no se puede vender: se saltea la variante en vez de
@@ -186,6 +203,7 @@ export async function syncCdoProduct(
       }
 
       const sku = buildSku(product.id, variant);
+      skusRecibidos.push(sku);
       if (!(variant.sku ?? "").trim()) summary.skuSintetico++;
 
       const { stock, reservedStock } = mapStock(variant);
@@ -207,6 +225,15 @@ export async function syncCdoProduct(
         create: { sku, ...variantData },
       });
     }
+
+    // Las variantes que CDO dejo de mandar (o mando sin net_price) se
+    // DESACTIVAN, no se borran: el sku sigue existiendo para las cotizaciones
+    // ya emitidas. Si vuelven, el upsert de arriba las reactiva. Mismo
+    // criterio que el conector de Zecat.
+    const desactivadas = await tx.productVariant.updateMany({
+      where: { productId: saved.id, sku: { notIn: skusRecibidos }, active: true },
+      data: { active: false },
+    });
 
     // Imagenes, tecnicas y atributos no tienen clave estable: se borran
     // (scoped a este producto) y se recrean dentro de la misma transaccion.
@@ -283,8 +310,41 @@ export async function syncCdoProduct(
       });
     }
 
-    return existing ? "updated" : "created";
+    // El conteo sale de la transaccion y se suma DESPUES del commit (en
+    // syncCdoCatalog): si se sumara aca y la transaccion fallara despues,
+    // el resumen contaria desactivaciones que nunca ocurrieron.
+    return {
+      outcome: existing ? ("updated" as const) : ("created" as const),
+      variantesDesactivadas: desactivadas.count,
+    };
   });
+}
+
+/// Una variante es vendible si trae net_price: sin costo no se puede cotizar
+/// (syncCdoProduct la saltea). Un producto sin ninguna queda inactivo.
+function tieneVariantesVendibles(product: CdoProduct): boolean {
+  return (product.variants ?? []).some((v) => Boolean(extractCostPrice(v)));
+}
+
+/// Cuantos productos ACTIVOS hoy quedarian inactivos por venir sin variantes
+/// vendibles. Cuenta TRANSICIONES, no el estado: un producto que ya estaba
+/// vacio (e inactivo) desde corridas anteriores no suma — si sumara, un
+/// grupo estable de vacios trabaria el sync para siempre, y cada corrida
+/// achicaria el umbral (menos activos) empeorandolo. Primera importacion
+/// (ningun activo todavia): no hay nada que proteger, no se frena.
+export async function vaciosQueSeApagarian(products: CdoProduct[]) {
+  const { umbral, activos, porcentaje } = await umbralDeSeguridad(ProductOrigin.CDO);
+  const vacios = products
+    .filter((p) => !tieneVariantesVendibles(p))
+    .map((p) => String(p.id));
+  const apagados =
+    activos === 0 || vacios.length === 0
+      ? []
+      : await prisma.product.findMany({
+          where: { origin: ProductOrigin.CDO, cdoId: { in: vacios }, active: true },
+          select: { cdoId: true, name: true },
+        });
+  return { seApagarian: apagados.length, apagados, umbral, activos, porcentaje };
 }
 
 export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
@@ -298,12 +358,28 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
     variantesSinPrecio: [],
     iconosDesconocidos: [],
     portadas: { ok: 0, deformes: 0, chicas: 0, rotas: 0 },
+    variantesDesactivadas: 0,
+    sinVariantes: [],
     errors: [],
   };
 
   // 1. Bajar el catalogo entero. Son 3 requests: el listado ya trae todo.
   const products: CdoProduct[] = [];
   for await (const product of iterateAllProducts()) products.push(product);
+
+  // Guarda de variantes vacias, ANTES de medir o escribir nada. Un producto
+  // sin variantes queda inactivo, y eso no pasa por ninguna otra guarda: si
+  // CDO devolviera las variantes vacias por una falla, el sync apagaria el
+  // catalogo producto por producto. Como aca el catalogo entero ya esta en
+  // memoria, se puede frenar ANTES de escribir — mismo umbral que el
+  // auto-pausado de ausentes (ver lib/sync-run.ts).
+  const { seApagarian, apagados, umbral, activos, porcentaje } =
+    await vaciosQueSeApagarian(products);
+  if (seApagarian > umbral) {
+    throw new Error(
+      `Respuesta anómala de CDO: ${seApagarian} productos activos vinieron sin variantes vendibles, y el umbral de seguridad es ${umbral} (sobre ${activos} activos). No se escribió nada.`
+    );
+  }
 
   // 2. Medir las imagenes ANTES de escribir nada.
   //
@@ -339,7 +415,13 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
 
     try {
       const result = await syncCdoProduct(product, summary, probes);
-      if (result === "created") summary.created++;
+      if (result.variantesDesactivadas > 0) {
+        summary.variantesDesactivadas += result.variantesDesactivadas;
+        console.warn(
+          `[cdo-sync] Producto ${product.id}: ${result.variantesDesactivadas} variante(s) desactivada(s), ya no vienen en el listado.`
+        );
+      }
+      if (result.outcome === "created") summary.created++;
       else summary.updated++;
     } catch (error) {
       summary.failed++;
@@ -350,6 +432,40 @@ export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
     }
   }
 
+  // Alerta por desactivacion masiva de variantes: el caso que la guarda de
+  // arriba no frena (cada producto conserva alguna variante, pero CDO dejo
+  // de mandar muchas). Se aplica igual porque se revierte sola en la proxima
+  // corrida sana; el mail es para que alguien se entere. Mismo criterio de
+  // umbral que el sync de Zecat (lib/sync-run.ts). CDO todavia no tiene
+  // SyncRun, asi que no hay id de corrida.
+  const variantesActivas = await prisma.productVariant.count({
+    where: { active: true, product: { origin: ProductOrigin.CDO, active: true, deletedAt: null } },
+  });
+  const umbralVariantes = Math.max(
+    AUTO_PAUSE_FLOOR,
+    Math.floor((variantesActivas * porcentaje) / 100)
+  );
+  if (summary.variantesDesactivadas > umbralVariantes) {
+    await sendSyncAlert({
+      provider: ProductOrigin.CDO,
+      motivo: "variantes",
+      runId: "sin corrida registrada (sync de CDO por consola)",
+      desactivadas: summary.variantesDesactivadas,
+      umbralVariantes,
+      umbralProductos: umbral,
+      productosSinVariantes: apagados.map((p) => ({
+        externalId: p.cdoId ?? "?",
+        nombre: p.name,
+        stockDisponible: null,
+      })),
+    });
+  }
+
+  if (summary.sinVariantes.length) {
+    console.warn(
+      `[cdo-sync] ${summary.sinVariantes.length} producto(s) vinieron SIN variantes vendibles: quedan inactivos hasta que vuelvan.`
+    );
+  }
   if (summary.sinImagen.length) {
     console.warn(
       `[cdo-sync] ${summary.sinImagen.length} producto(s) importados INACTIVOS por no tener ninguna imagen usable. Se reactivan solos si CDO les carga la foto.`

@@ -126,6 +126,14 @@ export function SyncProviderCard({
             )}
             {resultado.failed > 0 && <> · {resultado.failed} fallidos</>}
           </p>
+          {((resultado.variantesDesactivadas ?? 0) > 0 ||
+            (resultado.productosSinVariantes ?? 0) > 0) && (
+            <p className="mt-1">
+              {resultado.variantesDesactivadas ?? 0} variantes desactivadas
+              (el proveedor dejó de mandarlas) ·{" "}
+              {resultado.productosSinVariantes ?? 0} productos sin variantes
+            </p>
+          )}
           {resultado.autoPauseSkipped && (
             <p className="mt-1 font-medium text-primary-dark">
               ⚠ {resultado.missingExternalIds?.length} productos dejaron de

@@ -72,7 +72,7 @@ async function main() {
 
   console.log("\nCorriendo el conector para este producto unicamente...");
   const result = await syncProduct(detail);
-  console.log(`Resultado del upsert: ${result}`);
+  console.log(`Resultado del upsert: ${JSON.stringify(result)}`);
 
   const saved = await prisma.product.findUnique({
     where: { zecatId: String(detail.id) },

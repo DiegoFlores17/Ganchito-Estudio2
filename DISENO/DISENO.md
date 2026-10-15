@@ -1,6 +1,10 @@
 DISEÑO.md — Brief de diseño de la tienda Ganchito Estudio
 
-Este archivo define la dirección visual. Los valores de color y el logo REALES están en la carpeta de marca del proyecto (public/brand/ o donde los hayas dejado): usá SIEMPRE esos hex y esos archivos, no los aproximes. Lo de abajo es la dirección; la marca manda.
+Actualizado el 2026-10-15. La dirección visual es la original (agosto de 2026) y sigue valiendo. Se corrigió lo que ya quedó decidido o construido (marcado "Decidido:" o "Hoy:"). El estado completo de lo construido está en HANDOFF.md, y las reglas de negocio en CLAUDE.md.
+
+Este archivo define la dirección visual. Los valores de color y el logo REALES ya están en el proyecto: usá SIEMPRE esos hex y esos archivos, no los aproximes. Lo de abajo es la dirección; la marca manda.
+- Logo e isotipo: public/logo-ganchito.svg y public/isotipo-ganchito.svg.
+- Colores: tokens de Tailwind en src/app/globals.css (--color-brand-indigo, --color-brand-mauveine, --color-brand-phlox, --color-brand-yellow, --color-brand-yellow-bus).
 
 Dirección general
 
@@ -10,7 +14,7 @@ Importante: esto NO es un clon de la referencia (lamercheria.com.ar). De la refe
 
 Identidad visual
 
-Paleta oficial de Ganchito (hex reales — configurarlos como colores de marca en Tailwind). Violeta protagonista, amarillo de acento.
+Paleta oficial de Ganchito (hex reales; hoy ya configurados como colores de marca en Tailwind, ver arriba). Violeta protagonista, amarillo de acento.
 
 Hex	Nombre	Rol
 440670	Indigo	Violeta oscuro. Fondos de bloque protagónicos, hero, footer. El color más fuerte.
@@ -34,22 +38,22 @@ Cuerpo: Montserrat regular / medium para descripciones, precios y texto largo.
 Escala de tipos clara y con jerarquía marcada (títulos muy por encima del cuerpo). El contraste de tamaños es parte del look editorial.
 Estructura de páginas
 Home
-Hero grande y protagónico (el usuario lo pidió impactante): titular fuerte con el display, fondo violeta o foto de producto lifestyle, y doble CTA —uno principal en amarillo ("Ver productos" / "Comprar") y uno secundario ("Contacto" / WhatsApp).
+Hero grande y protagónico (el usuario lo pidió impactante): titular fuerte con el display, fondo violeta o foto de producto lifestyle, y doble CTA —uno principal en amarillo ("Ver productos") y uno secundario ("Contacto" / WhatsApp). No usar "Comprar": no hay pago online, el flujo es cotización.
 Bloque de categorías "con logo" (Indumentaria, Drinkware, Bolsos, etc.), con fotos grandes y nombre claro. Inspirado en la referencia, con estética Ganchito.
 Proceso en pasos (clave para merch personalizado): Explorá → Personalizá → Revisamos → Listo. Explica cómo funciona la compra con logo. Numerado, editorial.
 Productos destacados en grilla.
 CTA final + footer con isotipo, datos de contacto y WhatsApp.
 Listado de productos
 Grilla de cards limpias: foto grande, nombre, precio. Filtros por categoría.
-Lee de NUESTRA base (Prisma), no de Zecat directo.
+Lee de NUESTRA base (Prisma), no de los proveedores directo. Hoy el catálogo junta Zecat, CDO y productos cargados a mano, con categorías propias.
 Ficha de producto
 Foto grande + miniaturas. Título con el display.
-Precio: costo × margen (desde PricingConfig). Definir con el usuario si se muestra con IVA incluido (como la referencia) o "+ IVA" aparte (como la página actual de Ganchito). El modelo soporta ambas.
+Precio: costo × margen (desde PricingConfig). Decidido: el IVA va siempre aparte, "$ X + IVA", nunca embebido. En las cards, "Desde $X" solo cuando las variantes tienen precios distintos; si son iguales, el precio exacto.
 Selector de variante (color/talle) y de cantidad (con mínimo).
 Flujo de cotización, NO pago inmediato: botón tipo "Pedir cotización" / "Agregar a mi cotización". El logo se carga en el paso de cotización, no acá.
 Mostrar qué personalización admite el producto (áreas / técnicas de impresión), como info, no como editor de imagen.
 Cotización
-El cliente revisa sus ítems, completa sus datos (nombre, empresa, email, teléfono), sube su logo/arte, y envía. Se guarda como Quote con precios congelados.
+El cliente revisa sus ítems, completa sus datos (nombre, empresa, email, teléfono), sube su logo/arte, y envía. Se guarda como Quote con precios congelados. Hoy: al enviar, además, se abre WhatsApp con el pedido pre-armado (la Quote se guarda siempre antes; WhatsApp es un extra, no un punto de falla).
 Confirmación clara de "recibimos tu solicitud, te contactamos".
 Piso de calidad (siempre)
 Responsive hasta mobile.

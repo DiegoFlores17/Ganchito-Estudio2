@@ -290,8 +290,30 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       los dos (`ALERT_EMAIL` acepta varios destinatarios), o a nadie de su
       lado. Ojo que el texto de las alertas está escrito para alguien que
       puede verificar en la web del proveedor y usar el panel.
+- [x] **Ausentes que nunca se pueden verificar quedaban activos y en verde
+      — RESUELTO (`736db8a`, 2026-10-15).** El caso: KUPFER (CDO 17678), sin
+      code guardado, "no verificado" para siempre con un texto que prometía
+      un reintento. Ahora la causa permanente pasa a "a revisar" en la
+      primera corrida, la transitoria a las 3 seguidas (≥ 20 h), y hay
+      "Pausar sin confirmación del proveedor". De paso: CDO confirma como
+      baja un detalle sin variantes vendibles, y el "·" suelto del resumen
+      se corrigió. A KUPFER se le cargó el code en Neon; que el cron lo pause
+      queda en HANDOFF, "Pendiente de verificar".
+- [ ] **El tamaño de la base sube en cada sync.** (Dato de Diego, 2026-10-15:
+      ~1,5 MB en la corrida del 2026-10-14.) La causa probable es que las
+      imágenes de cada producto se borran y se recrean en cada pasada (los dos
+      conectores, porque no guardamos el id de imagen del proveedor): filas
+      nuevas en cada corrida, y el espacio de las borradas no se devuelve
+      enseguida. **Vigilar una semana**; si sigue creciendo, cambiar a upsert
+      de imágenes (por URL dentro del producto). Tener presente el límite de
+      almacenamiento del plan gratuito de Neon (ver HANDOFF,
+      "Infraestructura y costos").
+- [ ] **El nombre visible del proveedor es "CDO Promocionales".** Así aparece
+      en el panel y en los mails de alerta. Confirmar con el cliente si lo
+      conoce así o como "Stocksur" (la API es `api.argentina.stocksur.com`).
 - [ ] **Mirar el consumo de Neon la primera semana con las ventanas de 30
-      minutos** (eran de 2 h hasta el 2026-10-15).
+      minutos** (eran de 2 h hasta el 2026-10-15). Desde ahí, la regla fija
+      está en HANDOFF, "Infraestructura y costos": Billing cada dos semanas.
       Con el cron encendido, cada proveedor pega cada minuto durante dos
       ventanas de 30 minutos por día (aunque la mayoría de los ticks no tengan nada
       que hacer: "al día" consulta la base igual). Ver en el dashboard de Neon
@@ -501,12 +523,14 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       La diferencia es que en Blob el almacenamiento tiene costo asociado, a
       diferencia del filesystem local. Evaluar borrar el blob con `del()` al
       borrar la imagen.
-- [x] **Automatizar el sync con cron** — **HECHO para Zecat: etapa D
-      verificada el 2026-10-15.** Etapas A, A2, B y C en `main` (motor de
-      ticks con lease, interruptor por proveedor). Las corridas automáticas
-      del 2026-10-14 19:25 ART y del 2026-10-15 06:00 ART se hicieron solas y
-      quedaron en verde. Las ventanas pasan de 2 h a 30 minutos con el deploy
-      de la etapa E. CDO entra con la etapa E. Detalle en HANDOFF, "Sync automático de
+- [x] **Automatizar el sync con cron** — **HECHO para los dos proveedores.**
+      Zecat: etapa D verificada el 2026-10-15 (corridas automáticas del
+      2026-10-14 19:25 ART y del 2026-10-15 06:00 ART, en verde). CDO: etapa E
+      en producción desde `e1d78a4` (2026-10-15), con su interruptor encendido
+      después de la primera corrida desde el panel; **falta ver la primera
+      automática** (2026-10-16 07:00 ART, en HANDOFF "Pendiente de
+      verificar"). Las ventanas de 30 minutos están en producción desde
+      `e1d78a4`. Detalle en HANDOFF, "Sync automático de
       proveedores". Lo de abajo es el análisis original.
 
       **Analizado y decidido (2026-08-21).** Se va por Vercel
@@ -696,9 +720,10 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       todavía no tiene. Primero la base, después el push.
 - [x] **Importar CDO a producción.** Hecho: producción tiene **309 productos
       de CDO desde el 2026-09-09** (dato de Diego; el "~950" que se estimaba
-      era una proyección desde el entorno de pruebas). Lo que queda es la
-      **etapa E**: CDO sobre el motor del sync, construida en local, con su
-      deploy pendiente (ver HANDOFF, "Pendiente de verificar").
+      era una proyección desde el entorno de pruebas). La **etapa E** (CDO
+      sobre el motor del sync) se deployó el 2026-10-15 (`e1d78a4`). La
+      primera corrida en producción, desde el panel, dio 38 creados y 308
+      actualizados (= 346), 1 variante desactivada, en ~6 min (dato de Diego).
 - [ ] **Refactorizar el conector de Zecat para que ambos sigan el mismo
       contrato.** Ahora que hay dos conectores reales se puede diseñar sobre
       casos concretos en vez de en abstracto. Hoy comparten la forma (upsert por

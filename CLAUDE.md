@@ -132,11 +132,26 @@ API), CDO (vía la suya), carga manual, y futuros proveedores.
 - **Un producto sin variantes vendibles queda inactivo** (en CDO, sin
   `net_price`), y se reactiva solo cuando vuelven.
 - **Un ausente se confirma contra el detalle del proveedor antes de
-  pausarlo.** Faltar del listado no alcanza. Solo pausa una baja confirmada
-  (404; en Zecat además despublicado o sin variantes). Timeout, 5xx o red no
-  confirman nada: quedan "no verificados" y se reintenta. Un detalle sano
-  queda "a revisar": no se pausa. Y por encima del umbral de seguridad no se
-  pausa ninguno sin una persona ("Pausar estos N").
+  pausarlo.** Faltar del listado no alcanza. Solo pausa una baja confirmada:
+  404, o un detalle sin variantes vendibles (en los dos proveedores; en
+  Zecat además, despublicado). Un detalle sano queda "a revisar": no se
+  pausa. Y por encima del umbral de seguridad no se pausa ninguno sin una
+  persona ("Pausar estos N").
+- **Un ausente que no se puede verificar no queda en verde para siempre.**
+  Lo que no confirma nada queda "no verificado" y no se pausa, pero con su
+  causa:
+  - **Permanente** (sin code de CDO guardado, code inválido, o un code que
+    hoy es de otro producto): reintentar no lo arregla, así que pasa a "a
+    revisar" en la PRIMERA corrida.
+  - **Transitoria** (timeout, 5xx, red, fuera del tope de confirmaciones):
+    pasa a "a revisar" a las 3 corridas seguidas que abarquen al menos 20 h.
+  - El texto nunca promete un reintento que no va a pasar.
+- **Dos formas de pausar ausentes, y no se mezclan:**
+  - **"Pausar estos N"**: solo lo que el PROVEEDOR confirma como baja en ese
+    momento.
+  - **"Pausar sin confirmación del proveedor"**: una decisión HUMANA
+    explícita sobre los que no se pueden verificar. Deja nota de quién lo
+    hizo y no se registra como pausado automático.
 - **Tope de "sin foto" por RACHA** (CDO). Una corrida apaga como mucho el
   umbral de productos que se quedan sin foto usable; los demás quedan
   retenidos (conservan estado e imágenes). Si la última corrida completa
@@ -323,6 +338,11 @@ sección "Sync automático de proveedores". Acá van las reglas que no se reabre
 - **Una respuesta rota del proveedor corta ANTES de escribir** (una tanda
   entera sin variantes, una lista que no cierra con su total). No se aplica
   "producto por producto" algo que solo puede ser un error del proveedor.
+- **No se deploya durante una ventana del cron.** Zecat: de 06:00 a 06:29 y
+  de 18:00 a 18:29 ART. CDO: de 07:00 a 07:29 y de 19:00 a 19:29 ART. Así
+  ninguna corrida automática queda repartida entre dos versiones del código;
+  si se está cerca de una ventana, se espera a que termine. Las ventanas viven en
+  `vercel.json` y en `VENTANAS_UTC` (`src/lib/sync/motor.ts`), en UTC.
 
 ### Verificar producción: el navegador, no curl
 

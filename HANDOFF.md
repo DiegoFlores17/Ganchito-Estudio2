@@ -4,12 +4,11 @@ Registro del estado real del proyecto para poder retomar sin reconstruir context
 Se actualiza al final de cada tanda de trabajo.
 
 **Última actualización:** 2026-10-15 — sync automático de proveedores
-(etapas A, A2, B y C pusheadas a `main`; **D verificada en producción**;
-E construida y verificada en local, sin commitear; ventanas del cron
-achicadas a 30 minutos) y buscadores.
-**Branch:** `main`. Último commit en `main`: `ca0f2e3` (motor del sync
-automático). La etapa E (CDO sobre el motor) y esta actualización de docs
-están en el árbol de trabajo, sin commitear: se suben juntas.
+completo en producción: Zecat (etapa D, verificada) y CDO (etapa E, primera
+corrida hecha; falta ver la primera automática). Ventanas del cron de 30
+minutos. Ausentes que no se pueden verificar y "Pausar sin confirmación".
+**Branch:** `main`. Último commit de código: `736db8a` (ausentes que no se
+pueden verificar). Esta actualización de docs va en un commit aparte, después.
 
 La auditoría pre-entrega (`AUDITORIA.md`) ya está en `main`: los hallazgos
 1/3/4/6 se atacaron, y los 2/5/7/9 quedaron en PENDIENTES con su cuándo. La
@@ -49,8 +48,9 @@ Se construyó por etapas, cada una con su script de verificación en
 | A2 | `01d2bbd` | Variantes que el proveedor deja de mandar se desactivan |
 | B | `6c865d9` | Estado del catálogo y resumen fijo por corrida |
 | C | `ca0f2e3` | Motor del sync automático (cron), apagado por defecto |
-| D | — | Encender el cron de Zecat: **pendiente de verificar** (ver abajo) |
-| E | sin commitear | CDO sobre el motor (al momento de escribir esto) |
+| D | — | Encender el cron de Zecat: **verificada el 2026-10-15** |
+| E | `e1d78a4` | CDO sobre el motor, ventanas de 30 min — **en producción** |
+| — | `736db8a` | Ausentes que no se pueden verificar; "Pausar sin confirmación" |
 
 ### El motor (etapa C)
 
@@ -77,9 +77,9 @@ cursor vive en la base, y el navegador solo pide ticks mientras está abierto.
   (`MAX_ERRORES_TRANSITORIOS`); al tercero, FAILED. Una respuesta rota del
   proveedor (tanda entera sin variantes, lista que no cierra) es determinista:
   FAILED directo.
-- **Ventanas de 30 minutos** (desde 2026-10-15; hasta ahí eran de 2 h), en
-  UTC en `vercel.json` y en `VENTANAS_UTC` (tienen que coincidir; la
-  regresión de C lo chequea):
+- **Ventanas de 30 minutos** (en producción desde `e1d78a4`, 2026-10-15;
+  hasta ahí eran de 2 h), en UTC en `vercel.json` y en `VENTANAS_UTC`
+  (tienen que coincidir; la regresión de C lo chequea):
   - Zecat `0-29 9,21 * * *` = de 06:00 a 06:29 y de 18:00 a 18:29 ART.
   - CDO `0-29 10,22 * * *` = de 07:00 a 07:29 y de 19:00 a 19:29 ART (etapa
     E: una hora después, para no competir).
@@ -92,6 +92,11 @@ cursor vive en la base, y el navegador solo pide ticks mientras está abierto.
     caché, así que la nueva avanza mucho más rápido. El panel arranca fuera
     de ventana, y si se cierra la pestaña, el cron la retoma dentro de las
     6 h (si no, se vence).
+  - **Por qué se achicaron: Neon.** Cada tick consulta la base aunque no
+    haya nada que hacer, así que la base no se duerme mientras dure la
+    ventana. En el monitoreo del 2026-10-14 (dato de Diego) la corrida de
+    Zecat tardó 3 min, pero la base quedó despierta hasta 5 min después del
+    fin de la ventana de 2 h. Ver "Infraestructura y costos".
 - **Reglas del cron** (`motivoParaNoArrancar`): arranca una corrida nueva solo
   si la última completa tiene más de 6 h; tope de 3 corridas automáticas por
   ventana; 10 min de espera después de una fallida. Retomar una RUNNING no
@@ -154,9 +159,11 @@ antes de encender su interruptor.
   estado actual.
 - **Confirmación de ausentes**: antes de pausar, cada ausente se confirma
   contra el detalle del proveedor (15 s de timeout, de a 8).
-  - Confirma la baja: 404; en Zecat además despublicado o sin variantes.
-  - No confirma: timeout, 5xx o red → "no verificado", no se pausa, la
-    corrida siguiente reintenta.
+  - Confirma la baja: 404, o un detalle sin variantes vendibles (en los dos
+    proveedores desde `736db8a`; antes CDO tomaba cualquier 200 como
+    "presente"). En Zecat además, despublicado.
+  - No confirma → "no verificado", no se pausa. Desde `736db8a` guarda la
+    causa (ver "Ausentes que no se pueden verificar", abajo).
   - Detalle sano → **"a revisar"**: no se pausa (sigue a la venta sin
     sincronizarse) y deja el estado en A_REVISAR.
 - **"Pausar estos N"** (ADMIN): para una corrida con el umbral frenado. Pausa
@@ -177,10 +184,30 @@ antes de encender su interruptor.
 - Números de producción del 2026-10-14 (dato de Diego): **43 variantes
   desactivadas, 0 productos sin variantes**.
 
-### E: CDO sobre el motor (sin commitear al escribir esto)
+### E: CDO sobre el motor (en producción desde `e1d78a4`)
 
-Construida y verificada en local, contra la API de producción de CDO (solo
-GET). No está en producción: ver "Pendiente de verificar".
+Construida y verificada en local contra la API de producción de CDO (solo
+GET), y deployada el 2026-10-15. El deploy, en este orden:
+
+1. Branch de backup en Neon: `backup-pre-E-2026-10-15` (dato de Diego).
+2. Migraciones `20261016120000_add_image_probes` y
+   `20261016130000_add_sync_run_sin_foto` aplicadas en Neon **antes** del
+   push (el tick de Zecat también lee `sinFotoExternalIds`). Verificado:
+   `migrate status` "up to date", y en READ ONLY la tabla `image_probes`
+   (PK `url`, 0 filas) y la columna `sinFotoExternalIds` (jsonb NOT NULL,
+   default `[]`).
+3. Variables `CDO_API_URL` (https) y `CDO_API_TOKEN` cargadas en Vercel
+   (dato de Diego).
+4. Push: deploy de producción de `e1d78a4` en "success". Verificado después:
+   `/api/cron/sync/cdo` sin autorización responde **401** desde `gru1`; no
+   había corridas RUNNING ni FAILED nuevas.
+5. **Primera corrida de CDO en producción, desde el panel, el 2026-10-15**
+   (dato de Diego): **38 creados, 308 actualizados (= 346), 1 variante
+   desactivada, 0 sin variantes, ~6 min**, estado verde. La estimación de
+   ~26 min era la de local; desde `gru1` es mucho más rápido.
+6. Después, Diego encendió el interruptor de CDO.
+
+Lo que trae:
 
 - **Conector de CDO sobre el motor**: el listado trae el producto entero, así
   que "cargar" no pide nada por producto (usa el catálogo bajado en el tick).
@@ -205,6 +232,53 @@ GET). No está en producción: ver "Pendiente de verificar".
 - **`resolveCategoryId` fuera de la transacción**, con reintento ante P2002.
 - **Tiempos medidos en local** (346 productos): **1.571 s con la caché vacía**
   (29 ticks) y **33,8 s con la caché cargada** (un tick).
+
+### Ausentes que no se pueden verificar (`736db8a`)
+
+Sin esto, un ausente que nunca se podía verificar —el caso real: KUPFER, un
+producto de CDO sin code guardado— quedaba activo y a la venta para siempre,
+con el panel en verde y un texto que prometía un reintento que no iba a
+pasar.
+
+- Cada "no verificado" guarda su **causa** en el resumen de la corrida
+  (`noVerificadosDetalle`, JSON: no lleva migración):
+  - **Permanente**: sin code, code con forma inválida, o un code que hoy es
+    de otro producto. Pasa a **A_REVISAR en la primera corrida**.
+  - **Transitoria**: timeout, 5xx, red, o fuera del tope de confirmaciones.
+    Pasa a A_REVISAR a las **3 corridas seguidas** (`CORRIDAS_PARA_ESCALAR`)
+    que además abarquen **al menos 20 h** (`RACHA_MINIMA_MS`). Cuentan solo
+    las corridas completas que llegaron a preguntar: las FAILED y las que
+    frenaron el umbral se saltean. Una corrida que lo verifica corta la
+    racha. Sin el mínimo de 20 h, tres clicks al botón durante una caída de
+    10 minutos escalaban todo.
+- **Textos que no prometen lo que no va a pasar**: el permanente dice
+  "Revisalo y pausalo a mano si corresponde"; el transitorio, que el
+  proveedor no respondió y se reintenta; el que quedó fuera del tope, que no
+  se le preguntó y queda para las próximas.
+- **"Pausar sin confirmación del proveedor"** (ADMIN), separada de "Pausar
+  estos N" a propósito: aquella pausa solo lo que el proveedor confirma; esta
+  es una decisión humana explícita sobre los que no se pueden verificar.
+  - El servidor recalcula la lista y rechaza cualquier id que no esté (no
+    pausa ninguno).
+  - La pausa y una nota con quién lo hizo van en la **misma transacción**, en
+    la última corrida completa. No toca `autoPausedExternalIds`.
+  - Aborta si terminó otra corrida entre el cálculo de la lista y el click.
+  - El permiso (`requireAdmin`) está **verificado leyendo el código, no
+    ejecutándolo**: la acción necesita una sesión de Next.
+- **El separador "·" suelto** al final de la línea del resumen: corregido
+  (los separadores van entre avisos).
+- Verificación: `scripts/audit-verify-no-verificables.ts` (40 chequeos,
+  contra la base de prueba con la API de CDO simulada).
+
+**KUPFER (cdoId 17678).** No venía en el listado y no tenía code. Con GET se
+confirmó que `/products/K105` responde 200 con `id: 17678` y
+`variants: []` (CDO lo publica sin variantes; el listado no trae esos). El
+2026-10-15 a las 15:16 ART se hizo en Neon, en una transacción que exigía
+exactamente 1 fila:
+`UPDATE products SET "externalId" = 'K105' WHERE "cdoId" = '17678' AND "externalId" IS NULL`.
+Resultado: `[{"id":"cmta8pjkr03c24msxnwh3nxk5","cdoId":"17678","externalId":"K105","active":true}]`.
+El cron de CDO del 2026-10-16 a las 07:00 tiene que confirmarlo como baja y
+pausarlo solo: **pendiente de verificar**.
 
 ### Hora del panel
 
@@ -1016,13 +1090,36 @@ Cualquier trabajo de performance o de feedback de carga se valida en Vercel.
   **`backup-pre-E-2026-10-15`** (dato de Diego). No consta si la "back-up"
   previa a C sigue existiendo.
 - **Migraciones aplicadas en Neon en esta tanda:**
-  `20261014120000_add_sync_run_summary` (etapa B) y
-  `20261015120000_add_sync_engine` (etapa C).
-  **Pendientes para la etapa E:** `20261016120000_add_image_probes` y
-  `20261016130000_add_sync_run_sin_foto` (aplicadas solo en local).
+  `20261014120000_add_sync_run_summary` (etapa B),
+  `20261015120000_add_sync_engine` (etapa C), y el 2026-10-15
+  `20261016120000_add_image_probes` y `20261016130000_add_sync_run_sin_foto`
+  (etapa E). `migrate status` contra Neon: "up to date". El commit
+  `736db8a` no lleva migración.
 - **Resend** (mails de cotización y alertas): la cuenta se creó con la cuenta
   de Google de Ganchito. Para entrar hace falta un código que tiene el dueño.
   No se sabe si es la de `consultas@` o la de `diseno@`.
+- **No deployar durante una ventana del cron:** Zecat de 06:00 a 06:29 y de
+  18:00 a 18:29 ART; CDO de 07:00 a 07:29 y de 19:00 a 19:29 ART.
+
+### Infraestructura y costos
+
+Datos de Diego del 2026-10-15; los límites de los planes son los que informan
+Neon y Vercel, no se midieron acá.
+
+- **Neon, plan gratuito: 100 CU-hora por proyecto por mes** (~400 h a
+  0,25 CU). **Si se agotan, la base se suspende hasta el mes siguiente: la
+  tienda deja de funcionar.**
+  - Estimado con las ventanas de 30 min: ~15 CU-hora/mes del cron. El riesgo
+    real es el tráfico disperso a lo largo del día, que no deja dormir la
+    base.
+  - **Regla: revisar Billing de Neon cada dos semanas.** Si la proyección del
+    mes pasa de 70 CU-hora, pasar a **Launch** (pago por uso).
+  - Ojo también con el almacenamiento: ver el ítem de PENDIENTES sobre el
+    tamaño de la base, que crece en cada sync.
+- **Vercel Pro: Spend Management** con presupuesto de **20 USD de consumo
+  extra** y la **pausa encendida**. El cliente pidió no superar **40 USD/mes**
+  (20 de cuota + 20 de extra). **Si se pausa, caen `ganchito-estudio2` e
+  `irma-landing` juntos.**
 
 ---
 
@@ -1033,8 +1130,13 @@ Construido, commiteado y visible funcionando en producción:
 - **Etapa D: sync automático de Zecat por cron (verificada 2026-10-15).** Con
   el interruptor de Zecat encendido, la corrida automática del 2026-10-14 a
   las 19:25 ART y la del 2026-10-15 a las 06:00 ART se hicieron solas y
-  quedaron en verde (dato de Diego, mirado en `/admin/proveedores`). Corrieron
-  con las ventanas de 2 h; las de 30 minutos llegan con el deploy de la etapa E.
+  quedaron en verde (dato de Diego, mirado en `/admin/proveedores`).
+  Confirmado en Neon (READ ONLY): las dos DONE, de 3 y 5 min. Corrieron con
+  las ventanas de 2 h; las de 30 minutos están en producción desde `e1d78a4`.
+- **Etapa E: CDO sobre el motor, deployada el 2026-10-15** (`e1d78a4`). La
+  primera corrida, desde el panel, dio 38 creados, 308 actualizados, 1
+  variante desactivada y 0 sin variantes en ~6 min (dato de Diego). Falta ver
+  la primera automática: ver "Pendiente de verificar".
 - **Conector de Zecat.** Sync por polling con upsert por `zecatId` / `sku`, cada
   producto en su propia transacción. Se corre a mano con `npm run sync:zecat`.
   552 productos en la base.
@@ -1495,31 +1597,17 @@ idénticas por navegación (el cache es por request, no debilita el chequeo).
 
 Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
-- **Etapa E en producción (CDO sobre el motor).** El orden de deploy importa:
-  1. Branch de backup en Neon (`backup-pre-E-2026-10-15`, ver "Datos operativos").
-  2. Las dos migraciones en Neon, **ANTES del push**:
-     `20261016120000_add_image_probes` y
-     `20261016130000_add_sync_run_sin_foto`. El tick de **Zecat** también lee
-     `sync_runs.sinFotoExternalIds`: con el código arriba y sin la migración,
-     se rompe también el cron de Zecat.
-  3. Variables `CDO_API_URL` (`https://api.argentina.stocksur.com/v2`) y
-     `CDO_API_TOKEN` en Vercel.
-  4. Push.
-  5. La primera corrida de CDO **desde el panel**, antes de encender su
-     interruptor (con la caché de imágenes de Neon vacía son ~26 min de
-     ticks). Así existe una corrida completa y funciona el aviso de
-     "desactualizado".
-  6. Recién después, el interruptor de CDO.
-
-  Qué números esperar en esa primera corrida:
-  - **~37 creados** (lo que tiene la API de más contra los 309 de
-    producción).
-  - **1 variante desactivada** (la que CDO dejó de mandar).
-  - **Precios de CDO que se mueven**: los costos tenían un mes sin
-    sincronizar.
-
-  En local, con otra base de partida, dio 46 creados, 0 fallidos y
-  1 variante desactivada.
+- **La primera corrida automática de CDO: 2026-10-16 a las 07:00 ART.** Qué
+  mirar en `/admin/proveedores`: una corrida con origen "automática" que
+  termine DONE dentro de la ventana (07:00 a 07:29), estado OK o A_REVISAR
+  con motivo, y ninguna RUNNING colgada después.
+- **KUPFER (cdoId 17678) pausado por esa corrida.** Tiene que aparecer como
+  ausente confirmado ("CDO lo publica sin ninguna variante vendible") y
+  quedar inactivo, sin tocar nada a mano. Ver "Ausentes que no se pueden
+  verificar".
+- **La primera ventana de 30 min de Zecat: 2026-10-15 a las 18:00 ART.** La
+  última completa es de las 06:00, así que tiene más de 6 h y la corrida
+  tiene que arrancar sola y terminar DONE antes de las 18:29.
 - **No construidos (están en PENDIENTES):** las sugerencias del buscador
   (diseño aprobado), el arreglo de las etiquetas de variante con "." y la
   reactivación del optimizador de imágenes. Nada de eso existe en el código
@@ -1532,16 +1620,6 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 - **`ProductAttribute` no se muestra en ningún lado.** El sync de CDO lo
   escribe, pero no hay UI que lo lea. Decidir si va en la ficha (junto a las
   técnicas de impresión) o si se descarta.
-- **El estado real de migraciones de Neon.** Para verlo con certeza en vez de
-  deducir —la URL de Neon vive en `.env.neon`, no en el `.env`—:
-
-  ```bash
-  DATABASE_URL="$(rg -o '^NEON_DATABASE_URL="?([^"]+)"?' -r '$1' .env.neon)" npx prisma migrate status
-  ```
-
-  Es solo lectura. Hasta que se deploye la etapa E tiene que decir que faltan
-  **dos**: `20261016120000_add_image_probes` y
-  `20261016130000_add_sync_run_sin_foto`.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
@@ -1576,6 +1654,11 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 ---
 
 ## Neon: al día
+
+> **Corregido el 2026-10-15:** lo de abajo es de agosto. Después se aplicaron
+> las de las etapas B, C y E; la última es
+> `20261016130000_add_sync_run_sin_foto` (2026-10-15), y `migrate status`
+> contra Neon dice "up to date". Ver "Datos operativos".
 
 Neon tiene **todas** las migraciones del repo. La última aplicada fue
 `20260826180000_add_usd_rate_automation` (2026-08-26); antes,
@@ -2508,8 +2591,8 @@ por el oficial.
 
 ## Sync automático con Vercel Cron: ya no está en pausa
 
-> **Actualizado el 2026-10-15:** se construyó (etapas A a C, en `main`) y
-> la etapa D quedó verificada en producción el 2026-10-15. Ver la sección "Sync automático
+> **Actualizado el 2026-10-15:** se construyó (etapas A a C, en `main`), la
+> etapa D quedó verificada en producción y la etapa E (CDO) está deployada. Ver la sección "Sync automático
 > de proveedores (2026-10-08 al 2026-10-14)", arriba de todo. Lo de abajo
 > queda como historia del análisis de agosto: las tres cosas a contemplar se
 > resolvieron así: `gru1` global en `vercel.json`, el lease en `SyncRun`, y
@@ -2532,26 +2615,22 @@ Resumen de entonces:
 
 ## Próximo paso concreto
 
-1. ~~Verificar la etapa D~~: verificada el 2026-10-15 (19:25 y 06:00,
-   automáticas, en verde).
-2. **Deployar la etapa E** en este orden (detalle en
-   "Pendiente de verificar"):
-   1. branch de backup en Neon;
-   2. las dos migraciones en Neon (**antes** del push);
-   3. `CDO_API_URL` y `CDO_API_TOKEN` en Vercel;
-   4. commit y push de E junto con estos docs;
-   5. primera corrida de CDO desde el panel;
-   6. recién después, el interruptor de CDO.
-3. **Verificar la etapa E en producción**: los números esperados de la
-   primera corrida (~37 creados, 1 variante desactivada, precios que se
-   mueven), y después la primera corrida automática de CDO en su ventana
-   (07:00 o 19:00 ART).
-4. **La primera semana con las ventanas de 30 minutos**: mirar el consumo de
-   Neon (ítem en PENDIENTES).
+El sync automático de los dos proveedores quedó en producción. Lo que falta
+de esa tanda es **mirar**, no construir:
 
-Lo que sigue después, sin orden fijo: las sugerencias del buscador (con sus
-dos requisitos), el arreglo de las etiquetas de variante, y reactivar el
-optimizador de imágenes. Todo en PENDIENTES.
+1. **2026-10-15 18:00 ART**: la primera ventana de 30 min de Zecat.
+2. **2026-10-16 07:00 ART**: la primera corrida automática de CDO, y que
+   pause a KUPFER sola (qué mirar, en "Pendiente de verificar").
+3. **Neon cada dos semanas**: Billing, la proyección de CU-hora (umbral 70)
+   y el tamaño de la base (ver "Infraestructura y costos" y PENDIENTES).
+
+**Lo que sigue: una tanda de diseño de la tienda, en otro chat.** La
+referencia de identidad visual está en `DISENO/DISENO.md` y en la sección
+"Referencia de diseño" de `CLAUDE.md`.
+
+Después, sin orden fijo y todo en PENDIENTES: las sugerencias del buscador
+(con sus dos requisitos), el arreglo de las etiquetas de variante, reactivar
+el optimizador de imágenes, y juntar los avisos de currency="USD" de Zecat.
 
 **Abierto de antes, que sigue valiendo:**
 

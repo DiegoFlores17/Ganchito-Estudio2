@@ -164,6 +164,20 @@ export async function fetchGenericProductDetail(
 ///   status). NO confirma nada: ese producto no se pausa.
 export type Confirmacion = "baja" | "presente" | "no-verificado";
 
+/// Lo que devuelve la confirmacion de un ausente, en cualquier conector.
+///
+/// `causaPermanente`, solo en "no-verificado": la verificacion no puede
+/// salir NUNCA, por mas que se reintente (por ejemplo, un producto de CDO
+/// sin code guardado). Es la frase corta que ve el admin ("falta el code de
+/// CDO"). Sin ella, el no-verificado es transitorio (timeout, 5xx, red): la
+/// proxima corrida lo reintenta. Ver sinVerificarPendientes en
+/// lib/sync-run.ts.
+export interface ResultadoConfirmacion {
+  resultado: Confirmacion;
+  motivo: string;
+  causaPermanente?: string;
+}
+
 /// Timeout del detalle al confirmar. Propio y corto: es una pregunta puntual
 /// por producto, y un request colgado no puede comerse la invocacion.
 const TIMEOUT_CONFIRMACION_MS = 15_000;
@@ -179,7 +193,7 @@ const TIMEOUT_CONFIRMACION_MS = 15_000;
 /// "no-verificado" y se reintenta en la corrida siguiente, no en esta.
 export async function confirmarAusencia(
   id: string
-): Promise<{ resultado: Confirmacion; motivo: string }> {
+): Promise<ResultadoConfirmacion> {
   try {
     const { token, baseUrl } = getConfig();
     const response = await fetch(`${baseUrl}/generic_product/${id}`, {

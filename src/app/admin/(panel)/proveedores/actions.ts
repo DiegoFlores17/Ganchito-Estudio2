@@ -7,6 +7,7 @@ import { requireAdmin, requireSuperAdmin } from "@/lib/admin-auth";
 import {
   origenDeCorrida,
   pausarAusentesDeCorrida,
+  pausarSinConfirmacion as pausarSinConfirmacionDeLib,
   type SyncRunSummary,
 } from "@/lib/sync-run";
 import { conectorDe } from "@/lib/sync/conectores";
@@ -157,6 +158,34 @@ export async function pausarAusentes(runId: string): Promise<PausarAusentesResul
       noVerificados: r.noVerificados.length,
       restantes: r.restantes,
     };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "No se pudo pausar.",
+    };
+  }
+}
+
+/// "Pausar sin confirmación del proveedor": pausa ausentes que NO se pueden
+/// verificar, con una persona asumiendo la decision. Mismo permiso que
+/// "Pausar estos N" (cualquier admin): es reversible, y el sync lo reactiva
+/// si el producto vuelve al listado. Separado a proposito de aquel boton,
+/// que solo pausa lo que el proveedor confirma — ver pausarSinConfirmacion
+/// en lib/sync-run.ts, que ademas rechaza cualquier id que no este en la
+/// lista de "no se pueden verificar".
+export async function pausarSinConfirmacion(
+  provider: ProductOrigin,
+  externalIds: string[]
+): Promise<{ success: boolean; error?: string; pausados?: number }> {
+  // Gate propio: una Server Action es un endpoint, se puede invocar sin
+  // pasar por la pantalla.
+  const admin = await requireAdmin();
+  try {
+    const r = await pausarSinConfirmacionDeLib(provider, externalIds, admin.email);
+    revalidatePath("/admin/proveedores");
+    revalidatePath("/catalogo");
+    revalidatePath("/");
+    return { success: true, pausados: r.pausados.length };
   } catch (error) {
     return {
       success: false,

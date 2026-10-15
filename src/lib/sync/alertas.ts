@@ -233,14 +233,24 @@ async function enviar(
         ausentes: await describirAusentes(provider, est.pendientes),
       });
     }
-    case "A_REVISAR":
+    case "A_REVISAR": {
+      const descriptos = await describirAusentes(
+        provider,
+        est.sinVerificar.map((x) => x.externalId)
+      );
       return sendSyncAlert({
         motivo: "a-revisar",
         provider,
         runId,
         recordatorio,
         productos: await describirAusentes(provider, est.aRevisar),
+        sinVerificar: est.sinVerificar.map((x, i) => ({
+          ...descriptos[i],
+          permanente: x.permanente,
+          motivoVerificacion: x.motivo,
+        })),
       });
+    }
     case "DESACTUALIZADO": {
       const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: runId } });
       return sendSyncAlert({

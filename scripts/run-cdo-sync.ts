@@ -14,6 +14,7 @@ import { ProductOrigin } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
 import { avanzarCorrida, type ResultadoTick } from "../src/lib/sync/motor";
 import { revisarAlertas } from "../src/lib/sync/alertas";
+import { textoNoVerificado } from "../src/lib/sync/textos";
 
 export async function runCdoSync(etiquetaEntorno: string) {
   // El destino de ESCRITURA se imprime siempre y en primer lugar. El riesgo
@@ -99,7 +100,11 @@ export async function runCdoSync(etiquetaEntorno: string) {
         : s.aRevisar.includes(id)
           ? " (A REVISAR: el detalle sigue respondiendo)"
           : s.noVerificados.includes(id)
-            ? " (no se pudo verificar, no se pauso)"
+            ? ` (${
+                s.noVerificadosDetalle?.[id]
+                  ? textoNoVerificado(s.noVerificadosDetalle[id].permanente, s.noVerificadosDetalle[id].motivo, "CDO")
+                  : "no se pudo verificar"
+              }; no se pausó)`
             : "";
       console.log(`  - ${nombre(id)}${estado}`);
     }

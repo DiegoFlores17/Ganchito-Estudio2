@@ -5,6 +5,7 @@ import { alertConfigStatus } from "@/lib/email";
 import { formatDateTime, formatHace } from "@/lib/format";
 import {
   ausentesPendientes,
+  describirAusentes,
   estadoDelProveedor,
   leerSummary,
   origenDeCorrida,
@@ -14,6 +15,8 @@ import { SyncAlertStatus } from "@/components/admin/sync-alert-status";
 import { AutoSyncToggle } from "@/components/admin/auto-sync-toggle";
 import { SyncProviderCard } from "@/components/admin/sync-provider-card";
 import { SyncRunHistory } from "@/components/admin/sync-run-history";
+import { PausarSinConfirmacion } from "@/components/admin/pausar-sin-confirmacion";
+import { textoNoVerificado } from "@/lib/sync/textos";
 import { conectorDe, proveedoresConConector } from "@/lib/sync/conectores";
 import { VENTANAS_UTC } from "@/lib/sync/motor";
 
@@ -127,6 +130,11 @@ async function SeccionProveedor({
   const ultimaSummary = ultimaFila ? leerSummary(ultimaFila) : null;
   // Solo los que siguen activos: un "a revisar" que ya se pauso esta resuelto.
   const aRevisar = estado.aRevisar;
+  // Los que no se pueden verificar, con nombre y stock para decidir.
+  const sinVerificar = estado.sinVerificar;
+  const sinVerificarDescriptos = sinVerificar.length
+    ? await describirAusentes(provider, sinVerificar.map((x) => x.externalId))
+    : [];
 
   const estilo = ESTILO_ESTADO[estado.estado];
   const ultima = estado.ultimaCompleta;
@@ -166,11 +174,18 @@ async function SeccionProveedor({
             usá «Pausar estos {estado.pendientes.length}» en esa corrida, abajo.
           </p>
         )}
-        {estado.estado === "A_REVISAR" && (
+        {estado.estado === "A_REVISAR" && aRevisar.length > 0 && (
           <p className="mt-1 text-foreground/80">
             {aRevisar.length} productos a revisar: {nombre} los publica pero no
             los lista, así que siguen a la venta sin sincronizarse. El detalle está
             abajo.
+          </p>
+        )}
+        {estado.estado === "A_REVISAR" && sinVerificar.length > 0 && (
+          <p className="mt-1 text-foreground/80">
+            {sinVerificar.length} productos que no se pueden verificar: no vinieron
+            en el listado de {nombre} y no hubo forma de confirmar la baja, así que
+            siguen a la venta sin sincronizarse. El detalle está abajo.
           </p>
         )}
         {estado.estado === "DESACTUALIZADO" && (
@@ -202,6 +217,35 @@ async function SeccionProveedor({
         </div>
       )}
 
+      {sinVerificar.length > 0 && (
+        <div className="mt-4 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm">
+          <p className="font-medium text-amber-800">
+            {sinVerificar.length} productos que no se pueden verificar
+          </p>
+          <p className="mt-1 text-foreground/70">
+            No vinieron en el listado de {nombre} y no se pudo confirmar si los
+            dieron de baja, así que no se pausaron. Buscalos en su web: si ya no
+            están, pausalos acá.
+          </p>
+          <ul className="mt-2 flex flex-col gap-1 text-xs text-foreground/70">
+            {sinVerificar.map((x, i) => (
+              <li key={x.externalId}>
+                [{x.externalId}] {sinVerificarDescriptos[i]?.nombre ?? x.externalId}
+                {" — stock "}
+                {sinVerificarDescriptos[i]?.stockDisponible ?? "?"}
+                {" — "}
+                {textoNoVerificado(x.permanente, x.motivo, nombre)}
+              </li>
+            ))}
+          </ul>
+          <PausarSinConfirmacion
+            provider={provider}
+            nombreProveedor={nombre}
+            externalIds={sinVerificar.map((x) => x.externalId)}
+          />
+        </div>
+      )}
+
       <div className="mt-4 max-w-2xl">
         <SyncProviderCard
           provider={provider}
@@ -224,6 +268,7 @@ async function SeccionProveedor({
           Últimas corridas de {nombre}
         </h3>
         <SyncRunHistory
+          proveedor={nombre}
           runs={runs.map((r) => {
             const summary = leerSummary(r);
             const alCierre = new Set(summary?.autoPausados ?? []);

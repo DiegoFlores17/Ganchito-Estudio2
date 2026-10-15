@@ -1,6 +1,7 @@
 import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSyncAlert, type AusenteAlerta } from "@/lib/email";
+import { MOTIVO_FUERA_DE_TOPE } from "@/lib/sync/textos";
 import { conectorDe } from "@/lib/sync/conectores";
 
 /// Lock + progreso + historial de las corridas de sincronizacion. El lock
@@ -53,9 +54,18 @@ export interface SyncRunSummary {
   /// Ausentes con el detalle sano (publicado y con variantes): NO se
   /// pausan, se muestran como "a revisar".
   aRevisar: string[];
-  /// Ausentes sin respuesta limpia del detalle (timeout, 5xx, red): NO se
-  /// pausan; la proxima corrida los vuelve a intentar.
+  /// Ausentes que no se pudieron verificar contra el detalle: NO se pausan.
   noVerificados: string[];
+  /// Por que no se pudo verificar cada uno de `noVerificados`. Opcional: las
+  /// corridas anteriores al campo no lo tienen, y ahi todos cuentan como
+  /// transitorios.
+  /// - permanente: la verificacion no puede salir nunca (un producto de CDO
+  ///   sin code guardado); `motivo` es la frase corta para el admin. Pasa a
+  ///   "a revisar" desde la primera corrida.
+  /// - transitorio: timeout, 5xx, red, o fuera del tope de confirmaciones;
+  ///   la proxima corrida lo reintenta. Pasa a "a revisar" a las 3 corridas
+  ///   completas seguidas (ver sinVerificarPendientes).
+  noVerificadosDetalle?: Record<string, { permanente: boolean; motivo: string }>;
   /// Ya pausados que seguian fuera de la API en este momento.
   yaPausadosFueraDeApi: string[];
   variantesDesactivadas: number;
@@ -105,13 +115,15 @@ export async function confirmarYPausar(
   aRevisar: string[];
   noVerificados: string[];
   sinIntentar: string[];
+  detalle: Record<string, { permanente: boolean; motivo: string }>;
 }> {
   const confirmar = conectorDe(provider)?.confirmarAusente;
   const bajas: string[] = [];
   const aRevisar: string[] = [];
   const noVerificados: string[] = [];
+  const detalle: Record<string, { permanente: boolean; motivo: string }> = {};
   if (!confirmar) {
-    return { bajas, aRevisar, noVerificados: [...externalIds], sinIntentar: [] };
+    return { bajas, aRevisar, noVerificados: [...externalIds], sinIntentar: [], detalle };
   }
   const aIntentar = externalIds.slice(0, max);
   const sinIntentar = externalIds.slice(max);
@@ -121,10 +133,15 @@ export async function confirmarYPausar(
     const resultados = await Promise.all(tanda.map((id) => confirmar(id)));
     const bajasTanda: string[] = [];
     tanda.forEach((id, j) => {
-      const { resultado, motivo } = resultados[j];
+      const { resultado, motivo, causaPermanente } = resultados[j];
       if (resultado === "baja") bajasTanda.push(id);
       else if (resultado === "presente") aRevisar.push(id);
-      else noVerificados.push(id);
+      else {
+        noVerificados.push(id);
+        detalle[id] = causaPermanente
+          ? { permanente: true, motivo: causaPermanente }
+          : { permanente: false, motivo };
+      }
       if (resultado !== "baja") {
         console.warn(`[sync-run] Ausente ${id} NO se pausa (${resultado}): ${motivo}`);
       }
@@ -135,7 +152,10 @@ export async function confirmarYPausar(
       bajas.push(...bajasTanda);
     }
   }
-  return { bajas, aRevisar, noVerificados, sinIntentar };
+  for (const id of sinIntentar) {
+    detalle[id] = { permanente: false, motivo: MOTIVO_FUERA_DE_TOPE };
+  }
+  return { bajas, aRevisar, noVerificados, sinIntentar, detalle };
 }
 
 /// Suma ids a autoPausedExternalIds de una corrida (y opcionalmente una
@@ -270,6 +290,7 @@ export async function finishSyncRun(runId: string) {
     aRevisar: [] as string[],
     noVerificados: [] as string[],
     sinIntentar: [] as string[],
+    detalle: {} as Record<string, { permanente: boolean; motivo: string }>,
   };
   const umbralFrenado = missing.length > umbral;
   if (missing.length > 0 && !umbralFrenado) {
@@ -349,6 +370,7 @@ export async function finishSyncRun(runId: string) {
     aRevisar: confirmacion.aRevisar,
     // Los que quedaron afuera del tope tampoco se verificaron.
     noVerificados: [...confirmacion.noVerificados, ...confirmacion.sinIntentar],
+    noVerificadosDetalle: confirmacion.detalle,
     yaPausadosFueraDeApi: pausedMissing,
     variantesDesactivadas: variantes.desactivadas,
     productosSinVariantes: variantes.productosSinVariantes.length,
@@ -522,6 +544,7 @@ export async function estadoDelProveedor(provider: ProductOrigin, ahora = new Da
   const pendientes =
     ultimaCompleta?.autoPauseSkipped ? await ausentesPendientes(ultimaCompleta) : [];
   const aRevisar = ultimaCompleta ? await aRevisarPendientes(ultimaCompleta) : [];
+  const sinVerificar = ultimaCompleta ? await sinVerificarPendientes(ultimaCompleta) : [];
   const desactualizado =
     !ultimaCompleta?.finishedAt ||
     ahora.getTime() - ultimaCompleta.finishedAt.getTime() > DESACTUALIZADO_MS;
@@ -532,7 +555,7 @@ export async function estadoDelProveedor(provider: ProductOrigin, ahora = new Da
       ? "BLOQUEADO"
       : desactualizado
         ? "DESACTUALIZADO"
-        : aRevisar.length > 0
+        : aRevisar.length > 0 || sinVerificar.length > 0
           ? "A_REVISAR"
           : "OK";
 
@@ -549,7 +572,186 @@ export async function estadoDelProveedor(provider: ProductOrigin, ahora = new Da
     pendientes,
     /// Los "a revisar" de la ultima completa que siguen activos.
     aRevisar,
+    /// Ausentes que no se pueden verificar y ya no conviene esperar (ver
+    /// sinVerificarPendientes). Tambien ponen el estado en A_REVISAR.
+    sinVerificar,
   };
+}
+
+/// Corridas completas SEGUIDAS sin poder verificar un ausente (por un motivo
+/// transitorio) antes de pasarlo a "a revisar". Con dos corridas por dia,
+/// ~1,5 dias: lo bastante para que una caida del proveedor se resuelva sola.
+export const CORRIDAS_PARA_ESCALAR = 3;
+/// Y tienen que abarcar al menos esto, de la primera a la ultima. Con dos
+/// corridas automaticas por dia, 3 seguidas son ~24 h; sin este minimo, tres
+/// clicks al boton del panel durante una caida de 10 minutos escalaban todo
+/// lo que no respondio.
+export const RACHA_MINIMA_MS = 20 * 60 * 60 * 1000;
+
+export interface SinVerificar {
+  externalId: string;
+  permanente: boolean;
+  /// Permanente: la frase corta ("falta el code de CDO"). Transitorio: el
+  /// ultimo motivo (timeout, status...).
+  motivo: string;
+}
+
+/// Ausentes "no verificados" de la ultima corrida completa que ya no se
+/// pueden dejar en verde. Sin esto, un producto que nunca se puede verificar
+/// (por ejemplo, de CDO y sin code guardado) quedaba activo y a la venta
+/// para siempre, con el panel diciendo que se reintentaba.
+/// - Motivo permanente: desde la primera corrida en que aparece.
+/// - Motivo transitorio: si tampoco se pudo verificar en las
+///   CORRIDAS_PARA_ESCALAR - 1 corridas anteriores, y esas corridas abarcan
+///   al menos RACHA_MINIMA_MS.
+///
+/// Que cuenta como "seguidas": solo las corridas completas que llegaron a
+/// CONFIRMAR ausentes. Se saltean las FAILED y las que frenaron el umbral
+/// (las dos terminan sin preguntar nada al proveedor): no dicen nada del
+/// producto. Contarlas como "verificado" cortaria la racha con cada falla
+/// del proveedor; contarlas como "no verificado" escalaria por fallas que no
+/// son del producto. Una corrida que SI lo verifica (o en la que volvio al
+/// listado) la corta.
+///
+/// Solo los que siguen activos y sin borrar: pausado por cualquier camino,
+/// ya esta resuelto.
+export async function sinVerificarPendientes(run: {
+  id: string;
+  provider: ProductOrigin;
+  summary: Prisma.JsonValue;
+  finishedAt: Date | null;
+}): Promise<SinVerificar[]> {
+  const s = leerSummary(run);
+  const ids = s?.noVerificados ?? [];
+  if (ids.length === 0) return [];
+  const detalle = s?.noVerificadosDetalle ?? {};
+  const transitorios = ids.filter((id) => !detalle[id]?.permanente);
+
+  let enRacha = new Set<string>();
+  if (transitorios.length > 0 && run.finishedAt) {
+    const anteriores = await prisma.syncRun.findMany({
+      where: {
+        provider: run.provider,
+        status: SyncRunStatus.DONE,
+        id: { not: run.id },
+        finishedAt: { not: null, lt: run.finishedAt },
+      },
+      orderBy: { finishedAt: "desc" },
+      // Se piden de mas: las que no confirmaron nada se saltean.
+      take: 20,
+      select: { summary: true, finishedAt: true },
+    });
+    const queConfirmaron = anteriores
+      .map((r) => ({ s: leerSummary(r), finishedAt: r.finishedAt! }))
+      .filter((x): x is { s: SyncRunSummary; finishedAt: Date } => x.s !== null && !x.s.umbralFrenado)
+      .slice(0, CORRIDAS_PARA_ESCALAR - 1);
+    const primera = queConfirmaron.at(-1);
+    if (
+      queConfirmaron.length === CORRIDAS_PARA_ESCALAR - 1 &&
+      primera &&
+      run.finishedAt.getTime() - primera.finishedAt.getTime() >= RACHA_MINIMA_MS
+    ) {
+      enRacha = new Set(
+        transitorios.filter((id) => queConfirmaron.every((x) => (x.s.noVerificados ?? []).includes(id)))
+      );
+    }
+  }
+
+  const candidatos = ids.filter((id) => detalle[id]?.permanente || enRacha.has(id));
+  if (candidatos.length === 0) return [];
+  const activos = await prisma.product.findMany({
+    where: {
+      origin: run.provider,
+      deletedAt: null,
+      active: true,
+      [idField(run.provider)]: { in: candidatos },
+    },
+    select: { zecatId: true, cdoId: true },
+  });
+  const activosSet = new Set(
+    activos.map((p) => (run.provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId))
+  );
+  return candidatos
+    .filter((id) => activosSet.has(id))
+    .map((id) => ({
+      externalId: id,
+      permanente: detalle[id]?.permanente ?? false,
+      motivo: detalle[id]?.motivo ?? "No se pudo verificar en las últimas corridas.",
+    }));
+}
+
+/// "Pausar sin confirmación del proveedor": pausa ausentes que NO se pueden
+/// verificar (los de sinVerificarPendientes), con una persona decidiendo.
+///
+/// Distinto de "Pausar estos N" a proposito: aquel pausa solo lo que el
+/// proveedor CONFIRMA como baja, y esa garantia no se mezcla con esto. Por
+/// eso no pasa por confirmarYPausar ni se registra en autoPausedExternalIds:
+/// queda una nota en la ultima corrida completa con quien lo hizo.
+///
+/// La lista se recalcula aca: un id que no este en ella se rechaza (una
+/// Server Action se puede invocar con cualquier id). Si el producto vuelve
+/// al listado del proveedor, el sync lo reactiva como a cualquier otro
+/// (en los dos conectores, `active` se recalcula en cada corrida).
+export async function pausarSinConfirmacion(
+  provider: ProductOrigin,
+  externalIds: string[],
+  adminEmail: string
+): Promise<{ pausados: string[] }> {
+  const ids = [...new Set(externalIds)];
+  if (ids.length === 0) throw new Error("No hay productos para pausar.");
+  const est = await estadoDelProveedor(provider);
+  const permitidos = new Set(est.sinVerificar.map((x) => x.externalId));
+  const fuera = ids.filter((id) => !permitidos.has(id));
+  if (!est.ultimaCompleta) {
+    throw new Error("No hay ninguna corrida completa del proveedor. No se pausó ninguno.");
+  }
+  if (fuera.length > 0) {
+    throw new Error(
+      `No están en la lista de productos que no se pueden verificar: ${fuera.join(", ")}. No se pausó ninguno.`
+    );
+  }
+  const runId = est.ultimaCompleta.id;
+  // La pausa y la nota de quien lo hizo van en la MISMA transaccion: pausar
+  // sin dejar registro no puede pasar. Y si entre el calculo de la lista y
+  // aca termino otra corrida, la lista ya no es la que vio el admin (el
+  // producto pudo volver al listado): se aborta en vez de pausar a ciegas.
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM sync_runs WHERE id = ${runId} FOR UPDATE`;
+    const ultima = await tx.syncRun.findFirst({
+      where: { provider, status: SyncRunStatus.DONE, finishedAt: { not: null } },
+      orderBy: { finishedAt: "desc" },
+      select: { id: true },
+    });
+    if (ultima?.id !== runId) {
+      throw new Error("Terminó una corrida nueva mientras tanto: recargá la página y revisá la lista. No se pausó ninguno.");
+    }
+    const aPausar = (
+      await tx.product.findMany({
+        where: { origin: provider, deletedAt: null, active: true, [idField(provider)]: { in: ids } },
+        select: { zecatId: true, cdoId: true },
+      })
+    ).map((p) => (provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId) as string);
+    await tx.product.updateMany({
+      where: { origin: provider, deletedAt: null, active: true, [idField(provider)]: { in: aPausar } },
+      data: { active: false },
+    });
+    const actual = await tx.syncRun.findUniqueOrThrow({ where: { id: runId }, select: { errors: true } });
+    await tx.syncRun.update({
+      where: { id: runId },
+      data: {
+        errors: [
+          ...(actual.errors as Prisma.JsonArray),
+          {
+            externalId: "-",
+            message:
+              `Pausar sin confirmación del proveedor: ${adminEmail} el ${new Date().toISOString()}. ` +
+              `Pausó ${aPausar.length} que no se podían verificar: ${aPausar.join(", ")}.`,
+          },
+        ],
+      },
+    });
+    return { pausados: aPausar };
+  });
 }
 
 /// Los "a revisar" de una corrida (detalle sano fuera del listado) que

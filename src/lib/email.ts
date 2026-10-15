@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { formatDateTime } from "@/lib/format";
+import { textoNoVerificado } from "@/lib/sync/textos";
 
 /// Envio de mails transaccionales (Resend). Dos usos hoy: aviso de
 /// cotizacion nueva al equipo de Ganchito, y alertas tecnicas del sync.
@@ -283,6 +284,10 @@ export type SyncAlertInput =
       provider: string;
       runId: string;
       productos: AusenteAlerta[];
+      /// Ausentes que no se pueden verificar y siguen a la venta (ver
+      /// sinVerificarPendientes en lib/sync-run.ts). Opcional: sin ellos el
+      /// mail es el de siempre.
+      sinVerificar?: Array<AusenteAlerta & { permanente: boolean; motivoVerificacion: string }>;
       recordatorio?: boolean;
     }
   /// Mas de 26 h sin una corrida completa.
@@ -435,14 +440,49 @@ export function armarAlerta(
       </tr>`
       )
       .join("");
+    const sinVerificar = input.sinVerificar ?? [];
+    const filasSinVerificar = sinVerificar
+      .map(
+        (p) => `
+      <tr>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(p.externalId)}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee;">${escapar(p.nombre ?? "(sin nombre)")}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; text-align: right;">${p.stockDisponible ?? "—"}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(textoNoVerificado(p.permanente, p.motivoVerificacion, proveedor))}</td>
+      </tr>`
+      )
+      .join("");
+    const total = input.productos.length + sinVerificar.length;
     return {
-      titulo: `${rec}Sync de ${proveedor}: ${input.productos.length} productos a revisar (${cuando})`,
+      titulo: `${rec}Sync de ${proveedor}: ${total} productos a revisar (${cuando})`,
       link: linkCorrida(input.runId),
-      cuerpo: `
+      cuerpo: `${
+        input.productos.length
+          ? `
   <p style="${ESTILO_PARRAFO}">Estos productos no vinieron en el listado de ${proveedor}, pero su ficha sigue publicada y con variantes, así que no se pausaron. Siguen a la venta en la tienda <strong>sin sincronizarse</strong>: su precio y stock no se actualizan.</p>
   <h2 style="${ESTILO_SUBTITULO}">Qué hacer</h2>
   <p style="${ESTILO_PARRAFO}">Buscalos en la web de ${proveedor}. Si no están, avisale a quien opera el sistema para pausarlos. Si vuelven al listado, la próxima sincronización los pone al día sola.</p>
-  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;"><tbody>${filas}</tbody></table>
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;"><tbody>${filas}</tbody></table>`
+          : ""
+      }${
+        sinVerificar.length
+          ? `
+  <h2 style="${ESTILO_SUBTITULO}">${sinVerificar.length} que no se pueden verificar</h2>
+  <p style="${ESTILO_PARRAFO}">Estos productos no vinieron en el listado de ${proveedor} y no hubo forma de confirmar si los dieron de baja, así que no se pausaron: siguen a la venta <strong>sin sincronizarse</strong>. Al lado de cada uno está por qué.</p>
+  <p style="${ESTILO_PARRAFO}">Buscalos en la web de ${proveedor}. Si ya no están, pausalos desde el panel con «Pausar sin confirmación del proveedor».</p>
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;">
+    <thead>
+      <tr style="text-align: left; color: #666; font-size: 13px;">
+        <th style="padding: 6px 10px;">Id</th>
+        <th style="padding: 6px 10px;">Producto</th>
+        <th style="padding: 6px 10px; text-align: right;">Stock</th>
+        <th style="padding: 6px 10px;">Por qué</th>
+      </tr>
+    </thead>
+    <tbody>${filasSinVerificar}</tbody>
+  </table>`
+          : ""
+      }
   <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
     };
   }

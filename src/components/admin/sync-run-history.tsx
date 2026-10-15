@@ -35,7 +35,14 @@ const STATUS_LABEL: Record<string, string> = {
 
 /// Historial de corridas con el detalle expandible. Cada corrida tiene un
 /// ancla (#corrida-{id}): el mail del umbral linkea directo a la suya.
-export function SyncRunHistory({ runs }: { runs: RunView[] }) {
+export function SyncRunHistory({
+  runs,
+  proveedor,
+}: {
+  runs: RunView[];
+  /// Nombre visible del proveedor, para los textos del resumen.
+  proveedor?: string;
+}) {
   const [abierta, setAbierta] = useState<string | null>(null);
 
   if (runs.length === 0) {
@@ -77,6 +84,7 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
               <SyncRunSummaryLine
                 summary={run.summary}
                 pausadosDespues={run.pausadosDespues.length}
+                proveedor={proveedor}
               />
             ) : (
               run.status === "DONE" && (
@@ -111,6 +119,7 @@ export function SyncRunHistory({ runs }: { runs: RunView[] }) {
                   <SyncRunSummaryDetail
                     summary={run.summary}
                     pausadosDespues={run.pausadosDespues}
+                    proveedor={proveedor}
                   />
                 ) : (
                   run.pausadosDespues.length > 0 && (

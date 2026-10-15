@@ -130,7 +130,7 @@ export function SyncProviderCard({
           {/* Mismo resumen fijo que guarda la corrida y lee el historial de
               abajo: la card y la fila no pueden mostrar cifras distintas. */}
           {resultado.summary ? (
-            <SyncRunSummaryLine summary={resultado.summary} />
+            <SyncRunSummaryLine summary={resultado.summary} proveedor={nombre} />
           ) : (
             <p className="mt-1 text-xs text-foreground/50">
               El detalle está en el historial de abajo.

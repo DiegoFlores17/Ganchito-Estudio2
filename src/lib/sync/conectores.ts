@@ -6,7 +6,7 @@ import {
   listarIdsCongelados,
   TIMEOUT_DETALLE_MS,
   ZecatHttpError,
-  type Confirmacion,
+  type ResultadoConfirmacion,
 } from "@/lib/zecat/client";
 import { flattenVariants, ZecatPricingError } from "@/lib/zecat/normalize";
 import { syncProduct } from "@/lib/zecat/sync";
@@ -64,7 +64,7 @@ export interface Conector {
   /// "tanda entera vacia" del motor, ANTES de escribir.
   sinVariantes(producto: unknown): boolean;
   sincronizar(producto: unknown, contexto: ContextoSincronizar): Promise<ResultadoSincronizar>;
-  confirmarAusente(id: string): Promise<{ resultado: Confirmacion; motivo: string }>;
+  confirmarAusente(id: string): Promise<ResultadoConfirmacion>;
 }
 
 export type Carga =
@@ -276,14 +276,41 @@ const cdo: Conector = {
     // El detalle de CDO va por code, no por id: se guarda en externalId.
     const producto = await prisma.product.findUnique({ where: { cdoId: id }, select: { externalId: true } });
     const code = producto?.externalId;
+    // Sin code no hay como preguntar, y reintentar no lo arregla: el code se
+    // guarda cuando el producto viene en el listado, y este ya no viene. Es
+    // permanente (escala a "a revisar" en la primera corrida).
     if (!code) {
-      return { resultado: "no-verificado", motivo: "El producto no tiene el code de CDO guardado todavía (se guarda en la próxima corrida en que venga)." };
+      return {
+        resultado: "no-verificado",
+        motivo: "El producto no tiene el code de CDO guardado: se cargó antes de que se guardara y ya no viene en el listado.",
+        causaPermanente: "falta el code de CDO",
+      };
     }
     if (!CODE_CDO_CONFIABLE.test(code)) {
-      return { resultado: "no-verificado", motivo: `El code de CDO (${JSON.stringify(code)}) no tiene la forma esperada: un 404 sobre él no confirmaría la baja.` };
+      return {
+        resultado: "no-verificado",
+        motivo: `El code de CDO (${JSON.stringify(code)}) no tiene la forma esperada: un 404 sobre él no confirmaría la baja.`,
+        causaPermanente: "el code de CDO guardado no sirve para consultarlo",
+      };
     }
     try {
-      await fetchProductByCode(code);
+      const detalle = await fetchProductByCode(code);
+      // El code es la clave del detalle pero no del producto: si CDO lo
+      // reasigno, la respuesta es de OTRO producto y no dice nada de este.
+      if (String(detalle.id) !== id) {
+        return {
+          resultado: "no-verificado",
+          motivo: `El code ${JSON.stringify(code)} hoy corresponde a otro producto de CDO (id ${detalle.id}).`,
+          causaPermanente: "el code de CDO guardado hoy es de otro producto",
+        };
+      }
+      // Mismo criterio que Zecat (y que la regla de A2): publicado sin
+      // ninguna variante vendible no se puede cotizar, es una baja. Verificado
+      // el 2026-10-15: CDO publica productos con variants: [] que el listado
+      // ya no trae (17678, "KUPFER").
+      if (!tieneVariantesVendibles(detalle)) {
+        return { resultado: "baja", motivo: "CDO lo publica sin ninguna variante vendible." };
+      }
       return { resultado: "presente", motivo: "El detalle de CDO sigue respondiendo, pero no vino en el listado." };
     } catch (error) {
       if (error instanceof CdoHttpError && error.status === 404) {

@@ -5,8 +5,8 @@ import { signOut } from "@/auth";
 import { requireAdmin } from "@/lib/admin-auth";
 import { AdminMobileNav } from "@/components/admin/admin-mobile-nav";
 import { countPendingReview } from "@/lib/admin-categories";
-import { ProductOrigin } from "@prisma/client";
 import { estadoDelProveedor } from "@/lib/sync-run";
+import { conectorDe, proveedoresConConector } from "@/lib/sync/conectores";
 
 const ETIQUETA_ESTADO = {
   OK: "al día",
@@ -31,21 +31,26 @@ export default async function AdminPanelLayout({
   // ve desde cualquier pantalla del panel, sin entrar a Proveedores. Si el
   // calculo falla, el panel sigue andando sin el punto: es un aviso, no
   // puede tirar abajo todas las pantallas.
-  const [categoriasPendientes, estadoZecat] = await Promise.all([
+  const [categoriasPendientes, estados] = await Promise.all([
     countPendingReview(),
-    estadoDelProveedor(ProductOrigin.ZECAT)
-      .then((e) => e.estado)
-      .catch((error) => {
-        console.error("[admin] No se pudo calcular el estado de Zecat:", error);
-        return "OK" as const;
-      }),
+    Promise.all(
+      proveedoresConConector().map((provider) =>
+        estadoDelProveedor(provider)
+          .then((e) => ({ provider, estado: e.estado }))
+          .catch((error) => {
+            console.error(`[admin] No se pudo calcular el estado de ${provider}:`, error);
+            return { provider, estado: "OK" as const };
+          })
+      )
+    ),
   ]);
-  const avisoProveedores =
-    estadoZecat === "FALLANDO"
-      ? ("rojo" as const)
-      : estadoZecat === "OK"
-        ? undefined
-        : ("ambar" as const);
+  // El punto refleja el PEOR estado entre los proveedores.
+  const conProblema = estados.filter((e) => e.estado !== "OK");
+  const avisoProveedores = conProblema.some((e) => e.estado === "FALLANDO")
+    ? ("rojo" as const)
+    : conProblema.length
+      ? ("ambar" as const)
+      : undefined;
 
   // Una sola lista para los dos menús: si el de escritorio y el de mobile
   // arman sus links por separado, tarde o temprano uno queda con una pantalla
@@ -69,7 +74,11 @@ export default async function AdminPanelLayout({
       href: "/admin/proveedores",
       aviso: avisoProveedores,
       avisoTexto:
-        estadoZecat === "OK" ? undefined : `Catálogo de Zecat: ${ETIQUETA_ESTADO[estadoZecat]}`,
+        conProblema.length === 0
+          ? undefined
+          : conProblema
+              .map((e) => `${conectorDe(e.provider)?.nombre ?? e.provider}: ${ETIQUETA_ESTADO[e.estado]}`)
+              .join(" · "),
     },
     ...(isSuperAdmin
       ? [

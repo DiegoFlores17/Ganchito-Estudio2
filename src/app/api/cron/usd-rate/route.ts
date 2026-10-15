@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { ProductOrigin } from "@prisma/client";
 import { refreshUsdRate } from "@/lib/usd-rate";
 import { vigilarFrescura } from "@/lib/sync/alertas";
+import { proveedoresConConector } from "@/lib/sync/conectores";
 
 /// Actualiza la cotización del dólar. Lo llama Vercel Cron.
 ///
@@ -59,10 +59,12 @@ export async function GET(request: Request) {
   // cron: si el cron del sync dejo de disparar, este sigue y avisa (mas de
   // 26 h sin una corrida completa). Con el sync automatico apagado no hace
   // nada. Nunca tumba la cotizacion: es un aviso.
-  try {
-    await vigilarFrescura(ProductOrigin.ZECAT);
-  } catch (error) {
-    console.error("[usd-rate] No se pudo revisar la frescura del sync:", error);
+  for (const provider of proveedoresConConector()) {
+    try {
+      await vigilarFrescura(provider);
+    } catch (error) {
+      console.error(`[usd-rate] No se pudo revisar la frescura del sync de ${provider}:`, error);
+    }
   }
 
   // Siempre 200 salvo que no se haya podido consultar: que la API de terceros

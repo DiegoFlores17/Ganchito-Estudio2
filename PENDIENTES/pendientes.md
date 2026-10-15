@@ -131,9 +131,12 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
       El matcheo automático por nombre sigue descartado, como decía el ítem.
 
-## Vercel Pro: dos razones convergentes (en gestión con el cliente)
+## Vercel Pro: dos razones convergentes
 
-- [ ] **Contratar Vercel Pro.** Dos problemas distintos lo piden a la vez:
+- [x] **Contratar Vercel Pro.** HECHO: el proyecto está en Pro (dato de Diego,
+      2026-10). Es consistente con el deploy de la etapa C, que declara crons
+      por minuto en `vercel.json` (en Hobby eso rompe el deploy). Las dos
+      razones de entonces:
       1. **El cron del sync de productos** (analizado 2026-08-21): Hobby tiene
          300s de tope no extensible contra 282s medidos de Zecat y 597s de
          CDO producción. Sin Pro no hay sync automático.
@@ -148,8 +151,8 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       catálogo, el peor mes realista (crawl completo con el optimizador
       re-activado) son ~30–40K transformaciones ≈ **$2–7/mes** — Pro NO queda
       corto, verificado contra la doc oficial el 2026-09-01.
-- [ ] **Con Pro activo: evaluar revertir el `unoptimized` de las imágenes de
-      proveedor** (`src/lib/product-image.ts`, commit `1c6e82a` en main). Es
+- [ ] **Con Pro activo (ya lo está): reactivar el optimizador — evaluar revertir
+      el `unoptimized` de las imágenes de proveedor** (`src/lib/product-image.ts`, commit `1c6e82a` en main). Es
       un PUENTE: hoy las imágenes de Zecat/CDO van directas desde su CDN (sin
       srcset — mobile baja la imagen entera). Revertirlo recupera el resize
       por dispositivo a cambio de los ~$2–7/mes de arriba. Las imágenes
@@ -208,6 +211,122 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       que se pone incómodo si un proveedor trae miles de productos: en ese
       momento, mover los ids vistos a una tabla hija con append en vez de
       reescribir el Json.
+- [x] **RESUELTO en la etapa C (`ca0f2e3`):** la guarda pasó a la lista
+      congelada del motor (`TANDA = 5` en `src/lib/sync/motor.ts`: una tanda
+      entera sin variantes corta antes de escribir). El ítem original:
+      **La guarda de "página entera sin variantes" de Zecat está atada a las
+      páginas del loop actual** (`syncZecatBatch`, A2, 2026-10-14). Corta
+      ANTES de escribir si una página de 5 o más productos viene con TODOS
+      sin variantes. Hoy funciona porque el panel pide páginas de 10 y la
+      consola de 25. En la etapa C el recorrido pasa a una lista congelada
+      con cortes por tiempo, sin páginas: ahí se rediseña (por ejemplo, la
+      misma regla sobre los primeros N productos de cada tick, o sobre la
+      lista entera antes de empezar).
+- [ ] **Etiquetas de variante de Zecat con segmentos vacíos** ("Azul Mar /
+      . / Clip Blanco"). Medido en local el 2026-10-14 sobre variantes
+      activas de productos activos: **236 de 1.910 variantes de Zecat, en
+      109 productos**. CDO y manuales: 0.
+      - 223 con `materialName` = "." a secas.
+      - 9 con `colorName` compuesto con un segmento "." (y 5 con "...").
+      - 5 con `sizeName` = ".".
+
+      **De dónde sale:** Zecat manda "." (a veces "...") como valor de
+      `elementDescriptionN` cuando ese atributo no aplica a la variante.
+      `mapVariantAttributes` lo toma como valor real y lo combina con los
+      otros del mismo tipo. Ejemplos de la API:
+      - 4414 Bolígrafo Foster: `attribute_two` "Color Grip" → `elementDescription2` ".".
+      - 4090 Funda Matera TAHG: `attribute_three` "Material" → `elementDescription3` ".".
+
+      **Arreglo probable:** tratar "." y "..." como vacíos en
+      `mapVariantAttributes` (normalize.ts). Ojo: cambia el `colorName`
+      guardado, y con eso las opciones del filtro de color y la búsqueda.
+      Verificar contra esas dos lecturas antes de darlo por cerrado.
+
+      **El mismo arreglo tiene que cubrir los valores REPETIDOS.** Ejemplo:
+      Porta Bolsa Oli (Zecat 4677) tiene `colorName` "Beige / Kaki / Beige /
+      kaki": el mismo valor dos veces, con otra mayúscula. Verificado en local
+      el 2026-10-14: **36 productos** con exactamente ese `colorName` (la nota
+      de "Familias de color", más abajo, decía 33). Deduplicar segmentos sin
+      distinguir mayúsculas al combinar, en el mismo `mapVariantAttributes`.
+- [ ] **CDO: un producto con muchas imágenes puede estirar un tick más allá
+      del lease.** (Revisión de la etapa E, F5, 2026-10-14.) El motor mira el
+      presupuesto ENTRE productos, no adentro de uno. Medir las imágenes de
+      un producto cuesta `ceil(N / 12) × 10 s` en el peor caso (todas con
+      timeout): con ~23 imágenes (lo típico) son 2 tandas, sin problema;
+      con 100 serían ~90 s, que sumados al resto del tick pasan el
+      `maxDuration` de 120 s y el lease de 150 s. Hoy no pasa (no hay
+      productos así), y con la caché cargada casi no se mide nada.
+      **Arreglo probable:** un plazo total por producto dentro de
+      `medirConCache` (lo que no llegue a medirse queda "sin medir", que ya
+      no apaga nada), o un tope de imágenes medidas por producto.
+- [ ] **Las alertas "sin-foto" y "variantes" pueden salir dos veces.**
+      (Revisión de la etapa E, 2026-10-14; aceptado así por ahora.) Las dos
+      se mandan desde `finishSyncRun` ANTES de marcar la corrida DONE. Si el
+      cierre muere después del mail (o falla el update final), el próximo
+      tick reintenta el cierre y el mail sale de nuevo. No hay marca por
+      corrida de "esta alerta ya salió". Molesta (un mail repetido) pero no
+      rompe nada. **Arreglo probable:** reclamar la alerta en la corrida
+      (una columna o una nota en `errors`, como el "Alerta:" de la máquina
+      de estados) antes de mandarla, y devolver el reclamo si el envío falla.
+- [ ] **CDO: un 403 de un firewall por rate-limit contaría como foto "rota".**
+      (Revisión de la etapa E, 2026-10-14.) La CDN de CDO responde 403 a un
+      archivo inexistente (medido), y por eso el 403 es "rota". Pero un WAF o
+      CloudFront también pueden responder 403 por exceso de pedidos, y la
+      medición va de a 12 en paralelo. No está medido que esta CDN lo haga.
+      Lo que lo acota: el tope de "sin foto" por racha (apaga como mucho el
+      umbral en total) y que las rotas se vuelven a medir en cada corrida. Lo
+      que no acota: la caché queda con veredictos "rota" falsos hasta la
+      próxima corrida. Si aparece, distinguir por el cuerpo de la respuesta
+      (el 403 de archivo inexistente vino con `content-type: application/xml`,
+      medido) o bajar el paralelismo.
+- [ ] **Vigilante externo — NO decidido.** El vigilante de frescura (26 h)
+      corre dentro de Vercel: desde el cron del sync y desde el cron del
+      dólar. Si Vercel entero deja de disparar crons, o la base no responde,
+      no avisa nadie. Un vigilante afuera (un servicio de uptime que pegue a
+      un endpoint de estado) cubriría eso. Decidir si vale la pena.
+- [ ] **A quién van las alertas cuando el cliente opere solo — decisión de
+      Diego.** Hoy `ALERT_EMAIL` apunta a quien mantiene el sistema. Cuando
+      el cliente opere sin nosotros, decidir si las alertas le llegan a él, a
+      los dos (`ALERT_EMAIL` acepta varios destinatarios), o a nadie de su
+      lado. Ojo que el texto de las alertas está escrito para alguien que
+      puede verificar en la web del proveedor y usar el panel.
+- [ ] **Mirar el consumo de Neon la primera semana con las ventanas de 30
+      minutos** (eran de 2 h hasta el 2026-10-15).
+      Con el cron encendido, cada proveedor pega cada minuto durante dos
+      ventanas de 30 minutos por día (aunque la mayoría de los ticks no tengan nada
+      que hacer: "al día" consulta la base igual). Ver en el dashboard de Neon
+      que el cómputo no se dispare respecto de la semana anterior.
+- [ ] **Los avisos de currency="USD" de Zecat entierran los errores reales en
+      los logs.** (2026-10-15.) `[zecat-sync] currency="USD" sospechoso…` sale
+      UNA línea por producto: 236 por corrida, ~470 por día con el cron. En
+      los logs de Vercel (que en Pro duran 1 día) los errores de verdad
+      quedan sepultados. **Arreglo:** juntarlos en una sola línea por corrida,
+      con el conteo y los ids. El conteo ya se acumula en
+      `SyncRun.usdWarnings`; lo que falta es la lista y sacar el
+      `console.warn` por producto del conector.
+- [ ] **CDO: las imágenes vencen todas juntas a los 30 días.** (2026-10-15,
+      a raíz de las ventanas de 30 minutos.) La caché re-mide cada imagen a
+      los 30 días de medida, y la primera corrida las mide todas el mismo
+      día: 30 días después, una corrida vuelve a estar "en frío" (~26 min en
+      local, ~8.400 imágenes). En una ventana de 30 minutos puede no
+      terminar: queda RUNNING, a las 12 h se cierra FAILED por lista vencida
+      (con alerta de FALLANDO) y la siguiente termina, porque lo medido quedó
+      en la caché. No se pierde nada, pero es una alerta falsa y medio día de
+      atraso cada 30 días. **Arreglo probable:** repartir el vencimiento (por
+      ejemplo, 30 días ± un desfasaje fijo por URL) o un tope de re-mediciones
+      por corrida.
+- [x] **DECISIÓN (2026-10-14): los productos de proveedor que siguen en la API
+      NO se ocultan a mano (opción c).** Es coherente con "todos los productos
+      de Zecat se muestran" (CLAUDE.md). Si algún día hace falta, las otras
+      dos opciones que quedaron escritas:
+      - **(a) Un campo `hiddenByAdmin`** que el sync no escribe nunca, y que el
+        catálogo respeta además de `active`. Separa "el proveedor lo ofrece"
+        de "nosotros lo mostramos".
+      - **(b) Un motivo de pausa** (`pausedReason`): el sync solo puede
+        reactivar lo que pausó él mismo.
+
+      "Pausar estos N" no choca con esto: pausa solo ausentes confirmados, que
+      se reactivan si vuelven a la API.
 
 ## De la auditoría pre-entrega (2026-08-27, ver AUDITORIA.md)
 
@@ -382,10 +501,15 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       La diferencia es que en Blob el almacenamiento tiene costo asociado, a
       diferencia del filesystem local. Evaluar borrar el blob con `del()` al
       borrar la imagen.
-- [ ] **Automatizar el sync con cron** (Vercel Cron), cada 3-6 hs, para la
-      actualización semi-en-vivo. Hoy se corre a mano con `npm run sync:zecat`.
+- [x] **Automatizar el sync con cron** — **HECHO para Zecat: etapa D
+      verificada el 2026-10-15.** Etapas A, A2, B y C en `main` (motor de
+      ticks con lease, interruptor por proveedor). Las corridas automáticas
+      del 2026-10-14 19:25 ART y del 2026-10-15 06:00 ART se hicieron solas y
+      quedaron en verde. Las ventanas pasan de 2 h a 30 minutos con el deploy
+      de la etapa E. CDO entra con la etapa E. Detalle en HANDOFF, "Sync automático de
+      proveedores". Lo de abajo es el análisis original.
 
-      **Analizado y decidido (2026-08-21), falta construir.** Se va por Vercel
+      **Analizado y decidido (2026-08-21).** Se va por Vercel
       Cron sobre plan **Pro**. Descartadas: GitHub Actions (se prefiere no
       duplicar secrets) y el batching encadenado en Hobby.
 
@@ -442,11 +566,12 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       al actualizar `pg` a v9 la misma connection string va a **validar menos, en
       silencio, sin que nada falle**. Es una degradación de seguridad que no avisa
       cuando ocurre, solo antes. Hacerlo antes de esa actualización.
-- [ ] **`preferredRegion = "gru1"` en las funciones que pegan mucho a la base.**
-      Confirmado con dato real en el log del cron: la función corre en **`iad1`
-      (Washington)** y Neon está en `sa-east-1`. Para el cron del dólar da igual
-      (dos queries), pero el sync de productos hace 12-15 idas y vueltas **por
-      producto**. Ver el ítem de automatizar el sync.
+- [x] **`preferredRegion = "gru1"` en las funciones que pegan mucho a la base.**
+      RESUELTO (2026-09-07): `"regions": ["gru1"]` global en `vercel.json`,
+      para todas las funciones (ver HANDOFF, "Botón de sync: el primer click en
+      producción murió por región"). El dato original: la función corría en
+      **`iad1` (Washington)** con Neon en `sa-east-1`, y el sync de productos
+      hace 12-15 idas y vueltas **por producto**.
 - [x] **Enchufar el cron de la cotización del dólar.** Hecho: `vercel.json` con
       `0 19 * * *`. **Las expresiones de Vercel son UTC**, así que corre a las
       **16:00 ART**, después de que el BNA cierre — dolarapi actualiza a las
@@ -470,19 +595,110 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       implementar).
 - [ ] Mercado Pago / pago online (por ahora solo cotización).
 
+## Buscador: sugerencias mientras se escribe (diseño aprobado 2026-10-14)
+
+- [ ] **Sugerencias en el buscador de la barra.** Diseño aprobado, **NO
+      implementar todavía**: va **después de la etapa C**, junto con reactivar
+      el optimizador de imágenes. Pedido: que al escribir aparezcan opciones,
+      para que se note que está buscando.
+
+      **Dos requisitos previos, sin los cuales NO se implementa** (confirmado
+      2026-10-14; sigue sin construir):
+      1. **El límite de pedidos** para `/api/buscar` (detalle más abajo).
+      2. **El optimizador de imágenes reactivado** (abajo).
+
+      Optimizador: las miniaturas
+      dependen de reactivar el optimizador para las imágenes de proveedor
+      (el puente `unoptimized` de `src/lib/product-image.ts`, ítem de
+      "Vercel Pro" de arriba). Sin optimizador, cada pausa al escribir baja 5
+      fotos de proveedor ENTERAS (sin srcset) para mostrarlas en 48px.
+
+      **Dónde:** solo en el buscador de la barra (home y resto de la tienda).
+      **No en el catálogo:** ahí la grilla ya se filtra en vivo, y un
+      desplegable taparía justo los resultados que está mostrando.
+
+      **Qué muestra:** hasta 5 productos, cada uno con miniatura, nombre y
+      precio ("Desde $X" o exacto, mismo `computePriceRange` que las cards).
+      Al final, una fila "Ver los N resultados" que lleva a `/catalogo?q=…`
+      (N sale de la misma consulta). Orden: coincidencias por NOMBRE primero
+      (las que empiezan con lo tipeado, después las que lo contienen),
+      después por categoría o color. La descripción NO entra: la búsqueda
+      del catálogo la incluye, pero en un desplegable de 5 trae ruido.
+
+      **Costo:**
+      - Debounce de 250 ms, mínimo 2 caracteres, tope de 60 caracteres por
+        consulta.
+      - Se aborta el pedido anterior si llega otro (AbortController), y se
+        guardan en el navegador los términos ya buscados.
+      - Una ruta GET `/api/buscar?q=` (no server action: se puede abortar y
+        cachear).
+      - 2 consultas a Neon por pedido: la búsqueda con `unaccent` que ya
+        existe en `catalog.ts`, restringida a nombre, categoría y color; y
+        los 5 productos con foto y variantes activas. La configuración de
+        precios ya se lee en otras páginas y se reusa.
+      - Una búsqueda típica ("mochila") son 2 o 3 pausas: **4 a 6 consultas**,
+        a ~2 ms cada una desde gru1.
+
+      **Datos:** mismos filtros que el catálogo después de A2: `active`,
+      `deletedAt: null`, y solo `variants.active` (para el precio y para que
+      un color cuente como coincidencia).
+
+      **Teclado y accesibilidad** (patrón combobox de WAI-ARIA 1.2):
+      - Input `role="combobox"` con `aria-expanded` y `aria-controls`; lista
+        `role="listbox"`.
+      - Flechas para moverse, con el ítem activo anunciado por
+        `aria-activedescendant`.
+      - Enter con un ítem marcado va a ese producto; Enter sin marcar hace lo
+        de hoy: catálogo con la búsqueda completa.
+      - Escape con la lista abierta la cierra; con la lista cerrada borra el
+        texto (como hoy). Nunca hacen falta tres Escape.
+      - `aria-live` que anuncia "5 resultados" / "Sin resultados".
+
+      **Mobile con el teclado abierto:** la lista va debajo de la fila de
+      búsqueda, a todo el ancho. 5 filas de ~56 px son ~280 px, que entran
+      encima del teclado en un teléfono de 844 px; si no, scrollea por
+      dentro. Tocar una sugerencia navega y cierra la fila (y el teclado).
+
+      **Sin resultados:** "Sin resultados para «x»" y un link "Ver todo el
+      catálogo". Enter sigue llevando a `/catalogo?q=x`, que ya tiene su
+      estado vacío con salida.
+
+      **Límite de pedidos para `/api/buscar`** (endpoint público que consulta
+      Neon). Un rate limit en memoria NO sirve en serverless (cada invocación
+      puede ser otra instancia), así que en capas:
+      1. **Caché en el CDN primero**, que es lo que más ahorra: la respuesta
+         con `Cache-Control: s-maxage=60, stale-while-revalidate=300`, con
+         la URL normalizada (minúsculas, sin acentos ni espacios dobles,
+         recortada a 60 caracteres) para que "Mochila" y "mochila " peguen en
+         la misma entrada. Los términos repetidos no llegan a Neon.
+      2. **Validación barata antes de tocar la base:** menos de 2 o más de 60
+         caracteres → 400 sin consultar.
+      3. **Límite por IP en el borde:** una regla de rate limit del firewall
+         de Vercel sobre `/api/buscar` (orden de 60 pedidos por minuto por
+         IP; una persona escribiendo no llega ni a 20). **Verificar al
+         implementar** que el plan Pro la incluya y su costo: no está medido.
+         Si no la incluye, Upstash Redis con `@upstash/ratelimit` (ventana
+         deslizante por IP), que funciona en serverless.
+      4. Con el límite superado: 429, y el desplegable no muestra nada (el
+         buscador sigue funcionando con Enter).
+
 ## Multi-proveedor — el segundo proveedor ya llegó (CDO Promocionales / Stocksur)
 
 - [x] **Escribir el conector de CDO siguiendo el patrón del de Zecat.** Hecho.
       207 productos del entorno de pruebas, 0 fallidos. Se corre con
       `npm run sync:cdo`. Las trampas de la API (sku repetido entre productos,
       stock ya neto, precios en USD, iconos) están documentadas en `CLAUDE.md`.
-- [ ] **Migrar Neon y pushear el conector.** Es el próximo paso concreto del
+- [x] **Migrar Neon y pushear el conector.** Hecho (ver HANDOFF, "Conector
+      de CDO Promocionales / Stocksur — pusheado y en producción"). El texto
+      original: es el próximo paso concreto del
       proyecto — ver `HANDOFF.md`. **El código está commiteado y SIN pushear a
       propósito**: trae la migración `20260821174829_add_cdo_provider` que Neon
       todavía no tiene. Primero la base, después el push.
-- [ ] **Apuntar CDO a producción** (hoy `CDO_API_URL` es el entorno de pruebas).
-      Pasa de 207 a ~950 productos. Antes: revisar la checklist de la sección
-      del conector en `HANDOFF.md`.
+- [x] **Importar CDO a producción.** Hecho: producción tiene **309 productos
+      de CDO desde el 2026-09-09** (dato de Diego; el "~950" que se estimaba
+      era una proyección desde el entorno de pruebas). Lo que queda es la
+      **etapa E**: CDO sobre el motor del sync, construida en local, con su
+      deploy pendiente (ver HANDOFF, "Pendiente de verificar").
 - [ ] **Refactorizar el conector de Zecat para que ambos sigan el mismo
       contrato.** Ahora que hay dos conectores reales se puede diseñar sobre
       casos concretos en vez de en abstracto. Hoy comparten la forma (upsert por
@@ -571,7 +787,11 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       de pruebas, con listas explícitas de ids en `src/lib/cdo/normalize.ts`.
       Producción puede traer otros: el sync loguea los "sin clasificar", hay que
       mirar ese log y agregarlos a mano.
-- [ ] **`NEON_DATABASE_URL` volvió al `.env` — decidir si se saca.** Estaba
+- [x] **`NEON_DATABASE_URL` volvió al `.env` — RESUELTO (2026-10-14).** Se
+      movió a `.env.neon`, con línea propia en `.gitignore` (verificado con
+      `git check-ignore`). Ni Next ni Prisma lo cargan solos; los comandos que
+      tocan Neon lo leen explícitamente (comando en HANDOFF, "Regla de
+      entornos"). Historia del ítem: estaba
       resuelto el 2026-08-21 (12 claves, ninguna de Neon), pero al 2026-08-26 el
       `.env` tiene **14 claves y una es `NEON_DATABASE_URL`**.
 

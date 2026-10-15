@@ -16,10 +16,11 @@
 // Resend interceptado: ningun request sale de la maquina. BORRA todo lo de
 // la base de prueba al arrancar.
 import "dotenv/config";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
-import { avanzarCorrida, inicioDeVentana, LEASE_MS } from "../src/lib/sync/motor";
+import { avanzarCorrida, inicioDeVentana, LEASE_MS, VENTANAS_UTC } from "../src/lib/sync/motor";
 import { revisarAlertas, vigilarFrescura } from "../src/lib/sync/alertas";
 import { leerSummary } from "../src/lib/sync-run";
 import { GET } from "../src/app/api/cron/sync/[provider]/route";
@@ -146,7 +147,7 @@ async function main() {
     check("sin CRON_SECRET: 503", (await tickCron()).status === 503);
     process.env.CRON_SECRET = SECRET;
     check("header incorrecto: 401", (await tickCron("zecat", "Bearer otro")).status === 401);
-    check("proveedor sin conector (cdo): 404", (await tickCron("cdo")).status === 404);
+    check("proveedor sin conector (otro): 404", (await tickCron("otro")).status === 404);
     const apagado = await tickCron();
     check("interruptor apagado: 200 skipped", (await apagado.json()).skipped === "disabled");
     check("interruptor apagado: no creo ninguna corrida ni mando mails", (await runs()).length === 0 && mails.length === 0);
@@ -387,11 +388,21 @@ async function main() {
     }
     await correrHastaTerminar("admin@ejemplo.test");
 
-    console.log("\n=========== VENTANAS DE 2 HORAS ===========");
-    const h = (iso: string) => inicioDeVentana(new Date(iso)).toISOString().slice(11, 16);
-    check("09:40Z y 10:59Z son la ventana de las 09:00", h("2026-10-15T09:40:00Z") === "09:00" && h("2026-10-15T10:59:00Z") === "09:00");
-    check("21:05Z y 22:30Z son la ventana de las 21:00", h("2026-10-15T21:05:00Z") === "21:00" && h("2026-10-15T22:30:00Z") === "21:00");
+    console.log("\n=========== VENTANAS DE 30 MINUTOS ===========");
+    const h = (iso: string, p: ProductOrigin = ProductOrigin.ZECAT) =>
+      inicioDeVentana(new Date(iso), p).toISOString().slice(11, 16);
+    check("Zecat: 09:00Z y 09:29Z son la ventana de las 09:00", h("2026-10-15T09:00:00Z") === "09:00" && h("2026-10-15T09:29:59Z") === "09:00");
+    check("Zecat: 21:15Z es la ventana de las 21:00", h("2026-10-15T21:15:00Z") === "21:00");
+    check("CDO: 10:00Z y 22:29Z son sus ventanas", h("2026-10-15T10:00:00Z", ProductOrigin.CDO) === "10:00" && h("2026-10-15T22:29:00Z", ProductOrigin.CDO) === "22:00");
     check("fuera de ventana (15:20Z): la hora en curso", h("2026-10-15T15:20:00Z") === "15:00");
+    // vercel.json y VENTANAS_UTC tienen que decir lo mismo.
+    const crons = (JSON.parse(fs.readFileSync("vercel.json", "utf8")) as { crons: Array<{ path: string; schedule: string }> }).crons;
+    const esperado = (p: ProductOrigin) => {
+      const v = VENTANAS_UTC[p]!;
+      return `0-${v[0].minutos - 1} ${v.map((w) => w.desde).join(",")} * * *`;
+    };
+    check("vercel.json coincide con VENTANAS_UTC (Zecat)", crons.find((c) => c.path === "/api/cron/sync/zecat")?.schedule === esperado(ProductOrigin.ZECAT), esperado(ProductOrigin.ZECAT));
+    check("vercel.json coincide con VENTANAS_UTC (CDO)", crons.find((c) => c.path === "/api/cron/sync/cdo")?.schedule === esperado(ProductOrigin.CDO), esperado(ProductOrigin.CDO));
 
     console.log("\n=========== ALERTAS: CONCURRENCIA Y SIN CONFIGURAR ===========");
     estado.listado = ids.filter((id) => !ids.slice(0, 20).includes(id)); // bloqueo nuevo

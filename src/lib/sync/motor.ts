@@ -1,8 +1,20 @@
 import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSyncAlert } from "@/lib/email";
-import { finishSyncRun, leerSummary, type SyncRunSummary } from "@/lib/sync-run";
-import { conectorDe, type Carga, type Conector } from "@/lib/sync/conectores";
+import {
+  finishSyncRun,
+  leerSummary,
+  rachaSinFotoActiva,
+  umbralDeSeguridad,
+  type SyncRunSummary,
+} from "@/lib/sync-run";
+import {
+  conectorDe,
+  type Carga,
+  type Conector,
+  type ContextoSincronizar,
+  type ResultadoSincronizar,
+} from "@/lib/sync/conectores";
 
 /// El motor del sync: avanza UNA corrida de un proveedor durante un tick y
 /// corta. Lo llaman el cron (cada minuto dentro de la ventana), el boton del
@@ -47,15 +59,33 @@ export const LISTA_VENCE_MS = 6 * 60 * 60 * 1000;
 /// esto (con dos ventanas por dia, cada ventana arranca una).
 export const NUEVA_CORRIDA_CADA_MS = 6 * 60 * 60 * 1000;
 
-/// Las ventanas del cron, en hora UTC. TIENEN que coincidir con vercel.json
-/// ("* 9-10,21-22 * * *"): dos horas cada una, para que una corrida que
-/// arranca tarde en la primera hora (tras reintentos, o con el proveedor
-/// lento) termine en la segunda en vez de quedar varada hasta la ventana
-/// siguiente. 9 y 21 UTC = 06:00 y 18:00 ART.
-export const VENTANAS_UTC = [
-  { desde: 9, horas: 2 },
-  { desde: 21, horas: 2 },
-] as const;
+/// Las ventanas del cron de cada proveedor: hora UTC de inicio y duracion en
+/// minutos. TIENEN que coincidir con vercel.json. CDO va desfasado una hora
+/// de Zecat: no compiten por la base ni por los ticks.
+/// - Zecat: "0-29 9,21 * * *"  (06:00 a 06:29 y 18:00 a 18:29 ART)
+/// - CDO:   "0-29 10,22 * * *" (07:00 a 07:29 y 19:00 a 19:29 ART)
+///
+/// 30 minutos (eran 2 h hasta 2026-10-15): cada tick pega a la base aunque
+/// no haya nada que hacer, y con la cache cargada una corrida entra holgada.
+/// Alcanzan para el peor caso de reintentos: 3 corridas con 10 min entre
+/// fallidas (minutos 0, 10 y 20).
+///
+/// Una corrida que NO termina en su ventana queda RUNNING hasta la
+/// siguiente (12 h despues); ahi su lista ya vencio (LISTA_VENCE_MS), se
+/// cierra FAILED y arranca una nueva en el mismo tick. No se pierde todo: en
+/// CDO las imagenes medidas quedan en la cache, asi que la corrida nueva
+/// avanza mucho mas rapido. La primera corrida de CDO (cache vacia: ~26 min
+/// medidos en local) se hace desde el panel, que no tiene ventana.
+export const VENTANAS_UTC: Partial<Record<ProductOrigin, ReadonlyArray<{ desde: number; minutos: number }>>> = {
+  [ProductOrigin.ZECAT]: [
+    { desde: 9, minutos: 30 },
+    { desde: 21, minutos: 30 },
+  ],
+  [ProductOrigin.CDO]: [
+    { desde: 10, minutos: 30 },
+    { desde: 22, minutos: 30 },
+  ],
+};
 
 /// Tope de corridas que el cron arranca por ventana, y espera despues de una
 /// fallida. Con el proveedor caido, sin esto serian hasta 120 corridas
@@ -135,7 +165,7 @@ export async function avanzarCorrida(
         const noArrancar = await motivoParaNoArrancar(provider, ahora);
         if (noArrancar) return { estado: "sin-corrida", motivo: noArrancar };
       }
-      run = await crearCorrida(provider, startedBy);
+      run = await crearCorrida(provider, startedBy, ahora);
     }
 
     const toma = await tomarLease(run.id, ahora);
@@ -232,6 +262,21 @@ async function trabajar(lease: Lease, conector: Conector): Promise<ResultadoTick
   const lista = run.plannedExternalIds as string[];
   let cursor = run.cursor ?? 0;
 
+  // Tope de apagados por "sin foto": al llegar al umbral de seguridad, los
+  // siguientes productos que se queden sin foto CONSERVAN su estado. Un 403
+  // en masa de la CDN (un cambio de permisos del lado del proveedor) se ve
+  // igual que fotos rotas de verdad, y como cada producto se escribe durante
+  // la corrida, una alerta al cierre llegaria con el catalogo ya apagado.
+  // El conteo se lee bajo el lease (nadie mas escribe esta corrida) y se
+  // sigue en memoria durante el tick. El umbral usa los activos de ahora: a
+  // medida que se apagan productos baja, nunca sube.
+  //
+  // Ademas el tope es por RACHA: si la ultima corrida completa ya llego al
+  // tope, esta no apaga ninguno (ver rachaSinFotoActiva).
+  const { umbral: umbralSinFoto } = await umbralDeSeguridad(conector.provider);
+  const enRachaSinFoto = await rachaSinFotoActiva(conector.provider, lease.runId);
+  let apagadosSinFoto = (run.sinFotoExternalIds as Array<{ retenido: boolean }>).filter((x) => !x.retenido).length;
+
   while (cursor < lista.length && Date.now() - inicio < presupuestoTick()) {
     const ids = lista.slice(cursor, cursor + TANDA);
     const cargas = await Promise.all(ids.map((id) => conector.cargar(id)));
@@ -250,8 +295,18 @@ async function trabajar(lease: Lease, conector: Conector): Promise<ResultadoTick
     }
 
     for (let i = 0; i < ids.length; i++) {
-      await procesarUno(lease, cursor + 1, ids[i], cargas[i], conector);
+      const sinFoto = await procesarUno(lease, cursor + 1, ids[i], cargas[i], conector, {
+        puedeApagarSinFoto: !enRachaSinFoto && apagadosSinFoto < umbralSinFoto,
+      });
+      if (sinFoto === "apagado") apagadosSinFoto++;
       cursor++;
+      // Si cargar es gratis (CDO: el producto ya esta en memoria), el
+      // presupuesto se mira tambien ENTRE productos: en CDO cada producto
+      // mide sus imagenes (cache vacia: ~23 por producto) y una tanda entera
+      // se pasaba 20-25 s del presupuesto (medido). Cortar aca no pierde
+      // nada: el cursor avanzo producto por producto. En Zecat se corta solo
+      // entre tandas, para no volver a pedir detalles ya pedidos.
+      if (conector.cargaGratis && Date.now() - inicio >= presupuestoTick()) break;
     }
     // Renueva el lease (y el latido) entre tandas: es trabajo vivo.
     await renovar(lease);
@@ -302,9 +357,11 @@ async function procesarUno(
   nuevoCursor: number,
   id: string,
   carga: Carga,
-  conector: Conector
-) {
+  conector: Conector,
+  contexto: ContextoSincronizar
+): Promise<ResultadoSincronizar["sinFoto"]> {
   const delta = { creados: 0, actualizados: 0, pausados: 0, fallidos: 0, moneda: 0 };
+  let sinFoto: ResultadoSincronizar["sinFoto"];
   let visto = true;
   let error: { externalId: string; message: string } | null = null;
 
@@ -318,7 +375,8 @@ async function procesarUno(
     error = { externalId: id, message: carga.mensaje };
   } else {
     try {
-      const r = await conector.sincronizar(carga.producto);
+      const r = await conector.sincronizar(carga.producto, contexto);
+      sinFoto = r.sinFoto;
       if (r.resultado === "creado") delta.creados = 1;
       else if (r.resultado === "actualizado") delta.actualizados = 1;
       else delta.pausados = 1;
@@ -342,9 +400,11 @@ async function procesarUno(
       "usdWarnings" = "usdWarnings" + ${delta.moneda},
       "seenExternalIds" = CASE WHEN ${visto} THEN "seenExternalIds" || to_jsonb(${id}::text) ELSE "seenExternalIds" END,
       errors = CASE WHEN ${error !== null} THEN errors || ${JSON.stringify(error ? [error] : [])}::jsonb ELSE errors END,
+      "sinFotoExternalIds" = CASE WHEN ${sinFoto !== undefined} THEN "sinFotoExternalIds" || ${JSON.stringify(sinFoto ? [{ id, retenido: sinFoto === "retenido" }] : [])}::jsonb ELSE "sinFotoExternalIds" END,
       "heartbeatAt" = ${new Date()}
     WHERE id = ${lease.runId} AND "leaseUntil" = ${lease.ficha} AND status = 'RUNNING'`;
   if (filas !== 1) throw new LeasePerdido();
+  return sinFoto;
 }
 
 /// Escribe en la corrida solo si el lease sigue siendo nuestro.
@@ -483,9 +543,12 @@ async function avisarSiSeCortaDeNuevo(runId: string, provider: ProductOrigin) {
   }
 }
 
-async function crearCorrida(provider: ProductOrigin, startedBy: string) {
+/// startedAt sale del MISMO reloj que el resto del tick (`ahora`): las reglas
+/// que lo comparan (lista vencida, intentos por ventana) no pueden mezclar
+/// la hora del proceso con la de la base.
+async function crearCorrida(provider: ProductOrigin, startedBy: string, ahora: Date) {
   try {
-    return await prisma.syncRun.create({ data: { provider, startedBy } });
+    return await prisma.syncRun.create({ data: { provider, startedBy, startedAt: ahora } });
   } catch (error) {
     // Otro llego primero (indice unico parcial: una sola RUNNING por
     // proveedor). No es un error: se trabaja sobre la suya.
@@ -500,9 +563,10 @@ async function crearCorrida(provider: ProductOrigin, startedBy: string) {
 
 /// Inicio de la ventana del cron que contiene a `ahora` (o, fuera de toda
 /// ventana —un llamado manual—, la hora UTC en curso).
-export function inicioDeVentana(ahora: Date): Date {
+export function inicioDeVentana(ahora: Date, provider: ProductOrigin = ProductOrigin.ZECAT): Date {
   const h = ahora.getUTCHours();
-  const v = VENTANAS_UTC.find((w) => h >= w.desde && h < w.desde + w.horas);
+  const min = h * 60 + ahora.getUTCMinutes();
+  const v = (VENTANAS_UTC[provider] ?? []).find((w) => min >= w.desde * 60 && min < w.desde * 60 + w.minutos);
   const inicio = new Date(ahora);
   inicio.setUTCHours(v ? v.desde : h, 0, 0, 0);
   return inicio;
@@ -522,7 +586,7 @@ export async function motivoParaNoArrancar(
   }
 
   const delCron = await prisma.syncRun.findMany({
-    where: { provider, startedBy: "cron", startedAt: { gte: inicioDeVentana(ahora) } },
+    where: { provider, startedBy: "cron", startedAt: { gte: inicioDeVentana(ahora, provider) } },
     orderBy: { startedAt: "desc" },
   });
   if (delCron.length >= MAX_INTENTOS_CRON_POR_VENTANA) {

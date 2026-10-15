@@ -5,8 +5,15 @@
 /// que corresponden ANTES de llamar a esta funcion. Asi el destino es siempre
 /// una decision explicita del comando que se corre, no un efecto secundario
 /// de que variable quedo cargada en el .env.
+///
+/// Desde la etapa E corre sobre el MISMO motor que el cron y el boton del
+/// panel (lib/sync/motor.ts): lista congelada, ticks y el mismo lease. Si el
+/// cron o el panel tienen la corrida de CDO, la consola espera su turno y
+/// sigue la misma corrida.
+import { ProductOrigin } from "@prisma/client";
 import { prisma } from "../src/lib/prisma";
-import { syncCdoCatalog } from "../src/lib/cdo/sync";
+import { avanzarCorrida, type ResultadoTick } from "../src/lib/sync/motor";
+import { revisarAlertas } from "../src/lib/sync/alertas";
 
 export async function runCdoSync(etiquetaEntorno: string) {
   // El destino de ESCRITURA se imprime siempre y en primer lugar. El riesgo
@@ -30,82 +37,83 @@ export async function runCdoSync(etiquetaEntorno: string) {
   console.log("\nIniciando sincronizacion con CDO Promocionales...");
   const start = Date.now();
 
-  const summary = await syncCdoCatalog();
+  let fin: ResultadoTick;
+  let siguiendo: string | undefined;
+  let tick = 0;
+  for (;;) {
+    const t0 = Date.now();
+    fin = await avanzarCorrida(ProductOrigin.CDO, "consola", { esCron: false, siguiendo });
+    tick++;
+    const seg = ((Date.now() - t0) / 1000).toFixed(1);
+    if (fin.estado === "ocupado") {
+      console.log(`  en curso por ${fin.startedBy}: ${fin.procesados} de ${fin.total ?? "?"} — esperando el lease...`);
+      siguiendo = fin.runId;
+      await new Promise((r) => setTimeout(r, 5000));
+      continue;
+    }
+    if (fin.estado === "avanzo") {
+      siguiendo = fin.runId;
+      console.log(`  tick ${tick} (${seg} s): ${fin.procesados} de ${fin.total} productos`);
+      continue;
+    }
+    console.log(`  tick ${tick} (${seg} s): ${fin.estado}`);
+    break;
+  }
 
+  // Alertas por cambio de estado, igual que el cron (sin RESEND_API_KEY en
+  // el .env local solo se loguean).
+  await revisarAlertas(ProductOrigin.CDO);
+
+  if (fin.estado === "sin-corrida") {
+    console.error(`\nNo se pudo tomar ninguna corrida: ${fin.motivo}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (fin.estado === "fallo") {
+    console.error(`\nCorrida FALLIDA: ${fin.mensaje}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (fin.estado !== "completa") return;
+
+  const s = fin.summary;
   const elapsedSeconds = ((Date.now() - start) / 1000).toFixed(1);
+  const nombre = (id: string) => `${id} ${s.nombres[id] ?? ""}`.trim();
 
   console.log("\nResumen de la sincronizacion:");
-  console.log(`  Total procesados:   ${summary.total}`);
-  console.log(`  Creados:            ${summary.created}`);
-  console.log(`  Actualizados:       ${summary.updated}`);
-  console.log(`  Fallidos:           ${summary.failed}`);
-  console.log(`  Inactivos sin foto: ${summary.sinImagen.length}`);
-  console.log(`  Sin variantes:      ${summary.sinVariantes.length} (quedan inactivos)`);
-  console.log(`  Variantes desact.:  ${summary.variantesDesactivadas} (CDO dejo de mandarlas)`);
-  console.log(`  SKU sintetico:      ${summary.skuSintetico}`);
-  console.log(`  Sin net_price:      ${summary.variantesSinPrecio.length}`);
+  console.log(`  Vistos:             ${s.vistos} de ${s.totalRemoto}`);
+  console.log(`  Creados:            ${s.creados}`);
+  console.log(`  Actualizados:       ${s.actualizados}`);
+  console.log(`  Fallidos:           ${s.fallidos}`);
+  console.log(`  Variantes desact.:  ${s.variantesDesactivadas} (CDO dejo de mandarlas)`);
+  console.log(`  Sin variantes:      ${s.productosSinVariantes} producto(s), quedan inactivos`);
+  console.log(`  Apagados sin foto:  ${s.apagadosSinFoto?.length ?? 0}${s.retenidosSinFoto?.length ? ` (+ ${s.retenidosSinFoto.length} RETENIDOS: ${s.rachaSinFoto ? "sigue la racha" : "se llegó al tope"})` : ""}`);
+  console.log(`  Ticks:              ${tick}`);
   console.log(`  Tiempo:             ${elapsedSeconds}s`);
 
-  // Deberia ser SIEMPRE cero: si aparece, CDO cambio el contrato de precios
-  // y estamos perdiendo variantes en silencio.
-  if (summary.variantesSinPrecio.length) {
-    console.log(
-      `\nVARIANTES SIN net_price (salteadas — revisar, CDO pudo cambiar el contrato):`
-    );
-    for (const v of summary.variantesSinPrecio) {
-      console.log(`  - producto ${v.cdoId} (${v.name}), variante ${v.variantId}`);
+  if (s.ausentes.length) {
+    console.log(`\nAUSENTES: ${s.ausentes.length} producto(s) que la API ya no devuelve (umbral ${s.umbral}):`);
+    for (const id of s.ausentes) {
+      const estado = s.autoPausados.includes(id)
+        ? " (baja confirmada, pausado)"
+        : s.aRevisar.includes(id)
+          ? " (A REVISAR: el detalle sigue respondiendo)"
+          : s.noVerificados.includes(id)
+            ? " (no se pudo verificar, no se pauso)"
+            : "";
+      console.log(`  - ${nombre(id)}${estado}`);
     }
   }
 
-  if (summary.sinImagen.length) {
-    console.log(
-      "\nImportados INACTIVOS por no tener ninguna imagen usable (se reactivan solos si CDO les carga la foto):"
-    );
-    for (const p of summary.sinImagen) {
-      console.log(`  - [${p.cdoId}] ${p.name}`);
-    }
-  }
-
-  // Los dos casos de icono se listan por separado: piden acciones distintas.
-  const idsNuevos = summary.iconosDesconocidos.filter((i) => i.reason === "id-nuevo");
-  const labelsCambiados = summary.iconosDesconocidos.filter(
-    (i) => i.reason === "label-cambiado"
+  const run = await prisma.syncRun.findUniqueOrThrow({ where: { id: fin.runId } });
+  const errores = (run.errors as Array<{ externalId: string; message: string }>).filter(
+    (e) => e.externalId !== "-" && e.externalId !== "alerta"
   );
-
-  if (idsNuevos.length) {
-    console.log(
-      "\nIconos con id NUEVO — agregarlos a PRINTING_TECHNIQUE_ICONS o ATTRIBUTE_ICONS en src/lib/cdo/normalize.ts:"
-    );
-    for (const icon of idsNuevos) {
-      console.log(`  - ${icon.id}: "${icon.label}"`);
-    }
-  }
-
-  if (labelsCambiados.length) {
-    console.log(
-      "\n*** ATENCION — iconos que CAMBIARON DE SIGNIFICADO ***\n" +
-        "CDO reutilizo estos ids para otra cosa. NO se guardaron, a proposito.\n" +
-        "Hay que revisar la clasificacion en src/lib/cdo/normalize.ts:"
-    );
-    for (const icon of labelsCambiados) {
-      console.log(
-        `  - id ${icon.id}: esperabamos "${icon.expectedLabel}" y vino "${icon.label}"`
-      );
-    }
-  }
-
-  if (summary.errors.length) {
+  if (errores.length) {
     console.log("\nErrores:");
-    for (const error of summary.errors) {
-      console.log(`  - producto ${error.cdoId}: ${error.message}`);
-    }
+    for (const e of errores) console.log(`  - producto ${e.externalId}: ${e.message}`);
   }
-
-  if (summary.failed > 0) {
-    process.exitCode = 1;
-  }
-
-  return summary;
+  if (s.fallidos > 0) process.exitCode = 1;
 }
 
 export async function cerrar() {

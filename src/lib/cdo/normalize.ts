@@ -264,11 +264,26 @@ export const EXTREME_ASPECT_RATIO = 2.5;
 
 export type ImageVerdict = "ok" | "deforme" | "chica" | "rota";
 
+/// Plazo de cada medicion de imagen.
+export const TIMEOUT_MEDICION_MS = 10_000;
+
 export interface ImageProbe {
   verdict: ImageVerdict;
   width: number;
   height: number;
 }
+
+/// Lo que devuelve una medicion: un veredicto, o "sin-medir" cuando la
+/// medicion no llego a una respuesta definitiva (timeout, 5xx, error de red).
+///
+/// La diferencia importa: "rota" apaga el producto si no le queda ninguna
+/// otra foto, y un rato de CDN lenta no puede apagar productos que estan
+/// bien. "sin-medir" no se guarda en la cache ni cambia el estado de nadie:
+/// se reintenta en la proxima corrida (ver lib/cdo/imagenes.ts).
+export type ImageMeasurement = ImageProbe | { verdict: "sin-medir"; motivo: string };
+
+/// La descarga no llego a una respuesta definitiva.
+class SinRespuestaDefinitiva extends Error {}
 
 /// Mide una imagen para decidir si sirve como foto de producto.
 ///
@@ -280,31 +295,66 @@ export interface ImageProbe {
 ///
 /// Se pide solo el primer tramo del archivo: el header con las dimensiones
 /// esta al principio. Si con eso no alcanza, se baja entero.
-export async function probeImage(url: string): Promise<ImageProbe> {
+///
+/// "rota" es solo lo DEFINITIVO: un 4xx (la CDN de CDO responde 403, no 404,
+/// a un archivo que no existe: medido el 2026-10-14), o una respuesta que no
+/// es una imagen. Timeout, 5xx, 408, 429 y errores de red son "sin-medir".
+export async function probeImage(url: string): Promise<ImageMeasurement> {
   const sharp = (await import("sharp")).default;
+  // Un plazo para TODA la medicion (el tramo parcial y, si hace falta, la
+  // descarga completa): una imagen colgada no puede comerse el tick.
+  const plazo = AbortSignal.timeout(TIMEOUT_MEDICION_MS);
 
-  async function medir(headersExtra?: Record<string, string>) {
-    const res = await fetch(url, { headers: headersExtra });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const meta = await sharp(buf).metadata();
-    return { width: meta.width ?? 0, height: meta.height ?? 0 };
-  }
-
-  let dims: { width: number; height: number };
-  try {
-    dims = await medir({ Range: "bytes=0-65535" });
-    if (!dims.width || !dims.height) dims = await medir();
-  } catch {
+  /// El archivo, o null si el servidor respondio que no esta (4xx).
+  async function bajar(headersExtra?: Record<string, string>): Promise<Buffer | null> {
+    let res: Response;
     try {
-      dims = await medir();
-    } catch {
-      return { verdict: "rota", width: 0, height: 0 };
+      res = await fetch(url, { headers: headersExtra, signal: plazo });
+    } catch (error) {
+      throw new SinRespuestaDefinitiva(error instanceof Error ? error.message : String(error));
+    }
+    if (!res.ok) {
+      if (res.status >= 500 || res.status === 408 || res.status === 429) {
+        throw new SinRespuestaDefinitiva(`status ${res.status}`);
+      }
+      return null;
+    }
+    try {
+      return Buffer.from(await res.arrayBuffer());
+    } catch (error) {
+      // Se corto a mitad del cuerpo (el plazo, o la red).
+      throw new SinRespuestaDefinitiva(error instanceof Error ? error.message : String(error));
     }
   }
 
+  /// Las dimensiones, o null si no es una imagen que sharp pueda leer.
+  async function dimensiones(buf: Buffer) {
+    try {
+      const meta = await sharp(buf).metadata();
+      return meta.width && meta.height ? { width: meta.width, height: meta.height } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  let dims: { width: number; height: number } | null;
+  try {
+    // Con el tramo parcial, cualquier cosa rara (un 416, un header cortado)
+    // se resuelve bajando el archivo entero, que es la respuesta que decide.
+    const tramo = await bajar({ Range: "bytes=0-65535" });
+    dims = tramo ? await dimensiones(tramo) : null;
+    if (!dims) {
+      const entero = await bajar();
+      if (!entero) return { verdict: "rota", width: 0, height: 0 };
+      dims = await dimensiones(entero);
+    }
+  } catch (error) {
+    if (error instanceof SinRespuestaDefinitiva) return { verdict: "sin-medir", motivo: error.message };
+    throw error;
+  }
+
+  if (!dims) return { verdict: "rota", width: 0, height: 0 };
   const { width, height } = dims;
-  if (!width || !height) return { verdict: "rota", width, height };
   if (width < MIN_IMAGE_SIDE || height < MIN_IMAGE_SIDE) {
     return { verdict: "chica", width, height };
   }
@@ -321,17 +371,23 @@ export function probeAceptada(probe: ImageProbe | undefined): boolean {
   return probe.verdict === "ok" || probe.verdict === "deforme";
 }
 
-/// true si el producto no tiene NI UNA imagen usable en ninguna variante.
+/// Si el producto tiene foto usable, segun lo medido:
+/// - "con-foto": alguna imagen medida sirve;
+/// - "sin-foto": todas se midieron y ninguna sirve (o no tiene ninguna);
+/// - "indeterminado": ninguna medida sirve, pero hay alguna que no se pudo
+///   medir y nunca se midio antes. No hay como saber: el producto conserva
+///   el estado que tenia (ver syncCdoProduct).
 ///
-/// Se importan igual pero con active: false. Un producto sin foto en una
-/// tienda de merch no sirve — nadie cotiza lo que no puede ver, y en el
-/// catalogo se veria como un cuadrado gris. Como el sync los vuelve a evaluar
-/// en cada corrida, si CDO les carga la foto se reactivan solos.
-export function hasNoUsableImages(
+/// Un producto "sin-foto" se importa con active: false. Un producto sin foto
+/// en una tienda de merch no sirve — nadie cotiza lo que no puede ver, y en
+/// el catalogo se veria como un cuadrado gris. Como el sync los vuelve a
+/// evaluar en cada corrida, si CDO les carga la foto se reactivan solos.
+export function estadoDeFotos(
   product: CdoProduct,
-  probes?: Map<string, ImageProbe>
-): boolean {
-  return (product.variants ?? []).every(
-    (variant) => variantImageUrls(variant, probes).length === 0
-  );
+  probes: Map<string, ImageProbe>,
+  sinMedir: ReadonlySet<string> = new Set()
+): "con-foto" | "sin-foto" | "indeterminado" {
+  const urls = candidateImageUrls(product);
+  if (urls.some((u) => probes.has(u) && probeAceptada(probes.get(u)))) return "con-foto";
+  return urls.some((u) => sinMedir.has(u)) ? "indeterminado" : "sin-foto";
 }

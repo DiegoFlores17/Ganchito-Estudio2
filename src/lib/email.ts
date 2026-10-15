@@ -305,12 +305,26 @@ export type SyncAlertInput =
       umbralProductos: number;
       productosSinVariantes: AusenteAlerta[];
     }
+  /// La corrida llego al tope de productos apagados por quedarse sin foto,
+  /// y los siguientes conservaron su estado.
+  | {
+      motivo: "sin-foto";
+      provider: string;
+      runId: string;
+      /// La corrida anterior ya habia llegado al tope: esta no apago ninguno.
+      racha: boolean;
+      umbral: number;
+      apagados: AusenteAlerta[];
+      retenidos: AusenteAlerta[];
+    }
   /// Envio de prueba pedido desde el panel.
   | { motivo: "prueba"; provider: string; pedidoPor: string };
 
 /// Nombre visible del proveedor en los mails ("Zecat", no "ZECAT").
 function nombreProveedor(provider: string): string {
-  return provider === "ZECAT" ? "Zecat" : provider;
+  if (provider === "ZECAT") return "Zecat";
+  if (provider === "CDO") return "CDO Promocionales";
+  return provider;
 }
 
 /// Alerta tecnica del sync. Va a ALERT_EMAIL (variable de entorno), no a
@@ -439,6 +453,64 @@ export function armarAlerta(
       cuerpo: `
   <p style="${ESTILO_PARRAFO} white-space: pre-wrap;">${escapar(input.detalle)}</p>
   <p style="${ESTILO_PARRAFO}">Esta corrida no pausó ni borró nada. Los productos que alcanzó a actualizar antes del fallo quedan con los datos nuevos; el resto, con los de la corrida anterior. La próxima sincronización completa los pone al día.</p>
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+    };
+  }
+
+  if (input.motivo === "sin-foto") {
+    const tabla = (lista: AusenteAlerta[]) => `
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;">
+    <thead>
+      <tr style="text-align: left; color: #666; font-size: 13px;">
+        <th style="padding: 6px 10px;">Id</th>
+        <th style="padding: 6px 10px;">Producto</th>
+      </tr>
+    </thead>
+    <tbody>${lista
+      .map(
+        (p) => `
+      <tr>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(p.externalId)}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee;">${escapar(p.nombre ?? "(sin nombre)")}</td>
+      </tr>`
+      )
+      .join("")}</tbody>
+  </table>`;
+    const a = input.apagados.length;
+    const r = input.retenidos.length;
+    if (input.racha) {
+      return {
+        titulo: `Sync de ${proveedor}: sigue la racha de productos sin foto, ${r} retenidos (${cuando})`,
+        cuerpo: `
+  <p style="${ESTILO_PARRAFO}"><strong>La racha sigue.</strong> La sincronización anterior ya había llegado al límite de productos sin foto, y en esta las imágenes de <strong>${r} productos</strong> a la venta volvieron a responder que no existen o que no son una imagen: más que el límite de seguridad (${input.umbral}).</p>
+  <p style="${ESTILO_PARRAFO}">Mientras dure la racha <strong>no se apaga ningún producto por falta de foto</strong>: los ${r} siguen a la venta con las fotos que tenían. Así una falla larga del servidor de imágenes de ${proveedor} apaga, como mucho, lo que apagó la primera corrida. La racha se corta sola cuando una sincronización termina por debajo del límite.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo verificar</h2>
+  <p style="${ESTILO_PARRAFO}">Abrí 2 o 3 productos de la lista en la web de ${proveedor}. Si ahí las fotos se ven bien, la falla de su servidor de imágenes sigue. Si tampoco se ven, las sacaron de verdad.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo resolver</h2>
+  <p style="${ESTILO_PARRAFO}">Si es una falla, no hace falta hacer nada: cuando se arregle, la próxima sincronización vuelve a medir las fotos, prende solos los productos apagados y corta la racha. Si las sacaron de verdad, o si la racha dura varios días, avisale a quien opera el sistema.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Los ${r} retenidos (siguen a la venta)</h2>
+  ${tabla(input.retenidos)}
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+      };
+    }
+    return {
+      titulo: `Sync de ${proveedor}: demasiados productos sin foto, ${r} retenidos (${cuando})`,
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">En esta sincronización, las imágenes de <strong>${a + r} productos</strong> que estaban a la venta respondieron que no existen o que no son una imagen. Es más que el límite de seguridad (${input.umbral}).</p>
+  <p style="${ESTILO_PARRAFO}">Se apagaron los primeros <strong>${a}</strong>, hasta llegar al límite. Los otros <strong>${r}</strong> se retuvieron: siguen a la venta con las fotos que tenían, porque tantas fotos rotas de golpe suelen ser una falla del servidor de imágenes de ${proveedor}, no fotos borradas.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo verificar</h2>
+  <p style="${ESTILO_PARRAFO}">Abrí 2 o 3 productos de la lista en la web de ${proveedor}. Si ahí las fotos se ven bien, fue una falla de su servidor de imágenes. Si tampoco se ven, las sacaron de verdad.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Cómo resolver</h2>
+  <p style="${ESTILO_PARRAFO}">Si fue una falla, no hace falta hacer nada: la próxima sincronización vuelve a medir las fotos y prende solos los productos apagados. Si las sacaron de verdad, los retenidos se apagan en las próximas corridas, de a lo que permita el límite. Si se repite en varias corridas seguidas, avisale a quien opera el sistema.</p>
+
+  <h2 style="${ESTILO_SUBTITULO}">Los ${r} retenidos (siguen a la venta)</h2>
+  ${tabla(input.retenidos)}
+  ${a ? `<h2 style="${ESTILO_SUBTITULO}">Los ${a} apagados</h2>${tabla(input.apagados)}` : ""}
   <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
     };
   }

@@ -14,6 +14,8 @@ import { SyncAlertStatus } from "@/components/admin/sync-alert-status";
 import { AutoSyncToggle } from "@/components/admin/auto-sync-toggle";
 import { SyncProviderCard } from "@/components/admin/sync-provider-card";
 import { SyncRunHistory } from "@/components/admin/sync-run-history";
+import { conectorDe, proveedoresConConector } from "@/lib/sync/conectores";
+import { VENTANAS_UTC } from "@/lib/sync/motor";
 
 // Tope explicito de las invocaciones de este segmento — cubre a las server
 // actions de la sincronizacion (un archivo "use server" no puede exportar
@@ -38,14 +40,64 @@ export default async function ProveedoresPage() {
   const alertas = alertConfigStatus();
   const ahora = new Date();
 
+  return (
+    <div>
+      <h1 className="text-2xl font-medium text-foreground">Proveedores</h1>
+      <p className="mt-1 max-w-2xl text-sm text-foreground/60">
+        Sincronizá el catálogo con cada proveedor. Los productos se crean o
+        actualizan con los datos y costos de su API; los precios de venta se
+        recalculan solos.
+      </p>
+
+      <div className="mt-6 max-w-2xl">
+        <SyncAlertStatus
+          destinatarios={alertas.destinatarios}
+          invalidos={alertas.invalidos}
+          tieneApiKey={alertas.tieneApiKey}
+          puedeProbar={admin.role === AdminRole.SUPER_ADMIN}
+        />
+      </div>
+
+      {/* Una seccion por proveedor que corre sobre el motor del sync. */}
+      {proveedoresConConector().map((provider) => (
+        <SeccionProveedor
+          key={provider}
+          provider={provider}
+          puedeCambiar={admin.role === AdminRole.SUPER_ADMIN}
+          ahora={ahora}
+        />
+      ))}
+    </div>
+  );
+}
+
+/// "06:00 y 18:00" a partir de las ventanas UTC del motor (Argentina es UTC-3,
+/// sin horario de verano). Es el inicio de cada ventana.
+function horariosArgentina(provider: ProductOrigin): string {
+  return (VENTANAS_UTC[provider] ?? [])
+    .map((v) => `${String((v.desde + 21) % 24).padStart(2, "0")}:00`)
+    .join(" y ");
+}
+
+async function SeccionProveedor({
+  provider,
+  puedeCambiar,
+  ahora,
+}: {
+  provider: ProductOrigin;
+  puedeCambiar: boolean;
+  ahora: Date;
+}) {
+  const nombre = conectorDe(provider)?.nombre ?? provider;
+  const horarios = horariosArgentina(provider);
   const [recientes, estado, supplier] = await Promise.all([
     prisma.syncRun.findMany({
-      where: { provider: ProductOrigin.ZECAT },
+      where: { provider: provider },
       orderBy: { startedAt: "desc" },
       take: 5,
     }),
-    estadoDelProveedor(ProductOrigin.ZECAT, ahora),
-    prisma.supplier.findUnique({ where: { origin: ProductOrigin.ZECAT } }),
+    estadoDelProveedor(provider, ahora),
+    prisma.supplier.findUnique({ where: { origin: provider } }),
   ]);
   // La ultima corrida COMPLETA siempre se muestra, aunque haya quedado
   // fuera de las 5 mas recientes (varias fallidas despues): es donde vive
@@ -56,9 +108,9 @@ export default async function ProveedoresPage() {
       : null;
   const runs = ultimaCompletaFila ? [...recientes, ultimaCompletaFila] : recientes;
 
-  // El conteo de la card sale de la ultima corrida que llego a saberlo (la
-  // API lo reporta en la pagina 1), no de un numero hardcodeado que
-  // envejece: el catalogo de Zecat crecio de 545 a 638 en cuatro dias.
+  // El conteo de la card sale de la ultima corrida que llego a saberlo, no
+  // de un numero hardcodeado que envejece: el catalogo de Zecat crecio de
+  // 545 a 638 en cuatro dias.
   const ultimoTotal = runs.find((r) => r.totalRemote !== null)?.totalRemote;
 
   // El boton "Pausar estos N" va solo en la ULTIMA corrida completa, y solo
@@ -79,22 +131,17 @@ export default async function ProveedoresPage() {
   const estilo = ESTILO_ESTADO[estado.estado];
   const ultima = estado.ultimaCompleta;
 
-  return (
-    <div>
-      <h1 className="text-2xl font-medium text-foreground">Proveedores</h1>
-      <p className="mt-1 max-w-2xl text-sm text-foreground/60">
-        Sincronizá el catálogo con cada proveedor. Los productos se crean o
-        actualizan con los datos y costos de su API; los precios de venta se
-        recalculan solos.
-      </p>
 
+  return (
+    <section className="mt-12 border-t border-foreground/10 pt-8">
+      <h2 className="text-lg font-medium text-foreground">{nombre}</h2>
       {/* Estado del catalogo: sale de la ultima corrida COMPLETA, no de la
           ultima iniciada — una corrida en curso o fallida no actualizo nada. */}
-      <div className={`mt-8 max-w-2xl rounded-xl border p-5 text-sm ${estilo.caja}`}>
+      <div className={`mt-4 max-w-2xl rounded-xl border p-5 text-sm ${estilo.caja}`}>
         <p className={`font-medium ${estilo.titulo}`}>
           {ultima
-            ? `Catálogo de Zecat actualizado ${formatHace(ultima.finishedAt, ahora)}`
-            : "Catálogo de Zecat: todavía no hay ninguna sincronización completa"}
+            ? `Catálogo de ${nombre} actualizado ${formatHace(ultima.finishedAt, ahora)}`
+            : `Catálogo de ${nombre}: todavía no hay ninguna sincronización completa`}
           {ultima && (
             <span className="font-normal text-foreground/60">
               {" "}
@@ -121,8 +168,8 @@ export default async function ProveedoresPage() {
         )}
         {estado.estado === "A_REVISAR" && (
           <p className="mt-1 text-foreground/80">
-            {aRevisar.length} productos a revisar: Zecat los publica pero no los
-            lista, así que siguen a la venta sin sincronizarse. El detalle está
+            {aRevisar.length} productos a revisar: {nombre} los publica pero no
+            los lista, así que siguen a la venta sin sincronizarse. El detalle está
             abajo.
           </p>
         )}
@@ -141,10 +188,9 @@ export default async function ProveedoresPage() {
             {aRevisar.length} productos a revisar
           </p>
           <p className="mt-1 text-foreground/70">
-            No vinieron en el listado de Zecat, pero su ficha sigue publicada y
-            con variantes, así que no se pausaron. Puede ser un producto que
-            Zecat sacó del listado a propósito o un error de su lado: buscalos
-            en la web de Zecat.
+            No vinieron en el listado de {nombre}, pero su ficha sigue respondiendo,
+            así que no se pausaron. Puede ser un producto que {nombre} sacó del
+            listado a propósito o un error de su lado: buscalos en su web.
           </p>
           <ul className="mt-2 text-xs text-foreground/70">
             {aRevisar.map((id) => (
@@ -158,34 +204,25 @@ export default async function ProveedoresPage() {
 
       <div className="mt-4 max-w-2xl">
         <SyncProviderCard
-          provider={ProductOrigin.ZECAT}
-          nombre="Zecat"
+          provider={provider}
+          nombre={nombre}
           descripcion={`API oficial${ultimoTotal ? ` · ${ultimoTotal} productos` : ""}`}
         />
       </div>
 
       <div className="mt-4 max-w-2xl">
         <AutoSyncToggle
-          provider={ProductOrigin.ZECAT}
+          provider={provider}
           activado={supplier?.autoSyncEnabled ?? false}
-          horarios="06:00 y 18:00"
-          puedeCambiar={admin.role === AdminRole.SUPER_ADMIN}
-        />
-      </div>
-
-      <div className="mt-4 max-w-2xl">
-        <SyncAlertStatus
-          destinatarios={alertas.destinatarios}
-          invalidos={alertas.invalidos}
-          tieneApiKey={alertas.tieneApiKey}
-          puedeProbar={admin.role === AdminRole.SUPER_ADMIN}
+          horarios={horarios}
+          puedeCambiar={puedeCambiar}
         />
       </div>
 
       <div className="mt-10 max-w-2xl">
-        <h2 className="text-sm font-medium text-foreground/60">
-          Últimas corridas
-        </h2>
+        <h3 className="text-sm font-medium text-foreground/60">
+          Últimas corridas de {nombre}
+        </h3>
         <SyncRunHistory
           runs={runs.map((r) => {
             const summary = leerSummary(r);
@@ -210,6 +247,6 @@ export default async function ProveedoresPage() {
           })}
         />
       </div>
-    </div>
+    </section>
   );
 }

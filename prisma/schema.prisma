@@ -132,6 +132,13 @@ model SyncRun {
   failed      Int @default(0)
   usdWarnings Int @default(0)
 
+  /// Productos que esta corrida dejo SIN FOTO usable estando activos, como
+  /// [{ id, retenido }]. retenido=false: se apagaron. retenido=true: se
+  /// habrian apagado, pero la corrida ya habia llegado al umbral de
+  /// seguridad y conservaron su estado (un 403 en masa de la CDN no puede
+  /// apagar el catalogo entero). Ver lib/sync/motor.ts.
+  sinFotoExternalIds Json @default("[]")
+
   /// Ids EXTERNOS vistos en esta corrida (los de la lista congelada cuyo
   /// detalle respondio; un 404 no cuenta). Al cerrar se comparan contra los
   /// activos de la base: la diferencia son los AUSENTES. Se agrega de a un
@@ -411,9 +418,11 @@ model Product {
   /// id del producto en CDO. Clave del upsert de ese conector.
   ///
   /// Columna propia en vez de reusar `externalId`: darle dos significados
-  /// segun el origen es como empiezan los bugs raros. Y NO se usa el `code`
-  /// de CDO, que trae basura — hay uno cuyo code es literalmente
-  /// "25% de descuento!!!!!".
+  /// segun el origen es como empiezan los bugs raros. Y el `code` de CDO
+  /// NO es la clave, porque trae basura — hay uno cuyo code es literalmente
+  /// "25% de descuento!!!!!". Igual se guarda en `externalId`: el detalle de
+  /// CDO solo responde por code (por id da 404), y lo usa la confirmacion de
+  /// ausentes (lib/sync/conectores.ts).
   ///
   /// Con un tercer proveedor esto se generaliza a externalId + source; con
   /// dos, una columna paralela sale mas barata que el refactor.
@@ -759,4 +768,21 @@ model Supplier {
   updatedAt DateTime @updatedAt
 
   @@map("suppliers")
+}
+
+/// Cache de las mediciones de imagenes de proveedor (hoy: CDO). Medir una
+/// imagen es bajarla y leer sus dimensiones; con ~600 URLs eso era casi todo
+/// el tiempo de una corrida de CDO (~600-700 s). Con la cache se mide solo lo
+/// desconocido; las rotas se vuelven a medir en cada corrida (pueden haberse
+/// arreglado) y el resto cada 30 dias (por si el proveedor reemplaza la foto
+/// conservando la URL). Ver lib/cdo/imagenes.ts.
+model ImageProbe {
+  url       String   @id
+  width     Int
+  height    Int
+  /// "ok" | "deforme" | "chica" | "rota" (ImageVerdict en lib/cdo/normalize.ts)
+  verdict   String
+  checkedAt DateTime @default(now())
+
+  @@map("image_probes")
 }

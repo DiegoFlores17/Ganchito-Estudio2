@@ -60,6 +60,18 @@ export interface SyncRunSummary {
   yaPausadosFueraDeApi: string[];
   variantesDesactivadas: number;
   productosSinVariantes: number;
+  /// Activos que esta corrida apago por quedarse sin foto usable, y los
+  /// que conservaron su estado porque la corrida ya habia llegado al umbral
+  /// (ver el tope en lib/sync/motor.ts). Opcionales: las corridas anteriores
+  /// al campo no los tienen.
+  apagadosSinFoto?: string[];
+  retenidosSinFoto?: string[];
+  /// true si esta corrida LLEGO al tope de "sin foto": se habrian apagado
+  /// mas que el umbral. Mientras la ultima corrida completa lo tenga, la
+  /// siguiente no apaga ninguno por foto (racha: ver rachaSinFotoActiva).
+  topeSinFoto?: boolean;
+  /// true si esta corrida arranco con la racha activa (no apago ninguno).
+  rachaSinFoto?: boolean;
   /// Nombre de cada id de las listas de arriba, para mostrar algo legible
   /// sin consultar el estado actual (que puede haber cambiado).
   nombres: Record<string, string>;
@@ -241,7 +253,7 @@ export async function finishSyncRun(runId: string) {
     update: {},
     create: {
       origin: run.provider,
-      name: run.provider === ProductOrigin.ZECAT ? "Zecat" : run.provider,
+      name: { ZECAT: "Zecat", CDO: "CDO Promocionales" }[run.provider as string] ?? run.provider,
     },
   });
   const umbral = Math.max(
@@ -269,6 +281,42 @@ export async function finishSyncRun(runId: string) {
 
   // Un conteo y una alerta: si fallan, la corrida igual se marca DONE (el
   // auto-pausado de arriba ya se aplico; quedar RUNNING por esto seria peor).
+  // Sin repetidos: si una invocacion murio entre el commit de un producto y
+  // el registro de su avance, ese producto se reproceso y pudo anotarse dos
+  // veces. Vale la ULTIMA anotacion de cada id.
+  const ultimaPorId = new Map(
+    (run.sinFotoExternalIds as Array<{ id: string; retenido: boolean }>).map((x) => [x.id, x.retenido])
+  );
+  const apagadosSinFoto = [...ultimaPorId].filter(([, retenido]) => !retenido).map(([id]) => id);
+  const retenidosSinFoto = [...ultimaPorId].filter(([, retenido]) => retenido).map(([id]) => id);
+  // Llego al tope? Sin racha, el motor apaga hasta el umbral y retiene el
+  // resto: hay retenidos solo si se paso. Con racha no se apaga ninguno y
+  // todos quedan retenidos: se paso si los que se habrian apagado superan
+  // el umbral. Por debajo, la racha se corta y la proxima corrida aplica.
+  const rachaSinFoto = await rachaSinFotoActiva(run.provider, runId);
+  const topeSinFoto = rachaSinFoto ? retenidosSinFoto.length > umbral : retenidosSinFoto.length > 0;
+  if (topeSinFoto) {
+    // Mismo criterio que las variantes: una alerta por corrida, y si falla
+    // la corrida igual se cierra.
+    try {
+      await sendSyncAlert({
+        provider: run.provider,
+        motivo: "sin-foto",
+        runId,
+        racha: rachaSinFoto,
+        // El limite que se APLICO: el motor lo calcula por tick con los
+        // activos de ese momento, y al cerrar ya hay menos activos (justamente
+        // los apagados), asi que `umbral` de aca puede dar uno o dos menos.
+        // Con retenidos, el tope se alcanzo: lo aplicado son los apagados.
+        umbral: rachaSinFoto ? umbral : apagadosSinFoto.length,
+        apagados: await describirAusentes(run.provider, apagadosSinFoto),
+        retenidos: await describirAusentes(run.provider, retenidosSinFoto),
+      });
+    } catch (error) {
+      console.error("[sync-run] No se pudo mandar la alerta de productos sin foto:", error);
+    }
+  }
+
   let variantes: Awaited<ReturnType<typeof revisarVariantes>>;
   try {
     variantes = await revisarVariantes(run, umbral, supplier);
@@ -304,7 +352,16 @@ export async function finishSyncRun(runId: string) {
     yaPausadosFueraDeApi: pausedMissing,
     variantesDesactivadas: variantes.desactivadas,
     productosSinVariantes: variantes.productosSinVariantes.length,
-    nombres: await nombresDe(run.provider, [...missing, ...pausedMissing]).catch(
+    apagadosSinFoto,
+    retenidosSinFoto,
+    topeSinFoto,
+    rachaSinFoto,
+    nombres: await nombresDe(run.provider, [
+      ...missing,
+      ...pausedMissing,
+      ...apagadosSinFoto,
+      ...retenidosSinFoto,
+    ]).catch(
       (error) => {
         // Cosmetico: sin nombres el panel muestra los ids. No rompe el cierre.
         console.error("[sync-run] No se pudieron leer los nombres para el resumen:", error);
@@ -325,6 +382,23 @@ export async function finishSyncRun(runId: string) {
     },
   });
   return { run: updated, summary, aborted: false as const };
+}
+
+/// true si la ULTIMA corrida completa del proveedor (sin contar `excluir`,
+/// la que esta en curso) llego al tope de "sin foto".
+///
+/// El tope es por RACHA, no por corrida: con un tope por corrida, una caida
+/// 403 de la CDN que dure dias apagaria el umbral en CADA corrida (dos por
+/// dia). Con la racha, apaga como maximo el umbral en total: mientras la
+/// ultima completa haya llegado al tope, no se apaga ninguno por foto, hasta
+/// que una corrida complete por debajo. Las corridas FAILED no cuentan.
+export async function rachaSinFotoActiva(provider: ProductOrigin, excluir: string): Promise<boolean> {
+  const anterior = await prisma.syncRun.findFirst({
+    where: { provider, status: SyncRunStatus.DONE, id: { not: excluir } },
+    orderBy: { finishedAt: "desc" },
+    select: { summary: true },
+  });
+  return anterior ? leerSummary(anterior)?.topeSinFoto === true : false;
 }
 
 /// Lee el resumen de una corrida. Null en las anteriores al campo: el panel

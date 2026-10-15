@@ -7,7 +7,8 @@ import { revisarAlertas } from "@/lib/sync/alertas";
 
 /// Tick del sync automatico de un proveedor. Lo llama Vercel Cron cada
 /// minuto DENTRO de las ventanas declaradas en vercel.json (Zecat:
-/// "* 9-10,21-22 * * *": dos horas desde las 06:00 y las 18:00 ART). Cada
+/// "0-29 9,21 * * *", de 06:00 a 06:29 y de 18:00 a 18:29 ART; CDO:
+/// "0-29 10,22 * * *", una hora despues). Cada
 /// tick avanza ~45 s de la corrida
 /// abierta, o arranca una si la ultima completa tiene mas de 6 h. Ver
 /// lib/sync/motor.ts.

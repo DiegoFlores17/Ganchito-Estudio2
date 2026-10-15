@@ -1,15 +1,11 @@
-import { Currency, ProductOrigin, type Prisma } from "@prisma/client";
+import { Currency, Prisma, ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { AUTO_PAUSE_FLOOR, umbralDeSeguridad } from "@/lib/sync-run";
-import { sendSyncAlert } from "@/lib/email";
-import { iterateAllProducts } from "./client";
+import { umbralDeSeguridad } from "@/lib/sync-run";
 import {
   buildSku,
-  candidateImageUrls,
   extractCostPrice,
-  hasNoUsableImages,
+  estadoDeFotos,
   mapStock,
-  probeImage,
   slugifyCategory,
   splitIcons,
   variantImageUrls,
@@ -58,8 +54,6 @@ export interface CdoSyncSummary {
   errors: Array<{ cdoId: number; message: string }>;
 }
 
-type Tx = Prisma.TransactionClient;
-
 /// Upsert de la categoria por cdoCategoryId.
 ///
 /// Se importan TODAS, incluidas las de campaña ("Día de la Madre", "Precios
@@ -72,44 +66,41 @@ type Tx = Prisma.TransactionClient;
 /// volver a ocultarse en una corrida posterior. Son dos caminos separados y
 /// el de actualizacion ni siquiera menciona el campo.
 async function resolveCategoryId(
-  tx: Tx,
   category: CdoCategory | undefined
 ): Promise<string | null> {
   if (!category) return null;
 
-  const existing = await tx.category.findUnique({
-    where: { cdoCategoryId: String(category.id) },
-    select: { id: true },
-  });
-  if (existing) {
-    await tx.category.update({
-      where: { id: existing.id },
-      data: { name: category.name },
-    });
-    return existing.id;
-  }
-
-  // El slug es unico a nivel tabla y puede chocar contra una categoria de
-  // Zecat que se llame parecido. Si pasa, se desambigua con el id de CDO en
-  // vez de romper el sync entero.
-  const slug = slugifyCategory(category.name, category.id);
-  const slugTomado = await tx.category.findUnique({
-    where: { slug },
-    select: { id: true },
-  });
-
-  const created = await tx.category.create({
-    data: {
-      cdoCategoryId: String(category.id),
-      name: category.name,
-      slug: slugTomado ? `${slug}-cdo-${category.id}` : slug,
+  // FUERA de la transaccion del producto, a proposito (mismo fix que el 5206
+  // de Zecat): en Postgres una violacion de constraint ABORTA la transaccion
+  // entera, asi que un choque de slug adentro tumbaba el producto. Afuera,
+  // se captura P2002 y se reintenta con sufijo. Antes se hacia
+  // consultar-y-crear, que deja ventana de carrera entre el "¿existe?" y el
+  // create; ahora decide la base.
+  const crear = (slug: string) =>
+    prisma.category.upsert({
+      where: { cdoCategoryId: String(category.id) },
+      // Solo el nombre: una categoria que el cliente ya hizo visible no puede
+      // volver a ocultarse en una corrida posterior.
+      update: { name: category.name },
       // Nace oculta: el ruido del proveedor no llega al catalogo hasta que
-      // alguien lo apruebe. Este es el UNICO create de categorias de CDO, y
-      // solo se alcanza cuando el findUnique de arriba no encontro nada.
-      visible: false,
-    },
-  });
-  return created.id;
+      // alguien lo apruebe.
+      create: { cdoCategoryId: String(category.id), name: category.name, slug, visible: false },
+      select: { id: true },
+    });
+
+  const slug = slugifyCategory(category.name, category.id);
+  try {
+    return (await crear(slug)).id;
+  } catch (error) {
+    const choqueDeSlug =
+      error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+    if (!choqueDeSlug) throw error;
+    // El slug es unico a nivel tabla y puede chocar contra una categoria de
+    // Zecat que se llame parecido: se desambigua con el id de CDO.
+    const conSufijo = `${slug}-cdo-${category.id}`;
+    console.warn(`[cdo-sync] Slug en colision para la categoria ${category.id} ("${category.name}"): se usa "${conSufijo}".`);
+    return (await crear(conSufijo)).id;
+  }
 }
 
 /// Sincroniza un producto de CDO. Igual que el conector de Zecat, cada
@@ -118,8 +109,21 @@ async function resolveCategoryId(
 export async function syncCdoProduct(
   product: CdoProduct,
   summary: CdoSyncSummary,
-  probes: Map<string, ImageProbe>
-): Promise<{ outcome: "created" | "updated"; variantesDesactivadas: number }> {
+  probes: Map<string, ImageProbe>,
+  /// URLs que no se pudieron medir y nunca se habian medido (ver
+  /// medirConCache). Si el producto depende de ellas, conserva su estado.
+  sinMedir: ReadonlySet<string> = new Set(),
+  /// false: la corrida ya llego al tope de apagados por foto (ver motor.ts).
+  /// Un activo que se queda sin foto conserva su estado y sus imagenes.
+  puedeApagarSinFoto = true
+): Promise<{
+  outcome: "created" | "updated";
+  variantesDesactivadas: number;
+  /// Estaba activo y se quedo sin foto usable: "apagado" si se apago,
+  /// "retenido" si conservo su estado por el tope.
+  sinFoto?: "apagado" | "retenido";
+  fotos: "con-foto" | "sin-foto" | "indeterminado";
+}> {
   const variants = product.variants ?? [];
   const icons = splitIcons(product.icons);
 
@@ -135,8 +139,8 @@ export async function syncCdoProduct(
     }
   }
 
-  const sinImagen = hasNoUsableImages(product, probes);
-  if (sinImagen) {
+  const fotos = estadoDeFotos(product, probes, sinMedir);
+  if (fotos === "sin-foto") {
     summary.sinImagen.push({ cdoId: product.id, name: product.name });
   }
 
@@ -148,11 +152,40 @@ export async function syncCdoProduct(
     summary.sinVariantes.push({ cdoId: product.id, name: product.name });
   }
 
+  // Fuera de la transaccion a proposito — ver resolveCategoryId.
+  const categoryId = await resolveCategoryId(product.categories?.[0]);
+
   return prisma.$transaction(async (tx) => {
-    const categoryId = await resolveCategoryId(tx, product.categories?.[0]);
+    const existing = await tx.product.findUnique({
+      where: { cdoId: String(product.id) },
+      select: { id: true, active: true },
+    });
+
+    // Foto indeterminada (no se pudo medir y nunca se midio): el producto
+    // CONSERVA su estado. Un rato de CDN lenta no puede apagar productos que
+    // estan bien. Uno nuevo entra inactivo: no hay estado que conservar, y
+    // mostrar sin saber si tiene foto es peor que esperar a la proxima corrida.
+    //
+    // Sin foto estando activo, con la corrida ya en el tope: tambien conserva
+    // su estado (y sus imagenes, ver abajo).
+    // Si igual se apaga por no tener variantes vendibles, la foto no decide
+    // nada: ni cuenta para el tope ni se "retiene" (se informaria como "sigue
+    // a la venta" algo que no lo esta).
+    const quedaSinFoto = fotos === "sin-foto" && existing?.active === true && !sinVariantes;
+    const retenido = quedaSinFoto && !puedeApagarSinFoto;
+    const activoPorFotos =
+      fotos === "con-foto" || retenido
+        ? true
+        : fotos === "sin-foto"
+          ? false
+          : (existing?.active ?? false);
 
     const productData = {
       origin: ProductOrigin.CDO,
+      // El code de CDO (ej. "BP161"): es la clave del detalle
+      // (/products/{code}), que la confirmacion de ausentes necesita. El id
+      // sigue siendo la clave del upsert (cdoId).
+      externalId: product.code,
       name: product.name,
       description: product.description,
       // Los precios de CDO vienen en dolares. La conversion a pesos se hace
@@ -166,15 +199,10 @@ export async function syncCdoProduct(
       //
       // CDO tampoco tiene flag de publicado, asi que active sale de si el
       // producto tiene alguna foto usable — y alguna variante vendible.
-      active: !sinImagen && !sinVariantes,
+      active: activoPorFotos && !sinVariantes,
       categoryId,
       lastSyncedAt: new Date(),
     };
-
-    const existing = await tx.product.findUnique({
-      where: { cdoId: String(product.id) },
-      select: { id: true },
-    });
 
     const saved = await tx.product.upsert({
       where: { cdoId: String(product.id) },
@@ -237,7 +265,9 @@ export async function syncCdoProduct(
 
     // Imagenes, tecnicas y atributos no tienen clave estable: se borran
     // (scoped a este producto) y se recrean dentro de la misma transaccion.
-    await tx.productImage.deleteMany({ where: { productId: saved.id } });
+    // Un retenido conserva las imagenes que tenia: recrearlas desde lo medido
+    // lo dejaria activo y sin ninguna foto.
+    if (!retenido) await tx.productImage.deleteMany({ where: { productId: saved.id } });
     await tx.productPrintingType.deleteMany({ where: { productId: saved.id } });
     await tx.productAttribute.deleteMany({ where: { productId: saved.id } });
 
@@ -276,7 +306,7 @@ export async function syncCdoProduct(
       });
     }
 
-    if (imageRows.length) {
+    if (imageRows.length && !retenido) {
       await tx.productImage.createMany({ data: imageRows });
     }
 
@@ -316,13 +346,15 @@ export async function syncCdoProduct(
     return {
       outcome: existing ? ("updated" as const) : ("created" as const),
       variantesDesactivadas: desactivadas.count,
+      sinFoto: retenido ? ("retenido" as const) : quedaSinFoto ? ("apagado" as const) : undefined,
+      fotos,
     };
   });
 }
 
 /// Una variante es vendible si trae net_price: sin costo no se puede cotizar
 /// (syncCdoProduct la saltea). Un producto sin ninguna queda inactivo.
-function tieneVariantesVendibles(product: CdoProduct): boolean {
+export function tieneVariantesVendibles(product: CdoProduct): boolean {
   return (product.variants ?? []).some((v) => Boolean(extractCostPrice(v)));
 }
 
@@ -345,163 +377,4 @@ export async function vaciosQueSeApagarian(products: CdoProduct[]) {
           select: { cdoId: true, name: true },
         });
   return { seApagarian: apagados.length, apagados, umbral, activos, porcentaje };
-}
-
-export async function syncCdoCatalog(): Promise<CdoSyncSummary> {
-  const summary: CdoSyncSummary = {
-    total: 0,
-    created: 0,
-    updated: 0,
-    failed: 0,
-    sinImagen: [],
-    skuSintetico: 0,
-    variantesSinPrecio: [],
-    iconosDesconocidos: [],
-    portadas: { ok: 0, deformes: 0, chicas: 0, rotas: 0 },
-    variantesDesactivadas: 0,
-    sinVariantes: [],
-    errors: [],
-  };
-
-  // 1. Bajar el catalogo entero. Son 3 requests: el listado ya trae todo.
-  const products: CdoProduct[] = [];
-  for await (const product of iterateAllProducts()) products.push(product);
-
-  // Guarda de variantes vacias, ANTES de medir o escribir nada. Un producto
-  // sin variantes queda inactivo, y eso no pasa por ninguna otra guarda: si
-  // CDO devolviera las variantes vacias por una falla, el sync apagaria el
-  // catalogo producto por producto. Como aca el catalogo entero ya esta en
-  // memoria, se puede frenar ANTES de escribir — mismo umbral que el
-  // auto-pausado de ausentes (ver lib/sync-run.ts).
-  const { seApagarian, apagados, umbral, activos, porcentaje } =
-    await vaciosQueSeApagarian(products);
-  if (seApagarian > umbral) {
-    throw new Error(
-      `Respuesta anómala de CDO: ${seApagarian} productos activos vinieron sin variantes vendibles, y el umbral de seguridad es ${umbral} (sobre ${activos} activos). No se escribió nada.`
-    );
-  }
-
-  // 2. Medir las imagenes ANTES de escribir nada.
-  //
-  // Va aca y no dentro del sync de cada producto por una razon dura: cada
-  // producto se escribe en una transaccion, y hacer llamadas de red adentro
-  // de una transaccion la mantiene abierta esperando a la red. Eso agarra
-  // conexiones del pool y, con 627 imagenes, es pedir problemas.
-  const urls = [...new Set(products.flatMap((p) => candidateImageUrls(p)))];
-  const probes = new Map<string, ImageProbe>();
-  const LOTE = 12;
-  for (let i = 0; i < urls.length; i += LOTE) {
-    await Promise.all(
-      urls.slice(i, i + LOTE).map(async (url) => {
-        probes.set(url, await probeImage(url));
-      })
-    );
-  }
-
-  // 3. Recien ahora, escribir.
-  for (const product of products) {
-    summary.total++;
-
-    // Calidad de la PORTADA: la primera imagen usable de cualquier variante,
-    // que es la que termina en la card del catalogo.
-    const portada = candidateImageUrls(product)[0];
-    const probe = portada ? probes.get(portada) : undefined;
-    if (probe) {
-      if (probe.verdict === "ok") summary.portadas.ok++;
-      else if (probe.verdict === "deforme") summary.portadas.deformes++;
-      else if (probe.verdict === "chica") summary.portadas.chicas++;
-      else summary.portadas.rotas++;
-    }
-
-    try {
-      const result = await syncCdoProduct(product, summary, probes);
-      if (result.variantesDesactivadas > 0) {
-        summary.variantesDesactivadas += result.variantesDesactivadas;
-        console.warn(
-          `[cdo-sync] Producto ${product.id}: ${result.variantesDesactivadas} variante(s) desactivada(s), ya no vienen en el listado.`
-        );
-      }
-      if (result.outcome === "created") summary.created++;
-      else summary.updated++;
-    } catch (error) {
-      summary.failed++;
-      summary.errors.push({
-        cdoId: product.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  // Alerta por desactivacion masiva de variantes: el caso que la guarda de
-  // arriba no frena (cada producto conserva alguna variante, pero CDO dejo
-  // de mandar muchas). Se aplica igual porque se revierte sola en la proxima
-  // corrida sana; el mail es para que alguien se entere. Mismo criterio de
-  // umbral que el sync de Zecat (lib/sync-run.ts). CDO todavia no tiene
-  // SyncRun, asi que no hay id de corrida.
-  const variantesActivas = await prisma.productVariant.count({
-    where: { active: true, product: { origin: ProductOrigin.CDO, active: true, deletedAt: null } },
-  });
-  const umbralVariantes = Math.max(
-    AUTO_PAUSE_FLOOR,
-    Math.floor((variantesActivas * porcentaje) / 100)
-  );
-  if (summary.variantesDesactivadas > umbralVariantes) {
-    await sendSyncAlert({
-      provider: ProductOrigin.CDO,
-      motivo: "variantes",
-      runId: "sin corrida registrada (sync de CDO por consola)",
-      desactivadas: summary.variantesDesactivadas,
-      umbralVariantes,
-      umbralProductos: umbral,
-      productosSinVariantes: apagados.map((p) => ({
-        externalId: p.cdoId ?? "?",
-        nombre: p.name,
-        stockDisponible: null,
-      })),
-    });
-  }
-
-  if (summary.sinVariantes.length) {
-    console.warn(
-      `[cdo-sync] ${summary.sinVariantes.length} producto(s) vinieron SIN variantes vendibles: quedan inactivos hasta que vuelvan.`
-    );
-  }
-  if (summary.sinImagen.length) {
-    console.warn(
-      `[cdo-sync] ${summary.sinImagen.length} producto(s) importados INACTIVOS por no tener ninguna imagen usable. Se reactivan solos si CDO les carga la foto.`
-    );
-  }
-  // Los dos casos se loguean POR SEPARADO porque piden acciones distintas.
-  const idsNuevos = summary.iconosDesconocidos.filter((i) => i.reason === "id-nuevo");
-  const labelsCambiados = summary.iconosDesconocidos.filter(
-    (i) => i.reason === "label-cambiado"
-  );
-
-  if (idsNuevos.length) {
-    console.warn(
-      `[cdo-sync] ${idsNuevos.length} icono(s) con id NUEVO — agregarlos a normalize.ts decidiendo si son tecnica o atributo: ` +
-        idsNuevos.map((i) => `${i.id} ("${i.label}")`).join(", ")
-    );
-  }
-
-  if (labelsCambiados.length) {
-    // Esto no es un aviso mas: significa que CDO reutilizo un id para otra
-    // cosa y que la clasificacion guardada apuntaba a algo distinto. Los
-    // iconos afectados NO se guardaron, a proposito.
-    console.error(
-      `[cdo-sync] ATENCION — ${labelsCambiados.length} icono(s) CAMBIARON DE SIGNIFICADO. ` +
-        `No se clasificaron (mejor perderlos que guardarlos mal). Revisar normalize.ts: ` +
-        labelsCambiados
-          .map((i) => `id ${i.id}: esperabamos "${i.expectedLabel}" y vino "${i.label}"`)
-          .join(" · ")
-    );
-  }
-
-  const { ok, deformes, chicas, rotas } = summary.portadas;
-  const malas = deformes + chicas + rotas;
-  console.log(
-    `[cdo-sync] Calidad de portadas: ${ok} ok, ${deformes} deformes (se muestran con object-contain), ${chicas} muy chicas y ${rotas} rotas (descartadas). ${malas} de ${ok + malas} con algun problema.`
-  );
-
-  return summary;
 }

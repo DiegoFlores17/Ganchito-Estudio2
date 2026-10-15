@@ -1,3 +1,5 @@
+Escribí en español los comentarios y mensajes al usuario.
+
 # CLAUDE.md — Proyecto tienda Ganchito Estudio
 
 ## Tu rol
@@ -7,7 +9,7 @@ decisión técnica no está definida acá, la proponés y explicás el trade-off
 ejecutar, en vez de asumir. Priorizás código claro y mantenible por sobre soluciones
 "inteligentes". Vamos siempre de a un paso: no adelantes etapas que dependen de piezas
 que todavía no existen (por ejemplo, no construyas el frontend antes de tener datos
-reales en la base). Escribí en español los comentarios y mensajes al usuario.
+reales en la base).
 
 ## Qué estamos construyendo
 
@@ -121,6 +123,29 @@ API), CDO (vía la suya), carga manual, y futuros proveedores.
   global. Por ahora NO implementado: solo margen global.
 - Nota: los precios con 45% quedarán más altos que los de la web actual de Ganchito
   (que hoy usa ~20% en varios productos). Es una decisión de negocio buscada, no un bug.
+
+### Lo que el proveedor deja de mandar
+
+- **Variantes que dejan de venir se DESACTIVAN, nunca se borran.** Las
+  cotizaciones emitidas guardan el sku y el precio congelado. Se reactivan
+  solas si vuelven. Toda lectura de la tienda filtra `variants.active`.
+- **Un producto sin variantes vendibles queda inactivo** (en CDO, sin
+  `net_price`), y se reactiva solo cuando vuelven.
+- **Un ausente se confirma contra el detalle del proveedor antes de
+  pausarlo.** Faltar del listado no alcanza. Solo pausa una baja confirmada
+  (404; en Zecat además despublicado o sin variantes). Timeout, 5xx o red no
+  confirman nada: quedan "no verificados" y se reintenta. Un detalle sano
+  queda "a revisar": no se pausa. Y por encima del umbral de seguridad no se
+  pausa ninguno sin una persona ("Pausar estos N").
+- **Tope de "sin foto" por RACHA** (CDO). Una corrida apaga como mucho el
+  umbral de productos que se quedan sin foto usable; los demás quedan
+  retenidos (conservan estado e imágenes). Si la última corrida completa
+  llegó al tope, la siguiente no apaga ninguno hasta que una complete por
+  debajo. Así una caída de la CDN que dure días apaga como mucho el umbral
+  EN TOTAL. Y solo un veredicto definitivo apaga algo:
+  - "Rota" es un 4xx (salvo 408/429) o algo que no es imagen. La CDN de CDO
+    responde 403 a un archivo inexistente.
+  - Timeout, 5xx o red es "sin medir": no cambia el estado de nadie.
 
 ### Currency (dato sucio de Zecat — manejar con cuidado)
 - El campo `currency` de Zecat viene poco confiable: devuelve "USD" en productos que
@@ -264,18 +289,40 @@ en silencio.
   - Isotipo: el clip ("ganchito"). Logo y colores reales en la carpeta de marca del proyecto.
   - Hero grande e impactante. NO clonar el blanco y negro de la referencia.
 
-### Sincronización de proveedores (panel + consola)
+### Sincronización de proveedores (cron + panel + consola)
 
+El detalle (constantes, ventanas, estados, alertas) está en `HANDOFF.md`,
+sección "Sync automático de proveedores". Acá van las reglas que no se reabren:
+
+- **Un solo motor** (`src/lib/sync/motor.ts`) para el cron, el botón del panel
+  y la consola. Cada proveedor entra por un conector (`src/lib/sync/conectores.ts`);
+  el motor no sabe nada de Zecat ni de CDO.
+- **El panel ya no es el conductor.** El cursor vive en la base: el cron, el
+  panel y la consola se intercalan sobre la MISMA corrida, y cerrar el
+  navegador no la pierde.
 - La tabla `SyncRun` es lock + progreso retomable + observabilidad de cada
   corrida. **El historial se conserva a propósito, sin límite ni limpieza**:
-  con un sync diario son ~365 filas/año, chicas, y el historial sirve para
-  diagnóstico. Es una decisión explícita, no un olvido — si algún día
-  molesta, se agrega retención, no se borra callado.
+  con dos corridas por día por proveedor son unas ~1.500 filas/año, chicas, y
+  el historial sirve para diagnóstico. Es una decisión explícita, no un
+  olvido — si algún día molesta, se agrega retención, no se borra callado.
 - El lock es un índice único parcial en la base (una sola RUNNING por
   proveedor): el "acquire" es insertar y que la base decida, nunca
-  consultar-y-crear. Lo respetan el botón del panel Y los scripts de consola.
-- Una RUNNING sin heartbeat por 5 minutos está muerta: se RETOMA desde su
-  cursor, no se pisa ni se arranca de cero.
+  consultar-y-crear.
+- **Lease con fencing.** Quien avanza la corrida toma un lease (`leaseUntil`);
+  ese valor es su ficha de dueño, y toda escritura sobre la corrida exige
+  `leaseUntil = ficha`. Una invocación que despierta tarde no puede escribir.
+  Un lease vencido sin liberar es una invocación muerta: la corrida se RETOMA
+  desde su cursor, no se pisa ni se arranca de cero.
+- **Lista congelada.** Al arrancar la corrida se congela la lista de ids del
+  proveedor, validada contra el total que declara; el cursor es un índice
+  sobre ella. Nunca se vuelve a pedir en la misma corrida, y si envejece, la
+  corrida se cierra y se arranca otra.
+- **Interruptor por proveedor** (`Supplier.autoSyncEnabled`, solo
+  super-admin). Apagado, el endpoint del cron no toca nada: frena el sync
+  automático en caliente, sin deploy. Default apagado.
+- **Una respuesta rota del proveedor corta ANTES de escribir** (una tanda
+  entera sin variantes, una lista que no cierra con su total). No se aplica
+  "producto por producto" algo que solo puede ser un error del proveedor.
 
 ### Verificar producción: el navegador, no curl
 
@@ -358,6 +405,11 @@ tanto, sin buscar nada en particular.
   explícitamente. Antes de cualquier escritura, verificar el destino **en el mismo
   comando** que la escritura, con una guarda que aborte — no confiando en un chequeo
   anterior. El detalle está en `HANDOFF.md`, sección "Regla de entornos".
+- **La URL de Neon vive en `.env.neon`** (`NEON_DATABASE_URL`), ignorado por
+  git y que ni Next ni Prisma cargan solos. Un comando que toca Neon la lee
+  explícitamente, por ejemplo:
+  `DATABASE_URL="$(rg -o '^NEON_DATABASE_URL="?([^"]+)"?' -r '$1' .env.neon)" npx prisma migrate status`.
+  Nunca se copia al `.env`.
 - **La contracara de esa regla: por defecto se LEE local.** Una query rápida sin
   `DATABASE_URL=` adelante corre contra local, y local diverge de producción
   (datos de prueba, estados que solo se aplicaron en un entorno). Ya costó una

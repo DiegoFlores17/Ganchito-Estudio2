@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+# URL de produccion (Neon): explicita aunque .env* ya la cubra, para que
+# nadie la saque de la lista al tocar la regla general.
+.env.neon
 
 # vercel
 .vercel

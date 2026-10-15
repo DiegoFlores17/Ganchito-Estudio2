@@ -63,6 +63,20 @@ export function SyncRunSummaryLine({
             la próxima corrida) ·{" "}
           </span>
         )}
+        {(s.retenidosSinFoto?.length ?? 0) > 0 && (
+          <span className="font-medium text-primary-dark">
+            ⚠ {s.retenidosSinFoto!.length} sin foto retenidos
+            {s.rachaSinFoto
+              ? " (sigue la racha: no se apagó ninguno)"
+              : ` (se llegó al límite de ${s.apagadosSinFoto?.length ?? 0} apagados)`}
+            : siguen a la venta ·{" "}
+          </span>
+        )}
+        {(s.apagadosSinFoto?.length ?? 0) > 0 && (
+          <span className="text-primary-dark">
+            {s.apagadosSinFoto!.length} apagados por quedarse sin foto ·{" "}
+          </span>
+        )}
         {s.yaPausadosFueraDeApi.length > 0 && (
           <>{s.yaPausadosFueraDeApi.length} ya pausados siguen fuera de la API</>
         )}

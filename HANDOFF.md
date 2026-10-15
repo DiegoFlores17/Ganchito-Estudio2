@@ -3,29 +3,28 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-09-15 — menú de categorías, escalera de tramos
-de precio, y dos fixes de mobile (todo en producción)
-**Branch:** `auditoria-pre-entrega`, **solo local, sin pushear a propósito**:
-el usuario prueba y decide cuándo mergear a `main`. Informe en `AUDITORIA.md`.
-Hallazgos 1/3/4/6 atacados y verificados en la rama (validación de entrada en
-`submitQuote` + filtros de vivo al cotizar, con aviso en pantalla de líneas
-descartadas; contenido real de los logos validado; nanoid parcheado; stock
-disponible calculado server-side). Los hallazgos 2/5/7/9 quedaron en
-PENDIENTES con su cuándo. Nada de esto trae migración ni toca la base.
-La distinción que NO se tocó: las cotizaciones ya enviadas conservan sus
-ítems aunque el producto muera después — los filtros nuevos aplican solo al
-CREAR una cotización.
+**Última actualización:** 2026-10-15 — sync automático de proveedores
+(etapas A, A2, B y C pusheadas a `main`; **D verificada en producción**;
+E construida y verificada en local, sin commitear; ventanas del cron
+achicadas a 30 minutos) y buscadores.
+**Branch:** `main`. Último commit en `main`: `ca0f2e3` (motor del sync
+automático). La etapa E (CDO sobre el motor) y esta actualización de docs
+están en el árbol de trabajo, sin commitear: se suben juntas.
+
+La auditoría pre-entrega (`AUDITORIA.md`) ya está en `main`: los hallazgos
+1/3/4/6 se atacaron, y los 2/5/7/9 quedaron en PENDIENTES con su cuándo. La
+distinción que NO se tocó: las cotizaciones ya enviadas conservan sus ítems
+aunque el producto muera después — los filtros aplican solo al CREAR una
+cotización.
 
 **La cotización del dólar ya es automática de punta a punta, verificada.** Modo
 **Automática**, cron diario a las 16:00 ART, y la corrida del 2026-08-26 19:26
 devolvió **200** con `User Agent: vercel-cron/1.0` — o sea que la disparó
 Vercel, no una prueba a mano. Nadie del equipo tiene que apretar nada.
 
-**Lo último construido: envío de la cotización por WhatsApp** (deep link
-`wa.me`, sin Cloud API). El link del mensaje apunta al **panel**, no a una
+**Envío de la cotización por WhatsApp** (deep link `wa.me`, sin Cloud API):
+en `main` desde `6c9bba2`. El link del mensaje apunta al **panel**, no a una
 vista pública — decisión revisada, ver la sección "Cotización por WhatsApp".
-En la rama, verificado en local, **trae migración** — ver el orden de deploy
-antes de mergear.
 
 > Antes de tocar cualquier base, leer "Regla de entornos" acá abajo.
 
@@ -36,6 +35,223 @@ antes de mergear.
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
 > `PENDIENTES/pendientes.md`.
+
+---
+
+## Sync automático de proveedores (2026-10-08 al 2026-10-14)
+
+Se construyó por etapas, cada una con su script de verificación en
+`scripts/audit-verify-*.ts`:
+
+| Etapa | Commit | Qué trajo |
+|---|---|---|
+| A | `10332e7` | Hora argentina en el panel; alertas del sync verificables |
+| A2 | `01d2bbd` | Variantes que el proveedor deja de mandar se desactivan |
+| B | `6c865d9` | Estado del catálogo y resumen fijo por corrida |
+| C | `ca0f2e3` | Motor del sync automático (cron), apagado por defecto |
+| D | — | Encender el cron de Zecat: **pendiente de verificar** (ver abajo) |
+| E | sin commitear | CDO sobre el motor (al momento de escribir esto) |
+
+### El motor (etapa C)
+
+`src/lib/sync/motor.ts`, agnóstico de proveedor; cada proveedor entra por un
+conector (`src/lib/sync/conectores.ts`). Lo usan el cron, el botón del panel y
+la consola: **los tres son el mismo motor con el mismo lease**, así que pueden
+intercalarse sobre la misma corrida. El panel dejó de ser el conductor: el
+cursor vive en la base, y el navegador solo pide ticks mientras está abierto.
+
+- **Ticks de 45 s** (`presupuestoTick`), que cortan entre productos. La ruta y
+  el panel tienen `maxDuration = 120`.
+- **Lease de 150 s con fencing** (`LEASE_MS`): el `leaseUntil` que pone cada
+  invocación es su ficha de dueño, y toda escritura exige `leaseUntil = ficha`.
+  Una invocación que despierta tarde no puede retroceder el cursor ni pisar
+  contadores. Un lease vencido sin liberar = la invocación murió, y la
+  siguiente retoma desde el cursor.
+- **Lista congelada** al arrancar la corrida (`SyncRun.plannedExternalIds`; el
+  cursor es un índice sobre ella). En Zecat sale de un solo request con
+  `limit=1000`, validado contra el total; si no cierra, **fallback paginado** de
+  a 100 con la misma validación; si tampoco, la corrida falla sin escribir.
+- **Lista vencida a las 6 h** (`LISTA_VENCE_MS`): la corrida se cierra FAILED y
+  se arranca otra.
+- **Errores transitorios**: hasta 3 seguidos sobre el mismo cursor
+  (`MAX_ERRORES_TRANSITORIOS`); al tercero, FAILED. Una respuesta rota del
+  proveedor (tanda entera sin variantes, lista que no cierra) es determinista:
+  FAILED directo.
+- **Ventanas de 30 minutos** (desde 2026-10-15; hasta ahí eran de 2 h), en
+  UTC en `vercel.json` y en `VENTANAS_UTC` (tienen que coincidir; la
+  regresión de C lo chequea):
+  - Zecat `0-29 9,21 * * *` = de 06:00 a 06:29 y de 18:00 a 18:29 ART.
+  - CDO `0-29 10,22 * * *` = de 07:00 a 07:29 y de 19:00 a 19:29 ART (etapa
+    E: una hora después, para no competir).
+  - Verificado con el reloj simulado (`scripts/audit-verify-ventanas.ts`):
+    con el proveedor caído toda la ventana, los 3 intentos entran en los
+    minutos 0, 10 y 20. Una corrida que no termina en su ventana queda
+    RUNNING hasta la siguiente (12 h después), ahí su lista ya venció (6 h):
+    se cierra FAILED y en el mismo tick arranca una nueva, sin consumir
+    intentos de la ventana nueva. En CDO las imágenes medidas quedan en la
+    caché, así que la nueva avanza mucho más rápido. El panel arranca fuera
+    de ventana, y si se cierra la pestaña, el cron la retoma dentro de las
+    6 h (si no, se vence).
+- **Reglas del cron** (`motivoParaNoArrancar`): arranca una corrida nueva solo
+  si la última completa tiene más de 6 h; tope de 3 corridas automáticas por
+  ventana; 10 min de espera después de una fallida. Retomar una RUNNING no
+  cuenta para el tope. El panel y la consola arrancan siempre: los dispara una
+  persona.
+
+### Interruptor por proveedor
+
+`Supplier.autoSyncEnabled`, **solo super-admin**, desde `/admin/proveedores`
+(`setAutoSync` exige `requireSuperAdmin`). Default `false`. **Apagarlo frena el
+sync automático en caliente, sin deploy**: con el interruptor apagado el
+endpoint responde `{ skipped: "disabled" }` sin tocar nada (ni corridas, ni
+alertas). El cron sigue declarado en `vercel.json` y simplemente no hace nada.
+
+### Cómo probar sin esperar la ventana
+
+El botón **Run** de Vercel (Settings → Cron Jobs) llama al mismo endpoint, que
+**no mira la hora**. Con el interruptor encendido: arranca una corrida solo si
+la última completa tiene más de 6 h (y respeta el tope por ventana y la espera
+tras una fallida), y **continúa cualquier corrida abierta**. Con el interruptor
+apagado no hace nada.
+
+### Alertas
+
+`src/lib/sync/alertas.ts`, por **cambio de estado**, no por corrida:
+
+- Un mail al entrar en un problema; otro si un bloqueo cambia de forma;
+  **"resuelto"** al volver a OK; **recordatorio cada 72 h** si sigue igual.
+- **Vigilante de frescura de 26 h** (`DESACTUALIZADO_MS`): también lo corre el
+  cron del dólar, así que avisa aunque el cron del sync deje de disparar. Solo
+  con el interruptor encendido.
+- **Varios destinatarios** en `ALERT_EMAIL`, separados por coma o punto y coma
+  (`parseRecipients`).
+- **Botón de alerta de prueba** en `/admin/proveedores` (super-admin): manda
+  un mail real a `ALERT_EMAIL`.
+- **El envío exitoso se loguea con el id de Resend** (`[email] Enviado a …
+  (id …)`), para poder rastrearlo.
+- **Banner en la consola**: un sync de consola contra una base que no es local
+  y sin `RESEND_API_KEY`/`ALERT_EMAIL` avisa a la vista, al arrancar, que esa
+  corrida no manda alertas.
+- Los asuntos llevan fecha y hora (ver "Incidente del 8/10").
+
+**Límite conocido:** un proveedor que **nunca completó una corrida** no avisa
+"desactualizado". El panel sí lo muestra DESACTUALIZADO, pero el aviso se
+registra sobre una corrida y no hay ninguna (comentario en `alertas.ts`). Por
+eso la primera corrida de un proveedor nuevo se hace a mano desde el panel,
+antes de encender su interruptor.
+
+### Panel (`/admin/proveedores`)
+
+- **Estado del proveedor**, en el encabezado y como punto en el menú. Prioridad:
+  **FALLANDO** (la última corrida falló y no hay una completa después) >
+  **BLOQUEADO** (la última completa frenó el umbral y quedan ausentes sin
+  resolver) > **DESACTUALIZADO** (ninguna completa en 26 h) > **A_REVISAR**
+  (productos que el proveedor publica pero no lista, y siguen a la venta) >
+  **OK**.
+- **Resumen fijo por corrida** (`SyncRun.summary`): se escribe una sola vez al
+  cerrar, y la card y el historial leen esa misma fuente. Las corridas
+  anteriores al campo dicen "no registrado" en vez de recalcularse desde el
+  estado actual.
+- **Confirmación de ausentes**: antes de pausar, cada ausente se confirma
+  contra el detalle del proveedor (15 s de timeout, de a 8).
+  - Confirma la baja: 404; en Zecat además despublicado o sin variantes.
+  - No confirma: timeout, 5xx o red → "no verificado", no se pausa, la
+    corrida siguiente reintenta.
+  - Detalle sano → **"a revisar"**: no se pausa (sigue a la venta sin
+    sincronizarse) y deja el estado en A_REVISAR.
+- **"Pausar estos N"** (ADMIN): para una corrida con el umbral frenado. Pausa
+  solo lo que el proveedor confirma en ese momento, con **tope de 40 por
+  click** (`MAX_CONFIRMACIONES_POR_LLAMADA`); el resto queda para otro click.
+  Cada click queda registrado en la corrida.
+
+### A2: variantes que dejan de venir
+
+- Las variantes que el proveedor deja de mandar **se desactivan, nunca se
+  borran** (las cotizaciones guardan el sku y el precio congelado), y se
+  reactivan solas si vuelven.
+- Un producto sin variantes vendibles queda **inactivo**.
+- **Todas las lecturas de la tienda filtran `variants.active`**: grilla,
+  destacados, búsqueda, filtros de precio y color, ficha y cotización.
+- **Guarda de tanda vacía**: una tanda entera de productos sin variantes es
+  una respuesta rota y corta antes de escribir.
+- Números de producción del 2026-10-14 (dato de Diego): **43 variantes
+  desactivadas, 0 productos sin variantes**.
+
+### E: CDO sobre el motor (sin commitear al escribir esto)
+
+Construida y verificada en local, contra la API de producción de CDO (solo
+GET). No está en producción: ver "Pendiente de verificar".
+
+- **Conector de CDO sobre el motor**: el listado trae el producto entero, así
+  que "cargar" no pide nada por producto (usa el catálogo bajado en el tick).
+- **API por https.** El `http` redirigía y el token viajaba en claro en el
+  primer request.
+- **`Product.externalId` guarda el `code` de CDO**: el detalle solo responde
+  por code (por id da 404), y lo usa la confirmación de ausentes. Un code con
+  forma rara queda "no verificado" en vez de confirmar la baja con un 404.
+- **`ImageProbe`** (caché de mediciones de imágenes): se mide solo lo nuevo,
+  las rotas en cada corrida y el resto cada 30 días.
+- **"Rota" contra "sin medir"**:
+  - Rota es lo definitivo: un 4xx (salvo 408/429) o algo que no es imagen.
+    **La CDN de CDO responde 403, no 404, a un archivo que no existe**
+    (medido).
+  - Timeout, 5xx, 408, 429 o red es "sin medir": no se cachea y el producto
+    conserva su estado.
+- **Tope de "sin foto" por racha**: una corrida apaga como mucho el umbral de
+  productos por quedarse sin foto, y el resto queda retenido (conserva estado
+  e imágenes). Si la última corrida completa llegó al tope, la siguiente no
+  apaga ninguno hasta que una corrida complete por debajo. Así una caída 403
+  de días apaga como mucho el umbral **en total**.
+- **`resolveCategoryId` fuera de la transacción**, con reintento ante P2002.
+- **Tiempos medidos en local** (346 productos): **1.571 s con la caché vacía**
+  (29 ticks) y **33,8 s con la caché cargada** (un tick).
+
+### Hora del panel
+
+`APP_TIME_ZONE` en `src/lib/format.ts` (`America/Argentina/Buenos_Aires`),
+explícita en `formatDateTime` y `formatDate`. **Vercel corre en UTC**: sin la
+zona explícita el panel mostraba +3 h. En local el bug no se ve, porque la
+máquina ya está en hora argentina. `scripts/audit-verify-dates.ts` lo prueba
+con `TZ=UTC` y `TZ=Asia/Tokyo`.
+
+---
+
+## Incidente del 8/10: 54 ausentes
+
+Dato de Diego. Zecat sacó **54 productos de golpe** y el umbral frenó el
+auto-pausado, como debía. **La alerta SÍ llegó**, pero Gmail la apiló en un
+hilo viejo con el mismo asunto y no se vio.
+
+Se resolvió a mano: subir el umbral a 10 por SQL, sincronizar, y volver a 5.
+**Hoy eso se hace con "Pausar estos N"**, que además confirma cada ausente
+contra el proveedor.
+
+De ahí salieron **los asuntos con fecha y hora**: Gmail agrupa en un hilo los
+mails con el mismo asunto (comentario en `sendSyncAlert`, `src/lib/email.ts`).
+
+---
+
+## Buscadores (2026-10-14)
+
+- **Cruz propia** (`b1bc900`): la cruz nativa de `input type="search"` se
+  oculta y la reemplaza un botón con la paleta de la tienda (40 px de área
+  táctil en mobile, `aria-label` "Borrar búsqueda"). Escape también borra.
+- **El buscador del catálogo borraba color y técnica** (verificado en
+  producción): armaba la URL desde una lista fija de parámetros. Ahora parte
+  de la URL actual y solo toca `q` y `page`.
+- **El guard de paginación reemplazó a `skipNextRef`.** El guard evita navegar
+  al montar (el bug de la paginación que se reseteaba sola). Antes era un flag
+  de una sola vez, y no sobrevivía al doble montaje de React en desarrollo
+  (Strict Mode). Ahora compara contra la búsqueda ya aplicada.
+- **La barra ignora un Escape que ya atendió el buscador**
+  (`defaultPrevented`): React escucha en el mismo `document`, así que
+  `stopPropagation` no lo frena.
+- **Fila mobile con una sola cruz y "Cancelar"** (`a4f4c70`). Antes había tres
+  cruces iguales: dos cerraban y una borraba. Ahora:
+  - la lupa del header queda siempre lupa;
+  - a la derecha del campo dice "Cancelar";
+  - la única cruz es la de adentro del campo, y borra;
+  - al cerrar, el foco vuelve a la lupa.
 
 ---
 
@@ -299,7 +515,7 @@ no.
 
 ---
 
-## Cotización por WhatsApp (2026-08-31, en la rama de auditoría)
+## Cotización por WhatsApp (2026-08-31; construida en la rama de auditoría, hoy en `main` desde 6c9bba2)
 
 Al enviar la cotización se abre WhatsApp con el pedido pre-armado. **La Quote
 se guarda SIEMPRE antes de armar el link**: WhatsApp es un extra para
@@ -683,10 +899,22 @@ Snapshot pre-reimport para comparar/restaurar:
 **El `.env` apunta SIEMPRE a local.** Producción se toca únicamente pasando
 `DATABASE_URL=...` adelante del comando, y solo cuando se pide explícitamente.
 
-**Vercel NO aplica migraciones.** No hay `vercel.json`, el build es
-`next build` y el postinstall solo `prisma generate`. Cero apariciones de
-`migrate deploy` / `migrate dev` / `db push` en el repo. **Neon se migra a
-mano.** Consecuencia de orden: código que lea una columna nueva no puede
+**La URL de Neon vive en `.env.neon`** (clave `NEON_DATABASE_URL`), ignorado
+por git (línea propia en `.gitignore`, verificado con `git check-ignore`). Ni
+Next ni Prisma lo cargan solos: los comandos que tocan Neon lo leen
+explícitamente, por ejemplo (solo lectura):
+
+```bash
+DATABASE_URL="$(rg -o '^NEON_DATABASE_URL="?([^"]+)"?' -r '$1' .env.neon)" npx prisma migrate status
+```
+
+Para una escritura, la guarda de destino de abajo va igual, en el mismo
+comando.
+
+**Vercel NO aplica migraciones.** El build es `next build` y el postinstall
+solo `prisma generate`; `vercel.json` existe (crons y región `gru1`) pero no
+corre nada de Prisma. Cero apariciones de `migrate deploy` / `migrate dev` /
+`db push` en el build. **Neon se migra a mano.** Consecuencia de orden: código que lea una columna nueva no puede
 llegar a Vercel antes de que Neon tenga la migración, o se rompe producción.
 
 **Antes de CUALQUIER escritura contra una base, verificar el destino en el
@@ -774,10 +1002,39 @@ Cualquier trabajo de performance o de feedback de carga se valida en Vercel.
 
 ---
 
+## Datos operativos
+
+- **Región:** `"regions": ["gru1"]` global en `vercel.json` (resuelto el
+  2026-09-07). Neon está en `sa-east-1`.
+- **Logs de Vercel en Pro: duran 1 día.** Lo que haya que mirar de un cron
+  (por ejemplo la etapa D) se mira el mismo día. Lo que importa a largo
+  plazo queda en `SyncRun`, no en los logs.
+- **Backups de Neon:** antes de cada migración se saca una branch. Para las
+  etapas B y C se llamó **"back-up"** (una sola, recreada cada vez: se
+  borraba la anterior). Desde la etapa E se nombra con etapa y fecha, para
+  que el nombre diga de cuándo es: la de E es
+  **`backup-pre-E-2026-10-15`** (dato de Diego). No consta si la "back-up"
+  previa a C sigue existiendo.
+- **Migraciones aplicadas en Neon en esta tanda:**
+  `20261014120000_add_sync_run_summary` (etapa B) y
+  `20261015120000_add_sync_engine` (etapa C).
+  **Pendientes para la etapa E:** `20261016120000_add_image_probes` y
+  `20261016130000_add_sync_run_sin_foto` (aplicadas solo en local).
+- **Resend** (mails de cotización y alertas): la cuenta se creó con la cuenta
+  de Google de Ganchito. Para entrar hace falta un código que tiene el dueño.
+  No se sabe si es la de `consultas@` o la de `diseno@`.
+
+---
+
 ## Terminado y verificado
 
 Construido, commiteado y visible funcionando en producción:
 
+- **Etapa D: sync automático de Zecat por cron (verificada 2026-10-15).** Con
+  el interruptor de Zecat encendido, la corrida automática del 2026-10-14 a
+  las 19:25 ART y la del 2026-10-15 a las 06:00 ART se hicieron solas y
+  quedaron en verde (dato de Diego, mirado en `/admin/proveedores`). Corrieron
+  con las ventanas de 2 h; las de 30 minutos llegan con el deploy de la etapa E.
 - **Conector de Zecat.** Sync por polling con upsert por `zecatId` / `sku`, cada
   producto en su propia transacción. Se corre a mano con `npm run sync:zecat`.
   552 productos en la base.
@@ -1238,9 +1495,35 @@ idénticas por navegación (el cache es por request, no debilita el chequeo).
 
 Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
-- **Sync de Zecat contra la base de producción.** El script se corre a mano y
-  apunta a la `DATABASE_URL` del entorno. Confirmar que los 552 productos de
-  producción están actualizados y que el sync se puede correr contra Neon.
+- **Etapa E en producción (CDO sobre el motor).** El orden de deploy importa:
+  1. Branch de backup en Neon (`backup-pre-E-2026-10-15`, ver "Datos operativos").
+  2. Las dos migraciones en Neon, **ANTES del push**:
+     `20261016120000_add_image_probes` y
+     `20261016130000_add_sync_run_sin_foto`. El tick de **Zecat** también lee
+     `sync_runs.sinFotoExternalIds`: con el código arriba y sin la migración,
+     se rompe también el cron de Zecat.
+  3. Variables `CDO_API_URL` (`https://api.argentina.stocksur.com/v2`) y
+     `CDO_API_TOKEN` en Vercel.
+  4. Push.
+  5. La primera corrida de CDO **desde el panel**, antes de encender su
+     interruptor (con la caché de imágenes de Neon vacía son ~26 min de
+     ticks). Así existe una corrida completa y funciona el aviso de
+     "desactualizado".
+  6. Recién después, el interruptor de CDO.
+
+  Qué números esperar en esa primera corrida:
+  - **~37 creados** (lo que tiene la API de más contra los 309 de
+    producción).
+  - **1 variante desactivada** (la que CDO dejó de mandar).
+  - **Precios de CDO que se mueven**: los costos tenían un mes sin
+    sincronizar.
+
+  En local, con otra base de partida, dio 46 creados, 0 fallidos y
+  1 variante desactivada.
+- **No construidos (están en PENDIENTES):** las sugerencias del buscador
+  (diseño aprobado), el arreglo de las etiquetas de variante con "." y la
+  reactivación del optimizador de imágenes. Nada de eso existe en el código
+  todavía.
 - **Subida del logo del cliente en una cotización real.** La subida a Blob quedó
   verificada por el lado del admin (foto de producto), pero no hay registro de una
   prueba del otro uso: un cliente subiendo su logo en `/cotizar` en producción.
@@ -1249,16 +1532,16 @@ Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 - **`ProductAttribute` no se muestra en ningún lado.** El sync de CDO lo
   escribe, pero no hay UI que lo lea. Decidir si va en la ficha (junto a las
   técnicas de impresión) o si se descarta.
-- **El estado real de migraciones de Neon.** La de CDO se confirmó aplicada; la
-  de categorías todavía no se aplicó. Para verlo con certeza en vez de deducir
-  —la URL de Neon no está en el `.env`, a propósito, así que va a mano—:
+- **El estado real de migraciones de Neon.** Para verlo con certeza en vez de
+  deducir —la URL de Neon vive en `.env.neon`, no en el `.env`—:
 
   ```bash
-  DATABASE_URL='<url-de-neon>' npx prisma migrate status
+  DATABASE_URL="$(rg -o '^NEON_DATABASE_URL="?([^"]+)"?' -r '$1' .env.neon)" npx prisma migrate status
   ```
 
-  Es solo lectura. Tiene que decir que faltan **dos**:
-  `20260821200000_add_category_visible` y `20260821210000_add_category_canonical`.
+  Es solo lectura. Hasta que se deploye la etapa E tiene que decir que faltan
+  **dos**: `20261016120000_add_image_probes` y
+  `20261016130000_add_sync_run_sin_foto`.
 - **Los skeletons de la tanda 1, en producción.** Están deployados, pero nadie
   confirmó todavía haberlos visto. Mirar `/catalogo` y `/producto/[id]` en Vercel
   con latencia real.
@@ -1321,8 +1604,11 @@ select. **No alcanza con revisar qué campos usa el código a mano.**
 
 > **Importar el catálogo de CDO a producción es un paso APARTE.** El código
 > pusheado no trae productos: Vercel no tiene `CDO_API_TOKEN` ni
-> `CDO_API_URL`, y el sync se corre a mano. Producción sigue con los 553 de
-> Zecat.
+> `CDO_API_URL`, y el sync se corre a mano.
+>
+> **Corregido el 2026-10-14:** ese paso ya se hizo. Producción tiene **309
+> productos de CDO desde el 2026-09-09** (dato de Diego). Lo que falta es la
+> etapa E: que CDO corra sobre el motor, con sus variables en Vercel.
 
 ---
 
@@ -1690,6 +1976,11 @@ Segundo proveedor. **Pusheado, con Neon migrada y producción verificada.**
 **El sync sigue corriendo contra el entorno de pruebas de CDO y la base
 local.** Producción tiene el código pero no los productos: sigue con los 553
 de Zecat. 207 productos importados en local.
+
+> **Corregido el 2026-10-14:** lo de arriba describe el momento del push.
+> Producción tiene **309 productos de CDO desde el 2026-09-09** (dato de
+> Diego). Lo que sigue para CDO es la etapa E (ver "Sync automático de
+> proveedores").
 
 Se corre a mano: `npm run sync:cdo`. Última corrida: 207 procesados, 0
 fallidos, 16,5s.
@@ -2064,6 +2355,10 @@ de la advertencia que ya estaba anotada para el sync de productos, donde son
 12-15 idas y vueltas a la base **por producto**. Ahí sí hay que poner
 `preferredRegion = "gru1"`.
 
+> **Resuelto (2026-09-07):** `"regions": ["gru1"]` global en `vercel.json`,
+> para todas las funciones, no solo el sync. Ver "Botón de sync: el primer
+> click en producción murió por región".
+
 ### Qué se construyó
 
 | Pieza | Dónde |
@@ -2211,12 +2506,17 @@ por el oficial.
 
 ---
 
-## En pausa: sync automático con Vercel Cron
+## Sync automático con Vercel Cron: ya no está en pausa
 
-**Analizado a fondo el 2026-08-21, decidido, y explícitamente pospuesto.** No
-construir todavía. El detalle completo (números medidos y las tres cosas a
-contemplar) está en `PENDIENTES/pendientes.md`, en el ítem de automatizar el
-sync. Resumen:
+> **Actualizado el 2026-10-15:** se construyó (etapas A a C, en `main`) y
+> la etapa D quedó verificada en producción el 2026-10-15. Ver la sección "Sync automático
+> de proveedores (2026-10-08 al 2026-10-14)", arriba de todo. Lo de abajo
+> queda como historia del análisis de agosto: las tres cosas a contemplar se
+> resolvieron así: `gru1` global en `vercel.json`, el lease en `SyncRun`, y
+> `SyncRun` con su resumen fijo.
+
+**Analizado a fondo el 2026-08-21, decidido, y en su momento pospuesto.**
+Resumen de entonces:
 
 - Se va por **Vercel Cron sobre plan Pro** (el usuario lo va a contratar).
   Hobby quedaba descartado por dos límites duros: **300s de duración máxima no
@@ -2232,85 +2532,38 @@ sync. Resumen:
 
 ## Próximo paso concreto
 
-**Lo primero: mirar el panel mobile en un teléfono real.** Ya está pusheado y
-verificado a 390px, pero el iframe valida el layout, no el touch ni el scroll
-con el dedo. Lo que hay que probar ahí: que el menú hamburguesa abra y cierre,
-y que las cinco tablas se puedan arrastrar de costado hasta la última columna.
+1. ~~Verificar la etapa D~~: verificada el 2026-10-15 (19:25 y 06:00,
+   automáticas, en verde).
+2. **Deployar la etapa E** en este orden (detalle en
+   "Pendiente de verificar"):
+   1. branch de backup en Neon;
+   2. las dos migraciones en Neon (**antes** del push);
+   3. `CDO_API_URL` y `CDO_API_TOKEN` en Vercel;
+   4. commit y push de E junto con estos docs;
+   5. primera corrida de CDO desde el panel;
+   6. recién después, el interruptor de CDO.
+3. **Verificar la etapa E en producción**: los números esperados de la
+   primera corrida (~37 creados, 1 variante desactivada, precios que se
+   mueven), y después la primera corrida automática de CDO en su ventana
+   (07:00 o 19:00 ART).
+4. **La primera semana con las ventanas de 30 minutos**: mirar el consumo de
+   Neon (ítem en PENDIENTES).
 
-Después de eso, lo que queda son decisiones, no código:
+Lo que sigue después, sin orden fijo: las sugerencias del buscador (con sus
+dos requisitos), el arreglo de las etiquetas de variante, y reactivar el
+optimizador de imágenes. Todo en PENDIENTES.
 
-1. **Confirmar la primera corrida automática del cron**, después de las 16:00
-   ART. El disparo a mano ya dio 200; falta ver que el horario programado
-   dispare solo. Se mira en el panel: la fecha de "Valor actual" tiene que
-   avanzar sin que nadie toque nada.
+**Abierto de antes, que sigue valiendo:**
 
-2. **El mapeo de categorías** — en manos del cliente. La herramienta está
-   construida y deployada; falta que definan qué unificar y qué ocultar. El
-   caso urgente son los **cinco pares homónimos** (Escritura, Llaveros,
-   Paraguas, Tecnología, Gorros): hoy producción muestra dos filtros con el
-   mismo nombre.
-
-3. **Cargar dirección y horarios** en `/admin/configuracion`, si el cliente
-   quiere mostrarlos. Los íconos (pin y reloj) ya están hechos; hoy el footer
-   muestra solo los tres links porque esos dos campos están vacíos.
-
-4. **Verificar el footer en un teléfono real.** Es lo único que quedó sin
-   confirmar de verdad: en su momento el resize del navegador no respondió
-   (ver la técnica del iframe en la sección del panel mobile, que sí sirve),
-   así que el layout mobile se verificó forzando las clases sobre un
-   contenedor de 260px. Mismo criterio que se usó con la tanda 6.
-
-**Lo que queda del lado de CDO, aparte:**
-
-- Decidir si se apunta a **producción de CDO** (hoy es el entorno de pruebas).
-  Antes, la checklist de la sección del conector.
-- Cargar `CDO_API_TOKEN` y `CDO_API_URL` en Vercel, si se quiere sincronizar
-  contra Neon. Hoy el sync se corre a mano desde local, y **producción todavía
-  no tiene ningún producto de CDO**.
-- **Conversación con CDO, no trabajo de código:** ~15% de las portadas de
-  pruebas son inservibles y 33 de 207 productos no tienen ninguna foto usable.
-  Si el número se repite en producción, es un problema de ellos.
-
-Después de todo eso, lo que sigue es **verificar en producción**, con la lista
-de "Pendiente de verificar" en la mano.
-
-De la **tanda 7**: editar un producto manual, eliminarlo, y confirmar que
-desaparece del catálogo público y del admin pero la cotización que lo tenía se
-sigue viendo bien. Ojo que **producción no tiene cotizaciones**, así que para
-probar ese último punto hay que crear una primero desde `/cotizar`.
-
-De las **tandas 2 a 5**: skeletons del panel, shimmer del catálogo, filtro de
-cotizaciones, pantallas de error y la revalidación de la home.
-
-De la **tanda 8**: que el "Ver" muestre **"Abriendo..."** al clickear (solo se
-nota si la navegación tarda algo; el detalle es dinámico, así que debería), y
-que el segundo click no haga nada mientras tanto. Ya está todo deployado. En local no hay latencia: los
-estados de carga no se ven nunca, así que mirarlo en Vercel —y en un teléfono
-real, no en el navegador angostado— es lo único que valida el trabajo.
-
-La tanda 6 ya está cerrada: se probó en un teléfono y quedó aprobada.
-
-Con el relevamiento cerrado, **no queda nada pendiente de construir en el tema
-estados de carga**. Lo que sigue es verificar y decidir.
-
-Para probar las pantallas de error hace falta forzar un fallo — lo más simple es
-apuntar `DATABASE_URL` a una base inexistente en un preview de Vercel.
-
-Lo que queda abierto:
-
-- **`notFound()` que hoy no se llama** (relevado, no cambiado — es decisión de
-  producto):
-  - `/catalogo?categoria=basura` devuelve **200** con la grilla vacía y "No hay
-    productos en esta categoría". Como es searchParam y no segmento de ruta, el
-    empty state es defendible en UX; para SEO, un 200 con contenido vacío no es
-    ideal.
-  - `/catalogo?page=9999` — mismo caso.
-  - Los tres `notFound()` que sí existen (`producto/[id]`, `admin/productos/[id]`,
-    `admin/cotizaciones/[id]`) están bien puestos. No hay lookup por slug en
-    ningún lado: el producto se busca por id.
-
-Después, la Home vuelve a la cola: quedó pendiente sumarle un bloque de logos de
-marcas clientes (falta conseguir los logos).
+- **Del lado del cliente:** el mapeo de categorías (los pares homónimos,
+  hoy hechos por el desarrollador, falta que el cliente los revise), y cargar
+  dirección y horarios en `/admin/configuracion` si los quiere en el footer.
+- **Verificaciones en un teléfono real:** el panel mobile, el footer, y las
+  tandas 2 a 5 y 8 de estados de carga (lista en "Pendiente de verificar").
+- **`notFound()` que hoy no se llama** (decisión de producto, sin cambiar):
+  `/catalogo?categoria=basura` y `/catalogo?page=9999` devuelven 200 con la
+  grilla vacía. Defendible en UX; para SEO, un 200 vacío no es ideal.
+- **La home:** sumar un bloque de logos de marcas clientes (faltan los logos).
 
 ---
 

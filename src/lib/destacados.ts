@@ -171,7 +171,21 @@ export function elegirDestacados(
     fecha,
     cantidad,
     pricing,
-  }: { priceMin: number; priceMax: number; fecha: string; cantidad: number; pricing: PricingInputs }
+    excluir,
+    gruposUsados: gruposPrevios,
+  }: {
+    priceMin: number;
+    priceMax: number;
+    fecha: string;
+    cantidad: number;
+    pricing: PricingInputs;
+    /// Ids que no se pueden elegir (los fijados a mano). Se descartan al
+    /// ELEGIR, no antes de puntuar: los stats siguen siendo los del universo.
+    excluir?: ReadonlySet<string>;
+    /// Categorias que ya "salieron" (las de los fijados): cuentan como usadas
+    /// en las etapas de una-por-categoria. La etapa 3 puede repetirlas.
+    gruposUsados?: ReadonlySet<string>;
+  }
 ): ResultadoDestacados {
   const puntuados: Puntuado[] = [];
   for (const candidato of candidatos) {
@@ -200,8 +214,8 @@ export function elegirDestacados(
   };
 
   const elegidos: Destacado[] = [];
-  const usados = new Set<string>();
-  const gruposUsados = new Set<string>();
+  const usados = new Set<string>(excluir);
+  const gruposUsados = new Set<string>(gruposPrevios);
 
   const tomar = (p: Puntuado, etapa: EtapaDestacado) => {
     usados.add(p.candidato.id);
@@ -229,4 +243,160 @@ export function elegirDestacados(
   etapa(puntuados, "relleno-categoria", false);
 
   return { elegidos, stats };
+}
+
+// ---------------------------------------------------------------------------
+//  Fijados a mano
+// ---------------------------------------------------------------------------
+
+/// Un producto con featuredRank, tal como lo lee la base (activo o no).
+export interface ProductoFijado {
+  id: string;
+  /// Posicion pedida (1..cantidad). Fuera de ese rango se ignora.
+  rank: number;
+  /// Activo y no eliminado.
+  activo: boolean;
+  /// Tiene foto principal.
+  conFoto: boolean;
+  /// La categoria (resuelta a traves de la canonica) se ofrece como filtro.
+  categoriaVisible: boolean;
+  /// Mismo grupo que CandidatoDestacable.grupo; null si no tiene categoria.
+  grupo: string | null;
+  currency: Currency;
+  /// Solo variantes ACTIVAS, como las lee la card.
+  variants: VarianteDestacable[];
+}
+
+export type AdvertenciaFijado = "sin-stock" | "fuera-de-rango" | "categoria-oculta";
+export type MotivoOmitido = "pausado-eliminado" | "sin-foto" | "sin-variantes" | "posicion-fuera-de-rango";
+
+/// Un fijado que NO se muestra: su posicion la llena el automatico.
+export interface FijadoOmitido {
+  id: string;
+  rank: number;
+  motivo: MotivoOmitido;
+}
+
+/// Una posicion de la portada ya resuelta.
+export interface PosicionDestacada {
+  /// 1..cantidad. Puede haber huecos si el automatico se queda sin productos.
+  posicion: number;
+  id: string;
+  origen: "fijado" | "automatico";
+  /// Solo los automaticos tienen etapa.
+  etapa: EtapaDestacado | null;
+  colores: number;
+  precio: Prisma.Decimal;
+  /// Solo los fijados: lo que el automatico no habria elegido. Informativo,
+  /// nunca bloquea: fijar es una decision humana.
+  advertencias: AdvertenciaFijado[];
+}
+
+export interface ResultadoCombinado {
+  /// Ordenadas por posicion.
+  posiciones: PosicionDestacada[];
+  omitidos: FijadoOmitido[];
+  stats: ResultadoDestacados["stats"];
+}
+
+/// Combina los fijados a mano con el automatico. UNA sola funcion para la home
+/// y para la vista previa del panel: asi el panel muestra exactamente lo que
+/// muestra la home.
+///
+/// Reglas:
+///   - Un fijado sale en SU posicion si esta activo, sin eliminar y con foto
+///     principal. NO necesita estar en rango, tener stock ni estar en una
+///     categoria visible: es una decision humana (se avisa, no se bloquea).
+///   - Los que no cumplen eso se saltean y se informan; su posicion la llena
+///     el automatico.
+///   - El automatico llena las posiciones libres, en su orden, sin repetir
+///     ids fijados, y las categorias de los fijados mostrados cuentan como
+///     usadas en las etapas de una-por-categoria.
+///   - Un rank fuera de 1..cantidad no se muestra, pero se informa como
+///     omitido ("posicion-fuera-de-rango"): sigue ocupando el unique.
+export function combinarConFijados(
+  candidatos: CandidatoDestacable[],
+  fijados: ProductoFijado[],
+  opciones: { priceMin: number; priceMax: number; fecha: string; cantidad: number; pricing: PricingInputs }
+): ResultadoCombinado {
+  const { priceMin, priceMax, cantidad, pricing } = opciones;
+
+  const omitidos: FijadoOmitido[] = [];
+  const mostrados = new Map<number, PosicionDestacada>();
+  const idsFijados = new Set<string>();
+  const gruposFijados = new Set<string>();
+
+  // Un rank fuera de 1..cantidad no se muestra, pero SIGUE ocupando el unique:
+  // se informa (con su posicion real) para que el panel pueda soltarlo.
+  const enRango = (f: ProductoFijado) => Number.isInteger(f.rank) && f.rank >= 1 && f.rank <= cantidad;
+  for (const f of fijados.filter((x) => !enRango(x)).sort((a, b) => a.rank - b.rank)) {
+    idsFijados.add(f.id);
+    omitidos.push({ id: f.id, rank: f.rank, motivo: "posicion-fuera-de-rango" });
+  }
+  const validos = fijados.filter(enRango).sort((a, b) => a.rank - b.rank);
+
+  for (const f of validos) {
+    // Aunque no se muestre, su id no se vuelve a elegir de relleno: el que
+    // lo fijo lo quiere en esa posicion, no en otra.
+    idsFijados.add(f.id);
+    if (!f.activo) {
+      omitidos.push({ id: f.id, rank: f.rank, motivo: "pausado-eliminado" });
+      continue;
+    }
+    if (!f.conFoto) {
+      omitidos.push({ id: f.id, rank: f.rank, motivo: "sin-foto" });
+      continue;
+    }
+    // Sin variantes no hay precio que mostrar en la card.
+    const rango = computePriceRange(f.variants, f.currency, pricing);
+    if (!rango) {
+      omitidos.push({ id: f.id, rank: f.rank, motivo: "sin-variantes" });
+      continue;
+    }
+    const advertencias: AdvertenciaFijado[] = [];
+    if (!f.variants.some(hayStock)) advertencias.push("sin-stock");
+    if (rango.min.lessThan(priceMin) || rango.min.greaterThan(priceMax)) advertencias.push("fuera-de-rango");
+    if (!f.categoriaVisible) advertencias.push("categoria-oculta");
+    if (f.grupo) gruposFijados.add(f.grupo);
+    mostrados.set(f.rank, {
+      posicion: f.rank,
+      id: f.id,
+      origen: "fijado",
+      etapa: null,
+      colores: contarColores(f.variants),
+      precio: rango.min,
+      advertencias,
+    });
+  }
+  // Los omitidos no se pueden volver a elegir, pero tampoco tienen que
+  // gastar la categoria ni el lugar: eso lo hace solo lo mostrado.
+
+  const libres: number[] = [];
+  for (let n = 1; n <= cantidad; n++) if (!mostrados.has(n)) libres.push(n);
+
+  const auto = elegirDestacados(candidatos, {
+    ...opciones,
+    cantidad: libres.length,
+    excluir: idsFijados,
+    gruposUsados: gruposFijados,
+  });
+  auto.elegidos.forEach((e, i) => {
+    const posicion = libres[i];
+    mostrados.set(posicion, {
+      posicion,
+      id: e.id,
+      origen: "automatico",
+      etapa: e.etapa,
+      colores: e.colores,
+      precio: e.precio,
+      advertencias: [],
+    });
+  });
+
+  omitidos.sort((a, b) => a.rank - b.rank);
+  return {
+    posiciones: [...mostrados.values()].sort((a, b) => a.posicion - b.posicion),
+    omitidos,
+    stats: auto.stats,
+  };
 }

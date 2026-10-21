@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
 import { invalidarCachePublico, TAG } from "@/lib/cache-tags";
 import { parsearPesosEnteros } from "@/lib/destacados";
+import {
+  buscarProductosParaFijar as buscarEnLaBase,
+  fijarProducto,
+  moverPosicion,
+  soltarPosicion,
+  type ResultadoBusqueda,
+} from "@/lib/destacados-admin";
 
 export interface FeaturedActionResult {
   success: boolean;
@@ -60,4 +67,54 @@ export async function updateFeaturedConfig(
   revalidatePath("/admin/destacados");
   revalidatePath("/");
   return { success: true };
+}
+
+/// Despues de escribir: solo el tag de destacados (nada de catalogo ni precios
+/// cambio) y las dos pantallas que lo muestran. Solo si la escritura se hizo.
+function alTerminar(r: FeaturedActionResult): FeaturedActionResult {
+  if (r.success) {
+    invalidarCachePublico([TAG.featured]);
+    revalidatePath("/admin/destacados");
+    revalidatePath("/");
+  }
+  return r;
+}
+
+/// Fija un producto en una posicion de la portada. Cualquier ADMIN puede: es
+/// una decision editorial, no toca precios.
+export async function fijarDestacado(
+  productId: string,
+  posicion: number
+): Promise<FeaturedActionResult> {
+  await requireAdmin();
+  return alTerminar(await fijarProducto(productId, posicion));
+}
+
+/// Devuelve una posicion al automatico.
+///
+/// Recibe el producto que la tarjeta mostraba: si la posicion ya es de otro
+/// (alguien la cambio mientras tanto), no suelta nada.
+export async function soltarDestacado(
+  posicion: number,
+  productId: string
+): Promise<FeaturedActionResult> {
+  await requireAdmin();
+  return alTerminar(await soltarPosicion(posicion, productId));
+}
+
+/// Sube o baja un fijado una posicion (intercambia si el vecino tambien esta
+/// fijado). Igual que soltar, solo actua si la posicion sigue siendo de `productId`.
+export async function moverDestacado(
+  posicion: number,
+  direccion: "arriba" | "abajo",
+  productId: string
+): Promise<FeaturedActionResult> {
+  await requireAdmin();
+  return alTerminar(await moverPosicion(posicion, direccion, productId));
+}
+
+/// Busqueda del selector de productos. Solo lee: no invalida nada.
+export async function buscarProductosParaFijar(texto: string): Promise<ResultadoBusqueda> {
+  await requireAdmin();
+  return buscarEnLaBase(texto);
 }

@@ -551,6 +551,19 @@ model Product {
   /// invocacion del cron. «Refrescar tienda» borra las anteriores a su pedido.
   invalidacionPendienteDesde DateTime?
 
+  /// Posicion fija en los destacados de la home (1..FEATURED_PRODUCTS_COUNT).
+  /// Null = no esta fijado: lo elige el automatico (lib/destacados.ts).
+  ///
+  /// Es una decision HUMANA, tomada desde /admin/destacados: el producto sale
+  /// en esa posicion aunque no este en rango, no tenga stock o su categoria
+  /// este oculta (mientras siga activo, sin borrar y con foto principal).
+  /// @unique impide que dos productos ocupen la misma posicion; el
+  /// automatico rellena las posiciones que quedan libres, en su orden.
+  ///
+  /// Los conectores NUNCA la escriben (sus upserts no la nombran) y no entra
+  /// en publicHash: un sync no puede soltar ni mover un fijado.
+  featuredRank      Int?          @unique
+
   /// Marca de la última vez que el conector actualizó este producto.
   /// Útil para detectar productos "huérfanos" (que Zecat ya no devuelve).
   lastSyncedAt      DateTime?

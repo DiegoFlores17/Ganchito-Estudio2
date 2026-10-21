@@ -5,7 +5,12 @@ import {
   type CatalogFilterOptions,
   type OpcionFiltro,
 } from "@/lib/catalog-params";
-import { elegirDestacados, type EtapaDestacado } from "@/lib/destacados";
+import {
+  combinarConFijados,
+  type AdvertenciaFijado,
+  type EtapaDestacado,
+  type MotivoOmitido,
+} from "@/lib/destacados";
 import { computeSellPrice, getPricingConfig, sellPriceToCost } from "@/lib/pricing";
 
 export const PRODUCTS_PER_PAGE = 24;
@@ -399,20 +404,53 @@ function candidatosDestacables() {
   });
 }
 
-/// Elige los destacados leyendo la base. Compartido por la home y el panel.
+/// Productos con posicion fija (Product.featuredRank), activos o no: la
+/// combinacion decide cuales se muestran y el panel necesita saber por que
+/// no se muestra el que no. Son pocos (a lo sumo FEATURED_PRODUCTS_COUNT).
+function fijadosDestacables() {
+  return prisma.product.findMany({
+    where: { featuredRank: { not: null } },
+    select: {
+      id: true,
+      name: true,
+      featuredRank: true,
+      active: true,
+      deletedAt: true,
+      currency: true,
+      category: {
+        select: { id: true, visible: true, canonicalId: true, canonical: { select: { visible: true } } },
+      },
+      images: { where: { isMain: true }, take: 1, select: { id: true } },
+      variants: {
+        where: { active: true },
+        select: {
+          stock: true,
+          reservedStock: true,
+          costPrice: true,
+          discountPercent: true,
+          colorName: true,
+        },
+      },
+    },
+  });
+}
+
+/// Elige los destacados leyendo la base: fijados a mano + automatico.
+/// Compartido por la home y el panel.
 async function elegirDestacadosDeLaBase(
   take: number,
   fecha: string,
   leerPricing: () => Promise<PricingConfig>
 ) {
-  // Una sola vuelta: los tres son independientes.
-  const [candidatos, pricing, rango] = await Promise.all([
+  // Una sola vuelta: los cuatro son independientes.
+  const [candidatos, fijados, pricing, rango] = await Promise.all([
     candidatosDestacables(),
+    fijadosDestacables(),
     leerPricing(),
     leerRangoDestacados(),
   ]);
   const { priceMin, priceMax } = rango;
-  const resultado = elegirDestacados(
+  const resultado = combinarConFijados(
     candidatos.map((c) => ({
       id: c.id,
       currency: c.currency,
@@ -421,9 +459,25 @@ async function elegirDestacadosDeLaBase(
       grupo: c.category!.canonicalId ?? c.category!.id,
       variants: c.variants,
     })),
+    fijados.map((f) => ({
+      id: f.id,
+      rank: f.featuredRank!,
+      activo: f.active && f.deletedAt === null,
+      conFoto: f.images.length > 0,
+      // Mismo criterio que candidatosDestacables: la canonica manda.
+      categoriaVisible: f.category
+        ? f.category.canonicalId === null
+          ? f.category.visible
+          : f.category.canonical?.visible === true
+        : false,
+      grupo: f.category ? f.category.canonicalId ?? f.category.id : null,
+      currency: f.currency,
+      variants: f.variants,
+    })),
     { priceMin, priceMax, fecha, cantidad: take, pricing }
   );
-  return { resultado, rango, pricing };
+  const nombres = new Map(fijados.map((f) => [f.id, f.name]));
+  return { resultado, rango, pricing, nombres };
 }
 
 /// Productos destacados para la home: uno por categoria, dentro del rango de
@@ -442,9 +496,9 @@ export async function getFeaturedProducts(
   leerPricing: () => Promise<PricingConfig> = getPricingConfig
 ) {
   const { resultado } = await elegirDestacadosDeLaBase(take, fecha, leerPricing);
-  if (resultado.elegidos.length === 0) return [];
+  if (resultado.posiciones.length === 0) return [];
 
-  const ids = resultado.elegidos.map((e) => e.id);
+  const ids = resultado.posiciones.map((e) => e.id);
   const productos = await prisma.product.findMany({
     where: { id: { in: ids } },
     include: {
@@ -471,21 +525,35 @@ export async function getFeaturedProducts(
 
 /// Una posicion de la vista previa del panel.
 export interface DestacadoVistaPrevia {
+  /// 1..FEATURED_PRODUCTS_COUNT. Puede haber huecos al final de lo libre.
+  posicion: number;
   id: string;
   name: string;
   /// La categoria que ve el cliente (la canonica si la tiene).
   categoryName: string | null;
   imageUrl: string | null;
-  etapa: EtapaDestacado;
+  origen: "fijado" | "automatico";
+  /// Solo los automaticos.
+  etapa: EtapaDestacado | null;
   colores: number;
   precio: Prisma.Decimal;
+  /// Solo los fijados.
+  advertencias: AdvertenciaFijado[];
+}
+
+/// Un fijado que la home NO muestra (pausado, eliminado, sin foto).
+export interface FijadoOmitidoVistaPrevia {
+  id: string;
+  name: string;
+  rank: number;
+  motivo: MotivoOmitido;
 }
 
 /// Vista previa de los destacados para el panel. SIN CACHE (lee la base) y
 /// aparte del lector de la tienda: el admin nunca importa lectura-publica.
 export async function getFeaturedPreview(take: number, fecha: string) {
-  const { resultado, rango } = await elegirDestacadosDeLaBase(take, fecha, getPricingConfig);
-  const ids = resultado.elegidos.map((e) => e.id);
+  const { resultado, rango, nombres } = await elegirDestacadosDeLaBase(take, fecha, getPricingConfig);
+  const ids = resultado.posiciones.map((e) => e.id);
   const productos = ids.length
     ? await prisma.product.findMany({
         where: { id: { in: ids } },
@@ -498,19 +566,26 @@ export async function getFeaturedPreview(take: number, fecha: string) {
       })
     : [];
   const porId = new Map(productos.map((p) => [p.id, p]));
-  const posiciones: DestacadoVistaPrevia[] = resultado.elegidos.flatMap((e) => {
+  const posiciones: DestacadoVistaPrevia[] = resultado.posiciones.flatMap((e) => {
     const p = porId.get(e.id);
     if (!p) return [];
     return {
+      posicion: e.posicion,
       id: e.id,
       name: p.name,
       categoryName: p.category?.canonical?.name ?? p.category?.name ?? null,
       imageUrl: p.images[0]?.url ?? null,
+      origen: e.origen,
       etapa: e.etapa,
       colores: e.colores,
       precio: e.precio,
+      advertencias: e.advertencias,
     };
   });
+  const omitidos: FijadoOmitidoVistaPrevia[] = resultado.omitidos.map((o) => ({
+    ...o,
+    name: nombres.get(o.id) ?? o.id,
+  }));
   return {
     config: {
       priceMin: rango.priceMin,
@@ -521,6 +596,7 @@ export async function getFeaturedPreview(take: number, fecha: string) {
       updatedBy: rango.fila?.updatedBy ?? null,
     },
     posiciones,
+    omitidos,
     stats: resultado.stats,
   };
 }

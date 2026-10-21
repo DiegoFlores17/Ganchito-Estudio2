@@ -9,6 +9,7 @@ import {
   getProducts,
   type GetProductsParams,
 } from "@/lib/catalog";
+import { fechaArt } from "@/lib/destacados";
 import { getHomeCategoryShowcase } from "@/lib/home";
 import { getProductById } from "@/lib/product";
 import { getPricingConfig } from "@/lib/pricing";
@@ -165,11 +166,40 @@ export async function getProductByIdPublico(
   }
 }
 
-export const getFeaturedProductsPublico = cachear(getFeaturedProducts, {
-  clave: "featured-products",
-  revalidate: 6 * HORA,
-  tags: () => [TAG.catalog],
-});
+/// Destacados de la home. La fecha (hora argentina) es argumento del lector
+/// cacheado, o sea parte de su clave: al cambiar el dia la entrada es otra y
+/// la rotacion diaria ocurre sola, sin invalidar nada.
+///
+/// SOLO LEE las filas de config: si falta la de precios se tira FILA_FALTANTE
+/// para no guardar en la cache un render que habria creado una fila (mismo
+/// criterio que leerPricingConfig). La de destacados cae a sus defaults.
+const leerDestacados = cachear(
+  async (take: number, fecha: string) =>
+    getFeaturedProducts(take, fecha, async () => {
+      const fila = await prisma.pricingConfig.findUnique({ where: { id: 1 } });
+      if (!fila) throw new Error(FILA_FALTANTE);
+      return fila;
+    }),
+  {
+    clave: "featured-products",
+    // Depende de la config de precios (el rango se evalua sobre el precio de
+    // venta): mismo TTL de 1 h que getCatalogFilterOptionsPublico.
+    revalidate: 1 * HORA,
+    tags: () => [TAG.catalog, TAG.pricing, TAG.featured],
+  }
+);
+
+export async function getFeaturedProductsPublico(take: number) {
+  const fecha = fechaArt(new Date());
+  try {
+    return await leerDestacados(take, fecha);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes(FILA_FALTANTE)) {
+      return getFeaturedProducts(take, fecha);
+    }
+    throw error;
+  }
+}
 
 export const getHomeCategoryShowcasePublico = cachear(getHomeCategoryShowcase, {
   clave: "home-category-showcase",

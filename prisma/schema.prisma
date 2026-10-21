@@ -286,6 +286,28 @@ model PricingConfig {
   @@map("pricing_config")
 }
 
+/// Rango de precio de los destacados automaticos de la home. Fila unica
+/// (id siempre 1).
+///
+/// Es su propia tabla y no columnas de PricingConfig porque la edita cualquier
+/// ADMIN, y PricingConfig (margen, IVA, dolar) es solo de SUPER_ADMIN. Mezclar
+/// las dos en un mismo formulario invita a que uno pise al otro, o a abrirle a
+/// un admin comun la puerta a los precios.
+///
+/// El rango es sobre el precio de VENTA de 1 unidad SIN IVA, el mismo numero
+/// que muestra la card ("Desde $X"). Los defaults salen de aca: si la fila no
+/// existe, la lectura publica cae a 5000/15000 sin crearla.
+model FeaturedConfig {
+  id        Int      @id @default(1)
+  priceMin  Decimal  @default(5000) @db.Decimal(12, 2)
+  priceMax  Decimal  @default(15000) @db.Decimal(12, 2)
+  updatedAt DateTime @updatedAt
+  /// Email del admin que lo guardo por ultima vez.
+  updatedBy String?
+
+  @@map("featured_config")
+}
+
 // ----------------------------------------------------------------------------
 //  CATEGORÍAS (mapea a "families" de Zecat, pero sirve para todos los orígenes)
 // ----------------------------------------------------------------------------

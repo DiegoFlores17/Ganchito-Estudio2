@@ -17,6 +17,7 @@ import { getCatalogFilterOptions, getFeaturedProducts, getProducts } from "../sr
 import { syncCdoProduct, vaciosQueSeApagarian, type CdoSyncSummary } from "../src/lib/cdo/sync";
 import type { ImageProbe } from "../src/lib/cdo/normalize";
 import type { CdoProduct } from "../src/lib/cdo/types";
+import { fechaArt } from "../src/lib/destacados";
 import { getQuoteItemsSummary } from "../src/app/(store)/cotizar/actions";
 import type { ZecatGenericProduct } from "../src/lib/zecat/types";
 
@@ -34,6 +35,7 @@ const AUTOR_VARIANTS = "audit-verify-variants";
 // Color que SOLO tiene la variante C: si aparece en busqueda o filtros
 // despues de desactivarla, la lectura no esta filtrando.
 const COLOR_UNICO = "Zafiroprueba";
+const CATEGORIA_PRUEBA = "a2test-categoria";
 const CDO_IDS = [990000001, 990000002, 990000003];
 let fallos = 0;
 function check(nombre: string, ok: boolean, detalle = "") {
@@ -91,6 +93,7 @@ async function limpiar() {
   await prisma.quoteItem.deleteMany({ where: { productId: { in: ids } } });
   await prisma.quote.deleteMany({ where: { customerEmail: "a2test@ejemplo.test" } });
   await prisma.product.deleteMany({ where: { id: { in: ids } } });
+  await prisma.category.deleteMany({ where: { slug: CATEGORIA_PRUEBA } });
   await prisma.syncRun.deleteMany({ where: { startedBy: AUTOR_VARIANTS } });
 }
 
@@ -132,7 +135,15 @@ async function main() {
   console.log("\n=========== LECTURAS ===========");
   const ficha = await getProductById(producto.id);
   check("ficha: solo las 2 activas", ficha?.variants.map((v) => v.sku).join(",") === `${A},${B}`, ficha?.variants.map((v) => v.sku).join(","));
-  const destacados = await getFeaturedProducts(5000);
+  // Los destacados exigen una categoria visible: se le da una de prueba (se
+  // borra en limpiar()).
+  const categoriaPrueba = await prisma.category.upsert({
+    where: { slug: CATEGORIA_PRUEBA },
+    update: { visible: true, canonicalId: null },
+    create: { name: "A2 prueba", slug: CATEGORIA_PRUEBA, visible: true },
+  });
+  await prisma.product.update({ where: { id: producto.id }, data: { categoryId: categoriaPrueba.id } });
+  const destacados = await getFeaturedProducts(5000, fechaArt(new Date()));
   const enDestacados = destacados.find((p) => p.id === producto.id);
   check("destacados: aparece, con solo las 2 activas", enDestacados?.variants.length === 2, String(enDestacados?.variants.length));
   const enGrilla = (await getProducts({ page: 1, search: "Producto de prueba a2test-1" })).products.find((p) => p.id === producto.id);

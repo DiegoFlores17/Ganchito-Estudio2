@@ -1,10 +1,11 @@
-import { Currency, Prisma } from "@prisma/client";
+import { Currency, Prisma, type PricingConfig } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   normalizarNombre,
   type CatalogFilterOptions,
   type OpcionFiltro,
 } from "@/lib/catalog-params";
+import { elegirDestacados, type EtapaDestacado } from "@/lib/destacados";
 import { computeSellPrice, getPricingConfig, sellPriceToCost } from "@/lib/pricing";
 
 export const PRODUCTS_PER_PAGE = 24;
@@ -345,31 +346,183 @@ export async function getProducts({
   };
 }
 
-/// Productos destacados para la home. Sin flag "featured" en el modelo
-/// (ver PENDIENTES.md): por ahora se toman los ultimos sincronizados con
-/// foto principal, que es el criterio mas simple sin agregar campos nuevos.
-export async function getFeaturedProducts(take: number) {
+/// Rango de precio por defecto de los destacados. Es el mismo que el default
+/// de la columna en el schema (FeaturedConfig): si la fila no existe, la
+/// lectura cae aca SIN crearla.
+const RANGO_DESTACADOS_DEFAULT = { priceMin: 5000, priceMax: 15000 };
+
+/// Rango de los destacados. Solo lee: lo usa tambien la lectura cacheada de la
+/// tienda, donde crear una fila seria un efecto secundario fuera de lugar.
+async function leerRangoDestacados() {
+  const fila = await prisma.featuredConfig.findUnique({ where: { id: 1 } });
+  return {
+    priceMin: fila ? Number(fila.priceMin) : RANGO_DESTACADOS_DEFAULT.priceMin,
+    priceMax: fila ? Number(fila.priceMax) : RANGO_DESTACADOS_DEFAULT.priceMax,
+    fila,
+  };
+}
+
+/// Candidatos a destacados: vivos, con foto principal y en una categoria que
+/// se ofrece como filtro (resuelta a traves de la canonica, igual que
+/// getVisibleCategories). NO filtra por precio ni por stock en SQL: el rango
+/// se aplica en memoria con computePriceRange, la misma funcion que usa la
+/// card, para que haya un solo camino de calculo.
+function candidatosDestacables() {
   return prisma.product.findMany({
-    where: { active: true, deletedAt: null, images: { some: { isMain: true } } },
-    orderBy: { lastSyncedAt: "desc" },
-    take,
+    where: {
+      active: true,
+      deletedAt: null,
+      images: { some: { isMain: true } },
+      category: {
+        OR: [
+          { canonicalId: null, visible: true },
+          { canonical: { visible: true } },
+        ],
+      },
+    },
+    select: {
+      id: true,
+      currency: true,
+      category: { select: { id: true, canonicalId: true } },
+      variants: {
+        // Mismo criterio que la grilla del catalogo: solo las activas.
+        where: { active: true },
+        select: {
+          stock: true,
+          reservedStock: true,
+          costPrice: true,
+          discountPercent: true,
+          colorName: true,
+        },
+      },
+    },
+  });
+}
+
+/// Elige los destacados leyendo la base. Compartido por la home y el panel.
+async function elegirDestacadosDeLaBase(
+  take: number,
+  fecha: string,
+  leerPricing: () => Promise<PricingConfig>
+) {
+  // Una sola vuelta: los tres son independientes.
+  const [candidatos, pricing, rango] = await Promise.all([
+    candidatosDestacables(),
+    leerPricing(),
+    leerRangoDestacados(),
+  ]);
+  const { priceMin, priceMax } = rango;
+  const resultado = elegirDestacados(
+    candidatos.map((c) => ({
+      id: c.id,
+      currency: c.currency,
+      // La canonica si la tiene: "Escritura" de Zecat y de CDO cuentan como
+      // una sola categoria. Sin categoria no llega (lo filtra la query).
+      grupo: c.category!.canonicalId ?? c.category!.id,
+      variants: c.variants,
+    })),
+    { priceMin, priceMax, fecha, cantidad: take, pricing }
+  );
+  return { resultado, rango, pricing };
+}
+
+/// Productos destacados para la home: uno por categoria, dentro del rango de
+/// precio editable en el panel, con mas colores en stock primero y rotacion
+/// diaria entre los empatados (ver lib/destacados.ts).
+///
+/// `fecha` ("YYYY-MM-DD" en hora argentina, ver fechaArt) es parametro y no se
+/// lee aca adentro porque la lectura cacheada de la tienda la necesita como
+/// parte de la clave: asi la seleccion cambia sola al cambiar el dia.
+///
+/// `leerPricing` por defecto crea la fila de precios si falta (como el resto de
+/// los lectores originales); la lectura cacheada le pasa una que solo lee.
+export async function getFeaturedProducts(
+  take: number,
+  fecha: string,
+  leerPricing: () => Promise<PricingConfig> = getPricingConfig
+) {
+  const { resultado } = await elegirDestacadosDeLaBase(take, fecha, leerPricing);
+  if (resultado.elegidos.length === 0) return [];
+
+  const ids = resultado.elegidos.map((e) => e.id);
+  const productos = await prisma.product.findMany({
+    where: { id: { in: ids } },
     include: {
       images: { where: { isMain: true }, take: 1 },
       variants: {
-          // Mismo criterio que la grilla del catalogo: solo las activas.
-          where: { active: true },
-          select: {
-            stock: true,
-            reservedStock: true,
-            costPrice: true,
-            // Lo necesita computePriceRange para decidir "Desde $X": dos
-            // variantes con el mismo costo pueden valer distinto a partir
-            // de 2 unidades si descuentan distinto.
-            discountPercent: true,
-          },
+        // Mismo criterio que la grilla del catalogo: solo las activas.
+        where: { active: true },
+        select: {
+          stock: true,
+          reservedStock: true,
+          costPrice: true,
+          // Lo necesita computePriceRange para decidir "Desde $X": dos
+          // variantes con el mismo costo pueden valer distinto a partir
+          // de 2 unidades si descuentan distinto.
+          discountPercent: true,
         },
+      },
     },
   });
+  // findMany no respeta el orden de `in`: se reordena segun la eleccion.
+  const porId = new Map(productos.map((p) => [p.id, p]));
+  return ids.flatMap((id) => porId.get(id) ?? []);
+}
+
+/// Una posicion de la vista previa del panel.
+export interface DestacadoVistaPrevia {
+  id: string;
+  name: string;
+  /// La categoria que ve el cliente (la canonica si la tiene).
+  categoryName: string | null;
+  imageUrl: string | null;
+  etapa: EtapaDestacado;
+  colores: number;
+  precio: Prisma.Decimal;
+}
+
+/// Vista previa de los destacados para el panel. SIN CACHE (lee la base) y
+/// aparte del lector de la tienda: el admin nunca importa lectura-publica.
+export async function getFeaturedPreview(take: number, fecha: string) {
+  const { resultado, rango } = await elegirDestacadosDeLaBase(take, fecha, getPricingConfig);
+  const ids = resultado.elegidos.map((e) => e.id);
+  const productos = ids.length
+    ? await prisma.product.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          name: true,
+          category: { select: { name: true, canonical: { select: { name: true } } } },
+          images: { where: { isMain: true }, take: 1, select: { url: true } },
+        },
+      })
+    : [];
+  const porId = new Map(productos.map((p) => [p.id, p]));
+  const posiciones: DestacadoVistaPrevia[] = resultado.elegidos.flatMap((e) => {
+    const p = porId.get(e.id);
+    if (!p) return [];
+    return {
+      id: e.id,
+      name: p.name,
+      categoryName: p.category?.canonical?.name ?? p.category?.name ?? null,
+      imageUrl: p.images[0]?.url ?? null,
+      etapa: e.etapa,
+      colores: e.colores,
+      precio: e.precio,
+    };
+  });
+  return {
+    config: {
+      priceMin: rango.priceMin,
+      priceMax: rango.priceMax,
+      // true cuando nadie guardo un rango todavia y rigen los defaults.
+      esDefault: rango.fila === null,
+      updatedAt: rango.fila?.updatedAt ?? null,
+      updatedBy: rango.fila?.updatedBy ?? null,
+    },
+    posiciones,
+    stats: resultado.stats,
+  };
 }
 
 /// Stock real = stock - reservedStock por variante (nunca el bruto). El

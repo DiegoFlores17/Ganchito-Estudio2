@@ -328,7 +328,8 @@ con `TZ=UTC` y `TZ=Asia/Tokyo`.
 | opciones de filtro (con piso/techo de precio) | `catalog`, `pricing` | 1 h |
 | grilla sin búsqueda ni filtro de precio | `catalog`, `categories` | 6 h |
 | ficha | `product:{id}`, `categories` | 24 h |
-| destacados y tiles de la home | `catalog` | 6 h |
+| destacados de la home (fecha ART en la clave) | `catalog`, `pricing`, `featured` | 1 h |
+| tiles de categorías de la home | `catalog` | 6 h |
 
 La **búsqueda por texto y el filtro de precio no se cachean** (claves sin tope). La ficha con id de forma inválida (no es un cuid) devuelve null sin tocar base ni cache, y una ficha inexistente no se guarda. El **precio de venta nunca se cachea**: se guardan costos y config por separado y se multiplica al renderizar.
 
@@ -336,6 +337,7 @@ La **búsqueda por texto y el filtro de precio no se cachean** (claves sin tope)
 | Camino | Tags |
 |---|---|
 | `updatePricingConfig` (incluye el AUTO), `refreshUsdRateNow` (si aplicó), cron usd-rate (si `aplicado`) | `pricing` |
+| `updateFeaturedConfig` (rango de destacados, cualquier admin) | `featured` |
 | `updateSiteConfig` | `site` |
 | `saveProduct`, `toggleProductActive`, `deleteProduct` | `product:{id}`, `catalog`, `menu` |
 | acciones de categorías | `categories`, `menu`, `catalog` |
@@ -344,6 +346,9 @@ La **búsqueda por texto y el filtro de precio no se cachean** (claves sin tope)
 | botón «Refrescar tienda» (Configuración, solo super-admin) | `store` y borra todas las marcas |
 
 El tick incluye lo pausado por costo no calculable (Zecat), los apagados por foto (CDO) y los ausentes que pausa el cierre: todos cuentan como `publico` (`active` cambió). `avanzarCorrida` devuelve `cambios.productIds` solo para diagnóstico: la invalidación sale de las marcas de la base.
+
+### Destacados automáticos de la home
+`getFeaturedProductsPublico(take)` calcula la fecha en hora argentina (`fechaArt`) y se la pasa al lector cacheado: la fecha es parte de la clave, así que la rotación diaria ocurre sola, sin invalidar. TTL de 1 h porque el rango se evalúa sobre el precio de venta (depende de `pricing`). El ranking es puro (`src/lib/destacados.ts`); el rango vive en `FeaturedConfig` (migración `add_featured_config`, fila única, la edita cualquier admin en `/admin/destacados`). Sin fila rigen 5000/15000 sin crearla. **Neon: migrar a mano ANTES de pushear** (sin la tabla, la home falla). Verificación: `npx tsx scripts/audit-verify-destacados.ts` (solo lee, aborta fuera de localhost).
 
 ### Invalidación durable (marcas en la base)
 Invalidar es un efecto de proceso, no de base: si la invocación muere entre el commit del producto y `revalidateTag`, el producto queda cambiado y cacheado viejo hasta el TTL, sin rastro. Por eso:

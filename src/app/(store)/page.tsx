@@ -12,6 +12,7 @@ import {
   getPricingConfigPublica,
   getSiteConfigPublica,
 } from "@/lib/lectura-publica";
+import { FEATURED_PRODUCTS_COUNT } from "@/lib/destacados";
 import { computePriceRange } from "@/lib/pricing";
 import { isOptimizableImage } from "@/lib/product-image";
 
@@ -37,8 +38,6 @@ import { isOptimizableImage } from "@/lib/product-image";
 /// No bajarlo a false: dejaria la home con precios viejos hasta el proximo
 /// deploy cada vez que algo cambie por un camino sin revalidatePath.
 export const revalidate = 300;
-
-const FEATURED_PRODUCTS_COUNT = 8;
 
 const PROCESS_STEPS = [
   {

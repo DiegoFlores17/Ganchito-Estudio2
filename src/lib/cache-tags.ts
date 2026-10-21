@@ -16,6 +16,8 @@ export const TAG = {
   menu: "menu",
   categories: "categories",
   catalog: "catalog",
+  /// Rango de precio de los destacados (lo edita el panel).
+  featured: "featured",
 } as const;
 
 export type TagFijo = (typeof TAG)[keyof typeof TAG];

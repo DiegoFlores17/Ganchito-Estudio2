@@ -27,7 +27,7 @@ import { TAG } from "@/lib/cache-tags";
 /// deploy el Data Cache (que persiste entre deploys) seguiria sirviendo
 /// entradas con la forma vieja. REGLA: si cambia la forma de lo que devuelve
 /// cualquier lector cacheado, subir este numero.
-const VERSION_FORMA = "1";
+const VERSION_FORMA = "2";
 
 /// Envuelve un lector: lo guarda serializado (Decimal y Date sobreviven) y lo
 /// devuelve rehidratado. Los tags pueden depender de los argumentos (la ficha

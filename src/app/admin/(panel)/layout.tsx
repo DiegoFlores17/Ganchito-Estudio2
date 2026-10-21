@@ -67,6 +67,9 @@ export default async function AdminPanelLayout({
       href: "/admin/categorias",
       badge: categoriasPendientes,
     },
+    // Destacados: el rango de precio de la portada. No toca margen ni IVA
+    // (otra tabla), asi que es para cualquier admin.
+    { label: "Destacados", href: "/admin/destacados" },
     // Sincronizar es operacion del dia a dia (aplica la verdad del
     // proveedor, reversible), no configuracion de negocio: cualquier admin.
     {

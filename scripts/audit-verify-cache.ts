@@ -121,6 +121,7 @@ async function main() {
   const admin = archivosBajo(path.join(raiz, "src/app/admin"));
   const rAdm = alcanza(admin);
   check("[estatico] admin/** no llega a lectura-publica ni cache-publico", rAdm.cadena === null, rAdm.cadena ? rAdm.cadena.join(" -> ") : `${rAdm.visitados} archivos recorridos`);
+  check("[estatico] admin/** incluye la ruta /admin/destacados y su formulario (no queda fuera del recorrido)", admin.some((f) => f.includes("/destacados/page.tsx")) && admin.some((f) => f.includes("/destacados/actions.ts")) && importesDe(path.join(raiz, "src/app/admin/(panel)/destacados/page.tsx")).some((f) => f.endsWith("featured-range-form.tsx")));
   const enCron = alcanza([
     ...archivosBajo(path.join(raiz, "src/app/api")),
     ...archivosBajo(path.join(raiz, "src/lib/sync")),
@@ -659,7 +660,8 @@ async function main() {
   check("[runtime] grilla con filtro de precio: mismos ids", (await getProducts(fPrecio)).products.map((p) => p.id).join() === (await lectura.getProductsPublico(fPrecio)).products.map((p) => p.id).join());
 
   // Destacados / home / menu / filtros / site
-  const dDb = await getFeaturedProducts(50);
+  const { fechaArt } = await import("../src/lib/destacados");
+  const dDb = await getFeaturedProducts(50, fechaArt(new Date()));
   const dCache = await lectura.getFeaturedProductsPublico(50);
   check("[runtime] destacados: mismos productos y mismos rangos de precio", dDb.map((p) => p.id).join() === dCache.map((p) => p.id).join() && JSON.stringify(dDb.map((p) => computePriceRange(p.variants, p.currency, configDb))) === JSON.stringify(dCache.map((p) => computePriceRange(p.variants, p.currency, configCache))) && dDb.length >= 1, `${dDb.length}`);
   check("[runtime] menu: igual al de la base", JSON.stringify(await getMenuGroups()) === JSON.stringify(await lectura.getMenuGroupsPublico()));
@@ -698,6 +700,7 @@ async function main() {
     tagsDe(clave).length > 0 && tagsDe(clave).every((t) => esperados.every((x) => t.has(x)) && prohibidos.every((x) => !t.has(x)));
   check("[runtime] tags pricing-config = store, pricing", tiene("pricing-config", ["store", "pricing"]));
   check("[runtime] tags site-config = store, site", tiene("site-config", ["store", "site"]));
+  check("[runtime] tags featured-products = store, catalog, pricing, featured", tiene("featured-products", ["store", "catalog", "pricing", "featured"]));
   check("[runtime] tags menu-groups = store, menu, categories", tiene("menu-groups", ["store", "menu", "categories"]));
   check("[runtime] tags catalog-filter-options = store, catalog, pricing", tiene("catalog-filter-options", ["store", "catalog", "pricing"]));
   check("[runtime] tags products = store, catalog, categories (sin pricing: el filtro de precio no se cachea)", tiene("products", ["store", "catalog", "categories"], ["pricing"]));

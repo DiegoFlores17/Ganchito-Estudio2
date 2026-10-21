@@ -53,3 +53,6 @@ next-env.d.ts
 # snapshots de datos de proveedor antes de una reimportacion (megabytes de JSON,
 # utiles como red de seguridad en la maquina, no como historia del repo)
 /backups/
+
+# estado local de la herramienta de skills (registro regenerado en cada maquina)
+/.atl/

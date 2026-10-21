@@ -9,7 +9,7 @@ import { computeSellPrice, getPricingConfig, sellPriceToCost } from "@/lib/prici
 
 export const PRODUCTS_PER_PAGE = 24;
 
-interface GetProductsParams {
+export interface GetProductsParams {
   page: number;
   categorySlug?: string;
   search?: string;
@@ -53,12 +53,11 @@ export interface MenuGroup {
 /// Mismo criterio de visibilidad que getVisibleCategories(): solo `visible` y
 /// no-alias. Lo que agrega es el agrupamiento y el conteo de productos.
 ///
-/// Va en el header de TODO el sitio, asi que corre una vez por navegacion. Hoy
-/// sin cache a proposito: son ~24 filas de una tabla chica contra Neon en
-/// gru1, y la alternativa (`use cache` de Next 16) obliga a activar
-/// `cacheComponents` en next.config.ts, que cambia el modelo de cache de la
-/// aplicacion ENTERA. Ese es un cambio propio, con su propia verificacion, no
-/// algo para colar dentro de esta tarea. Queda anotado en PENDIENTES.
+/// Va en el header de TODO el sitio, asi que corre una vez por navegacion. La
+/// tienda NO llama a esta funcion directo sino a getMenuGroupsPublico()
+/// (lib/lectura-publica.ts), que la envuelve en `unstable_cache` con los tags
+/// `menu` y `categories`. Esta queda sin cache para quien necesite el dato
+/// fresco.
 ///
 /// El orden DENTRO de cada grupo es por cantidad de productos descendente:
 /// todavia no hay datos de ventas, y la cantidad es la mejor aproximacion

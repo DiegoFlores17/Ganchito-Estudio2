@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
+import { invalidarCachePublico, TAG, tagProducto } from "@/lib/cache-tags";
 import { ProductOrigin } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/admin-auth";
@@ -175,6 +176,10 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     // se sigue usando abajo, para la variante default de los productos sin
     // variantes cargadas.
     minOrderQuantity,
+    // Se edito a mano: la huella guardada ya no describe lo que ve el cliente.
+    // En null, el proximo sync lo clasifica como `publico` (hash anterior null)
+    // y lo invalida, en vez de creer que "no cambio nada".
+    publicHash: null,
   };
 
   const product = await prisma.$transaction(async (tx) => {
@@ -238,6 +243,9 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     return saved;
   });
 
+  // Cache de datos de la tienda: su ficha, la grilla/filtros y el menu
+  // (que cuenta productos por categoria).
+  invalidarCachePublico([tagProducto(product.id), TAG.catalog, TAG.menu]);
   revalidatePath("/admin/productos");
   revalidatePath("/catalogo");
   revalidatePath(`/producto/${product.id}`);
@@ -261,8 +269,11 @@ export async function toggleProductActive(
     return { success: false, error: "Ese producto no existe." };
   }
 
-  await prisma.product.update({ where: { id: productId }, data: { active } });
+  await prisma.product.update({ where: { id: productId }, data: { active, publicHash: null } });
 
+  // Cache de datos de la tienda: su ficha, la grilla/filtros y el menu
+  // (que cuenta productos por categoria).
+  invalidarCachePublico([tagProducto(productId), TAG.catalog, TAG.menu]);
   revalidatePath("/admin/productos");
   revalidatePath("/catalogo");
   // La ficha del producto faltaba: pausar lo saca del catalogo, pero quien
@@ -299,9 +310,12 @@ export async function deleteProduct(
 
   await prisma.product.update({
     where: { id: productId },
-    data: { deletedAt: new Date(), active: false },
+    data: { deletedAt: new Date(), active: false, publicHash: null },
   });
 
+  // Cache de datos de la tienda: su ficha, la grilla/filtros y el menu
+  // (que cuenta productos por categoria).
+  invalidarCachePublico([tagProducto(productId), TAG.catalog, TAG.menu]);
   revalidatePath("/admin/productos");
   revalidatePath("/catalogo");
   // La ficha tambien: si alguien la tenia en el router cache del cliente,

@@ -21,12 +21,15 @@ export interface EstadoFalso {
   listadoCaido: boolean;
   /// Contadores, para verificar que no se repiten pedidos.
   pedidosDetalle: Map<string, number>;
+  /// Variaciones por id sobre el detalle base (stock y nombre). Opcional: los
+  /// scripts que no lo usan no cambian.
+  variaciones?: Map<string, { stock?: string; name?: string }>;
 }
 
-export function detalleFalso(id: string, variantes: boolean) {
+export function detalleFalso(id: string, variantes: boolean, variacion?: { stock?: string; name?: string }) {
   return {
     id,
-    name: `Producto C ${id}`,
+    name: variacion?.name ?? `Producto C ${id}`,
     description: "Prueba etapa C",
     price: 1000,
     published: true,
@@ -39,7 +42,7 @@ export function detalleFalso(id: string, variantes: boolean) {
                 sku: `${id}-v`,
                 elementDescription1: "Negro",
                 attribute_one: { description: "Color" },
-                stock: "10",
+                stock: variacion?.stock ?? "10",
                 reservedStock: "0",
                 active: true,
                 discount_partner: 30,
@@ -78,7 +81,7 @@ export async function levantarZecatFalso(estado: EstadoFalso) {
       const c = estado.detalle.get(id) ?? "ok";
       if (c === "404") return json(404, { message: "not found" });
       if (c === "500") return json(500, { message: "error" });
-      return json(200, { generic_product: detalleFalso(id, c === "ok") });
+      return json(200, { generic_product: detalleFalso(id, c === "ok", estado.variaciones?.get(id)) });
     }
     return json(404, { message: "ruta desconocida" });
   });

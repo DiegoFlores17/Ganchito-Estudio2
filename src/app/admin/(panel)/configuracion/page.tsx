@@ -5,6 +5,7 @@ import { FUENTE_OFICIAL } from "@/lib/usd-rate";
 import { formatWhatsappLabel, getSiteConfig } from "@/lib/site-config";
 import { PricingConfigForm } from "@/components/admin/pricing-config-form";
 import { SiteConfigForm } from "@/components/admin/site-config-form";
+import { RefrescarTiendaButton } from "@/components/admin/refrescar-tienda-button";
 
 export default async function ConfiguracionPage() {
   await requireSuperAdmin();
@@ -65,6 +66,21 @@ export default async function ConfiguracionPage() {
             address={site.address ?? ""}
             openingHours={site.openingHours ?? ""}
           />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-medium text-foreground">Caché de la tienda</h2>
+        <p className="mt-1 max-w-2xl text-sm text-foreground/60">
+          La tienda guarda en caché el catálogo, el menú, las fichas, los
+          precios y el contacto, y se actualiza sola cuando guardás algo desde
+          este panel o corre un sync automático. Usá este botón después de un
+          sync hecho por consola, una migración o una edición manual en la
+          base, que no pueden avisarle a la tienda. Si no lo usás, se pone al
+          día sola en unas horas.
+        </p>
+        <div className="mt-4">
+          <RefrescarTiendaButton />
         </div>
       </section>
     </div>

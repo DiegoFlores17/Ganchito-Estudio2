@@ -101,6 +101,25 @@ const CONFIRMACIONES_EN_PARALELO = 8;
 /// corrida lo reintenta); en el boton queda pendiente (se vuelve a tocar).
 export const MAX_CONFIRMACIONES_POR_LLAMADA = 40;
 
+/// Adjunta a un error los Product.id que ya se alcanzaron a pausar antes de
+/// que tirara. La pausa es tanda por tanda: si la tanda N falla, las N-1
+/// anteriores ya estan inactivas en la base, y quien invalida la cache publica
+/// necesita saber cuales (si no, sus fichas cacheadas siguen vivas).
+function conPausados(error: unknown, pausadosIds: string[]): unknown {
+  const destino = error instanceof Error ? error : new Error(String(error));
+  (destino as Error & { pausadosIds?: string[] }).pausadosIds = [
+    ...pausadosDeError(destino),
+    ...pausadosIds,
+  ];
+  return destino;
+}
+
+/// Los Product.id que `conPausados` adjunto a un error (vacio si no hay).
+export function pausadosDeError(error: unknown): string[] {
+  const ids = (error as { pausadosIds?: unknown } | null)?.pausadosIds;
+  return Array.isArray(ids) ? (ids as string[]) : [];
+}
+
 /// Confirma cada ausente contra el proveedor y pausa las bajas confirmadas
 /// TANDA POR TANDA, registrandolas en la corrida en el mismo paso. Si la
 /// invocacion muere a mitad de camino, lo ya pausado queda registrado: no
@@ -116,46 +135,54 @@ export async function confirmarYPausar(
   noVerificados: string[];
   sinIntentar: string[];
   detalle: Record<string, { permanente: boolean; motivo: string }>;
+  /// Product.id de lo que se pauso de verdad, para invalidar la cache
+  /// publica de la tienda.
+  pausadosIds: string[];
 }> {
   const confirmar = conectorDe(provider)?.confirmarAusente;
   const bajas: string[] = [];
   const aRevisar: string[] = [];
   const noVerificados: string[] = [];
   const detalle: Record<string, { permanente: boolean; motivo: string }> = {};
+  const pausadosIds: string[] = [];
   if (!confirmar) {
-    return { bajas, aRevisar, noVerificados: [...externalIds], sinIntentar: [], detalle };
+    return { bajas, aRevisar, noVerificados: [...externalIds], sinIntentar: [], detalle, pausadosIds };
   }
   const aIntentar = externalIds.slice(0, max);
   const sinIntentar = externalIds.slice(max);
 
-  for (let i = 0; i < aIntentar.length; i += CONFIRMACIONES_EN_PARALELO) {
-    const tanda = aIntentar.slice(i, i + CONFIRMACIONES_EN_PARALELO);
-    const resultados = await Promise.all(tanda.map((id) => confirmar(id)));
-    const bajasTanda: string[] = [];
-    tanda.forEach((id, j) => {
-      const { resultado, motivo, causaPermanente } = resultados[j];
-      if (resultado === "baja") bajasTanda.push(id);
-      else if (resultado === "presente") aRevisar.push(id);
-      else {
-        noVerificados.push(id);
-        detalle[id] = causaPermanente
-          ? { permanente: true, motivo: causaPermanente }
-          : { permanente: false, motivo };
+  try {
+    for (let i = 0; i < aIntentar.length; i += CONFIRMACIONES_EN_PARALELO) {
+      const tanda = aIntentar.slice(i, i + CONFIRMACIONES_EN_PARALELO);
+      const resultados = await Promise.all(tanda.map((id) => confirmar(id)));
+      const bajasTanda: string[] = [];
+      tanda.forEach((id, j) => {
+        const { resultado, motivo, causaPermanente } = resultados[j];
+        if (resultado === "baja") bajasTanda.push(id);
+        else if (resultado === "presente") aRevisar.push(id);
+        else {
+          noVerificados.push(id);
+          detalle[id] = causaPermanente
+            ? { permanente: true, motivo: causaPermanente }
+            : { permanente: false, motivo };
+        }
+        if (resultado !== "baja") {
+          console.warn(`[sync-run] Ausente ${id} NO se pausa (${resultado}): ${motivo}`);
+        }
+      });
+      if (bajasTanda.length) {
+        pausadosIds.push(...(await pausar(provider, bajasTanda)));
+        await registrarPausados(runId, bajasTanda);
+        bajas.push(...bajasTanda);
       }
-      if (resultado !== "baja") {
-        console.warn(`[sync-run] Ausente ${id} NO se pausa (${resultado}): ${motivo}`);
-      }
-    });
-    if (bajasTanda.length) {
-      await pausar(provider, bajasTanda);
-      await registrarPausados(runId, bajasTanda);
-      bajas.push(...bajasTanda);
     }
+  } catch (error) {
+    throw conPausados(error, pausadosIds);
   }
   for (const id of sinIntentar) {
     detalle[id] = { permanente: false, motivo: MOTIVO_FUERA_DE_TOPE };
   }
-  return { bajas, aRevisar, noVerificados, sinIntentar, detalle };
+  return { bajas, aRevisar, noVerificados, sinIntentar, detalle, pausadosIds };
 }
 
 /// Suma ids a autoPausedExternalIds de una corrida (y opcionalmente una
@@ -195,16 +222,28 @@ function idField(provider: ProductOrigin) {
   return provider === ProductOrigin.ZECAT ? "zecatId" : "cdoId";
 }
 
-/// Pausa productos por id externo, solo los que siguen activos.
-async function pausar(provider: ProductOrigin, externalIds: string[]) {
-  if (externalIds.length === 0) return;
-  await prisma.product.updateMany({
-    where: {
-      origin: provider,
-      [idField(provider)]: { in: externalIds },
-      active: true,
-    },
-    data: { active: false },
+/// Pausa productos por id externo, solo los que siguen activos. Devuelve el
+/// Product.id de los que pauso: updateMany solo da el conteo y la cache
+/// publica necesita saber cuales fichas invalidar.
+async function pausar(provider: ProductOrigin, externalIds: string[]): Promise<string[]> {
+  if (externalIds.length === 0) return [];
+  const where = {
+    origin: provider,
+    [idField(provider)]: { in: externalIds },
+    active: true,
+  };
+  return prisma.$transaction(async (tx) => {
+    const ids = (await tx.product.findMany({ where, select: { id: true } })).map((p) => p.id);
+    // La marca de invalidacion pendiente va en la misma transaccion que la
+    // pausa (ver Product.invalidacionPendienteDesde).
+    await tx.product.updateMany({
+      where: { ...where, id: { in: ids } },
+      // publicHash: null en la MISMA escritura: si el proveedor lo devuelve igual,
+      // el upsert recalcularia el hash del estado activo y daria sin-cambio: la
+      // reactivacion no se invalidaria nunca. Con null clasifica "publico".
+      data: { active: false, publicHash: null, invalidacionPendienteDesde: new Date() },
+    });
+    return ids;
   });
 }
 
@@ -246,7 +285,7 @@ export async function finishSyncRun(runId: string) {
     // El mail lo manda la maquina de estados (lib/sync/alertas.ts) al ver
     // la corrida FAILED: asi una racha de fallos es UN mail, no uno por vez.
     const aborted = await failSyncRun(runId, motivo);
-    return { run: aborted, summary: null, aborted: true as const };
+    return { run: aborted, summary: null, aborted: true as const, pausadosIds: [] as string[] };
   }
 
   // Dos conjuntos, porque juntos confunden: `missing` son ACTIVOS que el
@@ -291,6 +330,7 @@ export async function finishSyncRun(runId: string) {
     noVerificados: [] as string[],
     sinIntentar: [] as string[],
     detalle: {} as Record<string, { permanente: boolean; motivo: string }>,
+    pausadosIds: [] as string[],
   };
   const umbralFrenado = missing.length > umbral;
   if (missing.length > 0 && !umbralFrenado) {
@@ -403,7 +443,7 @@ export async function finishSyncRun(runId: string) {
       summary: summary as unknown as Prisma.InputJsonValue,
     },
   });
-  return { run: updated, summary, aborted: false as const };
+  return { run: updated, summary, aborted: false as const, pausadosIds: confirmacion.pausadosIds };
 }
 
 /// true si la ULTIMA corrida completa del proveedor (sin contar `excluir`,
@@ -457,21 +497,26 @@ export async function pausarAusentesDeCorrida(runId: string, adminEmail: string)
   // Confirma y pausa por tanda, registrando en la corrida a medida que
   // avanza. Con mas de MAX_CONFIRMACIONES_POR_LLAMADA pendientes, el resto
   // queda para el proximo click (el boton vuelve a mostrar cuantos quedan).
-  const { bajas, aRevisar, noVerificados, sinIntentar } = await confirmarYPausar(
+  const { bajas, aRevisar, noVerificados, sinIntentar, pausadosIds } = await confirmarYPausar(
     run.provider,
     pendientes,
     run.id
   );
-  await registrarPausados(run.id, [], {
-    externalId: "-",
-    message:
-      `Pausar estos ${pendientes.length}: ${adminEmail} el ${new Date().toISOString()}. ` +
-      `${bajas.length} pausados (baja confirmada), ${aRevisar.length} siguen publicados (a revisar), ` +
-      `${noVerificados.length} no se pudieron verificar` +
-      (sinIntentar.length ? `, ${sinIntentar.length} quedan para otro click.` : "."),
-  });
+  try {
+    await registrarPausados(run.id, [], {
+      externalId: "-",
+      message:
+        `Pausar estos ${pendientes.length}: ${adminEmail} el ${new Date().toISOString()}. ` +
+        `${bajas.length} pausados (baja confirmada), ${aRevisar.length} siguen publicados (a revisar), ` +
+        `${noVerificados.length} no se pudieron verificar` +
+        (sinIntentar.length ? `, ${sinIntentar.length} quedan para otro click.` : "."),
+    });
+  } catch (error) {
+    // La nota fallo pero las pausas ya estan hechas: que lleguen a quien invalida.
+    throw conPausados(error, pausadosIds);
+  }
 
-  return { pausados: bajas, aRevisar, noVerificados, restantes: sinIntentar.length };
+  return { pausados: bajas, aRevisar, noVerificados, restantes: sinIntentar.length, pausadosIds };
 }
 
 /// Ausentes de una corrida frenada que todavia no se resolvieron: no
@@ -696,7 +741,7 @@ export async function pausarSinConfirmacion(
   provider: ProductOrigin,
   externalIds: string[],
   adminEmail: string
-): Promise<{ pausados: string[] }> {
+): Promise<{ pausados: string[]; productIds: string[] }> {
   const ids = [...new Set(externalIds)];
   if (ids.length === 0) throw new Error("No hay productos para pausar.");
   const est = await estadoDelProveedor(provider);
@@ -725,15 +770,15 @@ export async function pausarSinConfirmacion(
     if (ultima?.id !== runId) {
       throw new Error("Terminó una corrida nueva mientras tanto: recargá la página y revisá la lista. No se pausó ninguno.");
     }
-    const aPausar = (
-      await tx.product.findMany({
-        where: { origin: provider, deletedAt: null, active: true, [idField(provider)]: { in: ids } },
-        select: { zecatId: true, cdoId: true },
-      })
-    ).map((p) => (provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId) as string);
+    const filasAPausar = await tx.product.findMany({
+      where: { origin: provider, deletedAt: null, active: true, [idField(provider)]: { in: ids } },
+      select: { id: true, zecatId: true, cdoId: true },
+    });
+    const aPausar = filasAPausar.map((p) => (provider === ProductOrigin.ZECAT ? p.zecatId : p.cdoId) as string);
     await tx.product.updateMany({
       where: { origin: provider, deletedAt: null, active: true, [idField(provider)]: { in: aPausar } },
-      data: { active: false },
+      // publicHash: null: ver pausar().
+      data: { active: false, publicHash: null, invalidacionPendienteDesde: new Date() },
     });
     const actual = await tx.syncRun.findUniqueOrThrow({ where: { id: runId }, select: { errors: true } });
     await tx.syncRun.update({
@@ -750,7 +795,7 @@ export async function pausarSinConfirmacion(
         ],
       },
     });
-    return { pausados: aPausar };
+    return { pausados: aPausar, productIds: filasAPausar.map((p) => p.id) };
   });
 }
 

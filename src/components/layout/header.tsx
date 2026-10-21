@@ -4,7 +4,7 @@ import { CartIndicator } from "./cart-indicator";
 import { CategoryMenu } from "./category-menu";
 import { HeaderControls } from "./header-controls";
 import { HeaderSearchDesktop } from "./header-search-desktop";
-import { getMenuGroups } from "@/lib/catalog";
+import { getMenuGroupsPublico } from "@/lib/lectura-publica";
 
 /// Solo destinos que existen. Antes habia links a /como-funciona y /contacto,
 /// dos paginas que nunca se crearon: eran links al 404 en TODAS las paginas de
@@ -24,9 +24,9 @@ const NAV_LINKS = [
 ];
 
 /// Server Component: hace UNA query de categorias y la comparte con el menu
-/// desktop y el mobile. Sin cache por ahora — ver la nota de getMenuGroups().
+/// desktop y el mobile. Cacheado con tags `menu` y `categories` — ver getMenuGroupsPublico().
 export async function Header() {
-  const menuGroups = await getMenuGroups();
+  const menuGroups = await getMenuGroupsPublico();
 
   return (
     // `relative`: la fila de busqueda de mobile se posiciona contra este

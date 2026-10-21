@@ -2,10 +2,11 @@ import type { ReactNode } from "react";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { WhatsappBubble } from "@/components/layout/whatsapp-bubble";
-import { getSiteConfig, whatsappUrlConMensaje } from "@/lib/site-config";
+import { whatsappUrlConMensaje } from "@/lib/site-config";
+import { getSiteConfigPublica } from "@/lib/lectura-publica";
 
 export default async function StoreLayout({ children }: { children: ReactNode }) {
-  const config = await getSiteConfig();
+  const config = await getSiteConfigPublica();
   // Si no hay numero cargado no se renderiza nada: un boton de WhatsApp que
   // lleva a un link roto es peor que no tener boton.
   const whatsapp = whatsappUrlConMensaje(

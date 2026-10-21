@@ -7,6 +7,12 @@ import type { EscalonPrecio } from "@/lib/pricing";
 
 const TOAST_MS = 3200;
 
+/// Aviso cuando el pedido supera el stock que informa el proveedor. No bloquea
+/// nada: el stock es una foto del ultimo sync y el cliente puede necesitar mas;
+/// lo confirmamos al cotizar.
+export const AVISO_PEDIDO_MAYOR_AL_STOCK =
+  "Pedido mayor al stock informado; lo confirmamos al cotizar.";
+
 /// Cuantos escalones de precio se muestran antes del "ver mas".
 ///
 /// La escala completa es correcta en contenido pero pesada de entrada: siete
@@ -180,14 +186,22 @@ export function PurchasePanel({
 
   const available = selectedVariant ? selectedVariant.availableStock : 0;
   const outOfStock = selectedVariant ? available <= 0 : false;
-  // Sin stock: no se cappea la cantidad (se avisa y se deja pedir igual,
-  // el cliente puede necesitar mas de lo que el sync todavia reflejo).
-  // Con stock, la cantidad nunca puede superar lo disponible.
-  const maxQuantity = outOfStock ? Infinity : available;
-
+  // La cantidad NO se recorta al stock, con o sin stock: el stock es lo que
+  // informo el ultimo sync, no un tope. Si el pedido lo supera se AVISA (ver
+  // AVISO_PEDIDO_MAYOR_AL_STOCK) y se confirma al cotizar. Lo unico que
+  // recorta es el minimo de compra.
   function clampQuantity(value: number): number {
-    return Math.min(Math.max(value, lineFloor), maxQuantity);
+    return Math.max(value, lineFloor);
   }
+
+  /// Stock informado de un sku (0 si no figura).
+  function stockDe(sku: string): number {
+    return activeVariants.find((v) => v.sku === sku)?.availableStock ?? 0;
+  }
+
+  /// Hay stock informado y el pedido lo supera. Con stock 0 no aplica: ahi ya
+  /// sale "Consultar disponibilidad".
+  const pedidoSuperaElStock = !outOfStock && available > 0 && quantity > available;
 
   /// Unico camino para mover la cantidad: mantiene numero y texto en sinc.
   function aplicarCantidad(value: number) {
@@ -208,24 +222,7 @@ export function PurchasePanel({
     aplicarCantidad(n);
   }
 
-  /// La variante que corresponde a un par (color, talle) concreto.
-  ///
-  /// Hace falta en los handlers de cambio porque ahi el estado TODAVIA no se
-  /// actualizo: `selectedVariant`, `available` y `maxQuantity` siguen siendo
-  /// los de la variante vieja, y clampear contra ese stock daria el tope
-  /// equivocado.
-  function variantePara(color?: string, size?: string) {
-    return (
-      activeVariants.find(
-        (v) =>
-          (!colors.length || v.colorName === color) &&
-          (!sizes.length || v.sizeName === size)
-      ) ?? activeVariants[0]
-    );
-  }
-
-  /// Al cambiar de variante se CONSERVA la cantidad, recortandola al stock de
-  /// la nueva si no entra.
+  /// Al cambiar de variante se CONSERVA la cantidad.
   ///
   /// Antes volvia a 1, y con el precio dependiendo de la cantidad eso mentia:
   /// la ficha invita a comparar talles ("El precio varía según el talle"), y
@@ -234,14 +231,11 @@ export function PurchasePanel({
   /// Remera Regent eso mostraba $6.974 contra $11.218 cuando la diferencia
   /// real es contra $9.555: una comparacion inflada, peor que no avisar nada.
   ///
-  /// El tope por stock no cambia — solo se aplica sobre la cantidad que el
-  /// cliente ya habia elegido en vez de forzarla al piso.
-  function conservarCantidad(variant: VariantData | undefined) {
-    const disponible = variant ? variant.availableStock : 0;
-    // Mismo criterio que maxQuantity: sin stock no se cappea (se avisa y se
-    // deja pedir igual).
-    const tope = disponible <= 0 ? Infinity : disponible;
-    const n = Math.min(Math.max(quantity, lineFloor), tope);
+  /// Ya no se recorta al stock de la nueva variante (el stock no es un tope):
+  /// solo se respeta el piso. Si la cantidad supera el stock de la nueva, el
+  /// aviso aparece solo.
+  function conservarCantidad() {
+    const n = clampQuantity(quantity);
     setQuantity(n);
     setQuantityText(String(n));
   }
@@ -254,12 +248,12 @@ export function PurchasePanel({
         .map((v) => v.sizeName)
     );
     setSelectedSize(sizesForColor[0]);
-    conservarCantidad(variantePara(color, sizesForColor[0]));
+    conservarCantidad();
   }
 
   function handleSizeChange(size: string) {
     setSelectedSize(size);
-    conservarCantidad(variantePara(selectedColor, size));
+    conservarCantidad();
   }
 
   function handleAddLine() {
@@ -362,16 +356,15 @@ export function PurchasePanel({
     : escalones.slice(0, MAX_ESCALONES_VISIBLES);
   const escalonesOcultos = escalones.length - filasTabla.length;
 
-  // Un escalon por encima del stock de ESTA variante no se puede pedir hoy: el
-  // input recorta la cantidad a lo disponible. El precio es verdadero (Zecat
-  // lo cobraria si hubiera stock) asi que la fila no se saca, pero se atenua
-  // para que no se lea como una promesa.
+  // Un escalon por encima del stock informado de ESTA variante se atenua como
+  // PISTA, no como bloqueo: se puede pedir igual (el stock es una foto del
+  // ultimo sync) y lo confirmamos al cotizar. El precio es verdadero, asi que
+  // la fila no se saca.
   //
-  // Con stock 0 NO se atenua nada: ahi el input deja pedir de mas a proposito,
-  // porque el sync puede estar atrasado. Atenuar toda la tabla en ese caso
-  // seria mentir al reves.
-  const hayTopeDeStock = !outOfStock && available > 0;
-  const fueraDeStock = (desde: number) => hayTopeDeStock && desde > available;
+  // Con stock 0 NO se atenua nada: ahi ya sale "Consultar disponibilidad" y
+  // atenuar toda la tabla seria mentir al reves.
+  const hayStockInformado = !outOfStock && available > 0;
+  const masQueElStock = (desde: number) => hayStockInformado && desde > available;
 
   function handleAddToQuote() {
     if (hasVariantOptions) {
@@ -430,7 +423,7 @@ export function PurchasePanel({
         {mostrarTabla && (
           <div className="mt-3 inline-flex flex-col gap-1 rounded-lg bg-foreground/[0.03] px-3 py-2">
             {filasTabla.map((e, i) => {
-              const inalcanzable = fueraDeStock(e.desde);
+              const inalcanzable = masQueElStock(e.desde);
               return (
                 <div
                   key={e.desde}
@@ -444,7 +437,7 @@ export function PurchasePanel({
                   }
                   // Para lector de pantalla la atenuacion no existe: hay que
                   // decirlo con palabras.
-                  title={inalcanzable ? "Más unidades que las disponibles hoy" : undefined}
+                  title={inalcanzable ? "Más unidades que el stock informado" : undefined}
                 >
                   <span>
                     {e.desde === 1 ? "1 unidad" : `${e.desde} unidades`}
@@ -549,7 +542,6 @@ export function PurchasePanel({
             type="button"
             onClick={() => aplicarCantidad(quantity + 1)}
             className="flex h-9 w-9 items-center justify-center rounded-full border border-foreground/15 text-foreground/70 hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={quantity >= maxQuantity}
             aria-label="Sumar"
           >
             +
@@ -564,6 +556,16 @@ export function PurchasePanel({
             Cantidad mínima: {minQuantity} unidades
           </p>
         ) : null}
+      </div>
+
+      {/* Region viva SIEMPRE montada: un lector de pantalla anuncia el cambio
+          de contenido, cosa que no hace con un nodo que aparece de golpe. */}
+      <div aria-live="polite">
+        {pedidoSuperaElStock && (
+          <p className="rounded-lg bg-primary-dark/5 px-3 py-2 text-sm text-primary-dark">
+            {AVISO_PEDIDO_MAYOR_AL_STOCK}
+          </p>
+        )}
       </div>
 
       {outOfStock ? (
@@ -619,6 +621,11 @@ export function PurchasePanel({
                         <span className="ml-2 rounded-full bg-primary-dark px-2 py-0.5 text-xs font-medium text-white">
                           Consultar disponibilidad
                         </span>
+                      )}
+                      {!line.outOfStock && stockDe(line.sku) > 0 && line.quantity > stockDe(line.sku) && (
+                        <p className="mt-0.5 text-xs text-primary-dark">
+                          {AVISO_PEDIDO_MAYOR_AL_STOCK}
+                        </p>
                       )}
                     </div>
                     <button

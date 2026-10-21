@@ -1,8 +1,11 @@
 import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSyncAlert } from "@/lib/email";
+import type { CambiosDeTick } from "@/lib/cache-tags";
+import { invalidaCache } from "@/lib/sync/cambios";
 import {
   finishSyncRun,
+  pausadosDeError,
   leerSummary,
   rachaSinFotoActiva,
   umbralDeSeguridad,
@@ -139,10 +142,31 @@ interface Lease {
 /// - `siguiendo`: la corrida que viene acompañando quien llama (el loop del
 ///   panel o de la consola). Si otro la termino, se devuelve su resultado en
 ///   vez de arrancar otra.
+///
+/// El resultado trae `cambios`: los Product.id cuya ficha publica cambio en
+/// este tick (ver lib/sync/cambios.ts), SEA CUAL SEA el estado del tick
+/// (avanzo, completa, fallo, ocupado). Quien llama (cron, panel) invalida la
+/// cache publica con invalidarPorCambios(). La consola no puede: corre fuera
+/// de Next, y la tienda se pone al dia por TTL o con "Refrescar tienda".
+/// La invalidacion NO depende de este resultado: el conector deja una marca
+/// en la base (Product.invalidacionPendienteDesde) y el barrido de
+/// lib/sync/invalidaciones.ts la levanta aunque el tick tire o el proceso
+/// muera. `cambios` queda para diagnostico y para las verificaciones.
 export async function avanzarCorrida(
   provider: ProductOrigin,
   startedBy: string,
   opciones: { esCron: boolean; ahora?: Date; siguiendo?: string } = { esCron: false }
+): Promise<ResultadoTick & { cambios: CambiosDeTick }> {
+  const acumulado = new Set<string>();
+  const resultado = await avanzarCorridaInterna(provider, startedBy, opciones, acumulado);
+  return { ...resultado, cambios: { productIds: [...acumulado] } };
+}
+
+async function avanzarCorridaInterna(
+  provider: ProductOrigin,
+  startedBy: string,
+  opciones: { esCron: boolean; ahora?: Date; siguiendo?: string },
+  acumulado: Set<string>
 ): Promise<ResultadoTick> {
   const conector = conectorDe(provider);
   if (!conector) throw new Error(`El proveedor ${provider} todavía no corre sobre el motor del sync.`);
@@ -188,7 +212,7 @@ export async function avanzarCorrida(
         continue;
       }
 
-      return await trabajar(lease, conector);
+      return await trabajar(lease, conector, acumulado);
     } catch (error) {
       const mensaje = error instanceof Error ? error.message : String(error);
       if (error instanceof LeasePerdido) {
@@ -235,7 +259,7 @@ function ocupado(run: {
   };
 }
 
-async function trabajar(lease: Lease, conector: Conector): Promise<ResultadoTick> {
+async function trabajar(lease: Lease, conector: Conector, acumulado: Set<string>): Promise<ResultadoTick> {
   const inicio = Date.now();
   let run = await prisma.syncRun.findUniqueOrThrow({ where: { id: lease.runId } });
 
@@ -297,7 +321,7 @@ async function trabajar(lease: Lease, conector: Conector): Promise<ResultadoTick
     for (let i = 0; i < ids.length; i++) {
       const sinFoto = await procesarUno(lease, cursor + 1, ids[i], cargas[i], conector, {
         puedeApagarSinFoto: !enRachaSinFoto && apagadosSinFoto < umbralSinFoto,
-      });
+      }, acumulado);
       if (sinFoto === "apagado") apagadosSinFoto++;
       cursor++;
       // Si cargar es gratis (CDO: el producto ya esta en memoria), el
@@ -319,7 +343,17 @@ async function trabajar(lease: Lease, conector: Conector): Promise<ResultadoTick
     }
     // Antes de cerrar, confirmar que la corrida sigue siendo nuestra.
     await renovar(lease);
-    const fin = await finishSyncRun(lease.runId);
+    let fin;
+    try {
+      fin = await finishSyncRun(lease.runId);
+    } catch (error) {
+      // Si el cierre pauso ausentes por tandas y despues tiro, esos productos
+      // ya estan inactivos: sus ids tienen que llegar a la invalidacion.
+      for (const id of pausadosDeError(error)) acumulado.add(id);
+      throw error;
+    }
+    // Lo que el cierre pauso por ausente confirmado: su `active` cambio.
+    for (const id of fin.pausadosIds) acumulado.add(id);
     if (fin.aborted) {
       const errores = fin.run.errors as Array<{ message: string }>;
       return { estado: "fallo", runId: lease.runId, mensaje: errores.at(-1)?.message ?? "Corrida abortada." };
@@ -358,7 +392,8 @@ async function procesarUno(
   id: string,
   carga: Carga,
   conector: Conector,
-  contexto: ContextoSincronizar
+  contexto: ContextoSincronizar,
+  acumulado: Set<string>
 ): Promise<ResultadoSincronizar["sinFoto"]> {
   const delta = { creados: 0, actualizados: 0, pausados: 0, fallidos: 0, moneda: 0 };
   let sinFoto: ResultadoSincronizar["sinFoto"];
@@ -377,6 +412,9 @@ async function procesarUno(
     try {
       const r = await conector.sincronizar(carga.producto, contexto);
       sinFoto = r.sinFoto;
+      // Solo lo que el cliente nota: cambio publico (incluye altas, pausas y
+      // apagados por foto) o stock que cruza el cero. El otro stock lo absorbe el TTL.
+      if (r.productId && r.cambio && invalidaCache(r.cambio)) acumulado.add(r.productId);
       if (r.resultado === "creado") delta.creados = 1;
       else if (r.resultado === "actualizado") delta.actualizados = 1;
       else delta.pausados = 1;

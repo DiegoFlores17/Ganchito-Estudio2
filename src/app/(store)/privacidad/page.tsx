@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getSiteConfig } from "@/lib/site-config";
+import { getSiteConfigPublica } from "@/lib/lectura-publica";
 
 export const metadata: Metadata = {
   title: "Política de Privacidad · Ganchito Estudio",
@@ -28,7 +28,7 @@ const ULTIMA_ACTUALIZACION = "15 de septiembre de 2026";
 /// tratamientos que no se hacen (o que omite los que sí) es peor que no
 /// tenerla.
 export default async function PrivacidadPage() {
-  const { contactEmail } = await getSiteConfig();
+  const { contactEmail } = await getSiteConfigPublica();
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">

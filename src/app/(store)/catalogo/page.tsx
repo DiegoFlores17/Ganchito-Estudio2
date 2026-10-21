@@ -4,19 +4,20 @@ import { FiltersPanel } from "@/components/catalog/filters-panel";
 import { Pagination } from "@/components/catalog/pagination";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SearchInput } from "@/components/search-input";
+import { hasAvailableStock } from "@/lib/catalog";
 import {
-  getCatalogFilterOptions,
-  getMenuGroups,
-  getProducts,
-  hasAvailableStock,
-} from "@/lib/catalog";
+  getCatalogFilterOptionsPublico,
+  getMenuGroupsPublico,
+  getPricingConfigPublica,
+  getProductsPublico,
+} from "@/lib/lectura-publica";
 import {
   buildCatalogHref,
   hayAlgunFiltro,
   parseCatalogParams,
   type ParamsCrudos,
 } from "@/lib/catalog-params";
-import { computePriceRange, getPricingConfig } from "@/lib/pricing";
+import { computePriceRange } from "@/lib/pricing";
 
 export default async function CatalogoPage({
   searchParams,
@@ -31,7 +32,7 @@ export default async function CatalogoPage({
 
   const [{ products, totalPages, total }, categoryGroups, opciones, pricingConfig] =
     await Promise.all([
-      getProducts({
+      getProductsPublico({
         page: filtros.page,
         categorySlug: filtros.categoria,
         search: filtros.q,
@@ -40,9 +41,9 @@ export default async function CatalogoPage({
         colores: filtros.colores,
         tecnicas: filtros.tecnicas,
       }),
-      getMenuGroups(),
-      getCatalogFilterOptions(),
-      getPricingConfig(),
+      getMenuGroupsPublico(),
+      getCatalogFilterOptionsPublico(),
+      getPricingConfigPublica(),
     ]);
 
   const activeCategoryName = categoryGroups

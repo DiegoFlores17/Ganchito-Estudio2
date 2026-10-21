@@ -3,10 +3,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { ProductCard } from "@/components/catalog/product-card";
 import { Skeleton } from "@/components/skeleton";
-import { getFeaturedProducts, hasAvailableStock } from "@/lib/catalog";
-import { buildContactView, getSiteConfig } from "@/lib/site-config";
-import { getHomeCategoryShowcase, HOME_CATEGORY_COUNT } from "@/lib/home";
-import { computePriceRange, getPricingConfig } from "@/lib/pricing";
+import { hasAvailableStock } from "@/lib/catalog";
+import { buildContactView } from "@/lib/site-config";
+import { HOME_CATEGORY_COUNT } from "@/lib/home";
+import {
+  getFeaturedProductsPublico,
+  getHomeCategoryShowcasePublico,
+  getPricingConfigPublica,
+  getSiteConfigPublica,
+} from "@/lib/lectura-publica";
+import { computePriceRange } from "@/lib/pricing";
 import { isOptimizableImage } from "@/lib/product-image";
 
 /// La home se sirve cacheada, pero NO indefinidamente.
@@ -72,7 +78,7 @@ export default async function HomePage() {
   // que esto no se paga por visita. Va en el shell y no dentro de un Suspense
   // a proposito: el boton esta arriba de todo, y aparecer despues seria un
   // salto de layout justo donde el ojo aterriza.
-  const contacto = buildContactView(await getSiteConfig());
+  const contacto = buildContactView(await getSiteConfigPublica());
 
   return (
     <div>
@@ -192,7 +198,7 @@ const PRODUCT_GRID_CLASSES =
   "mt-10 grid grid-cols-2 gap-x-6 gap-y-12 sm:grid-cols-3 lg:grid-cols-4";
 
 async function CategoryShowcase() {
-  const categories = await getHomeCategoryShowcase();
+  const categories = await getHomeCategoryShowcasePublico();
 
   return (
     <div className={CATEGORY_GRID_CLASSES}>
@@ -241,8 +247,8 @@ function CategoryShowcaseSkeleton() {
 
 async function FeaturedProducts() {
   const [featuredProducts, pricingConfig] = await Promise.all([
-    getFeaturedProducts(FEATURED_PRODUCTS_COUNT),
-    getPricingConfig(),
+    getFeaturedProductsPublico(FEATURED_PRODUCTS_COUNT),
+    getPricingConfigPublica(),
   ]);
 
   return (

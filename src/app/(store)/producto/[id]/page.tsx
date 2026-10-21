@@ -1,19 +1,35 @@
 import { Currency } from "@prisma/client";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Gallery } from "@/components/product/gallery";
 import { PrintingInfo } from "@/components/product/printing-info";
 import { ProductAttributes } from "@/components/product/product-attributes";
 import { PurchasePanel } from "@/components/product/purchase-panel";
-import { getProductById, getVariantAvailableStock } from "@/lib/product";
+import { getVariantAvailableStock } from "@/lib/product";
+import { getPricingConfigPublica, getProductByIdPublico } from "@/lib/lectura-publica";
 import {
   computeEscalones,
   computePriceRange,
-  getPricingConfig,
   type EscalonPrecio,
 } from "@/lib/pricing";
 import { RANGE_DISCOUNT_MIN_QUANTITY } from "@/lib/zecat/normalize";
 import { formatPriceArs } from "@/lib/format";
+
+/// La URL canonica de la ficha es SIEMPRE /producto/{id}, sin query: `desde`
+/// solo arma el link de "volver" y generaba una URL distinta por cada
+/// catalogo de origen para el mismo producto, que es justo lo que los bots
+/// recorren. Se arma solo con el param: nada de pegarle a la base por esto.
+///
+/// El absoluto sale de `metadataBase` (layout raiz, NEXT_PUBLIC_SITE_URL).
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  return { alternates: { canonical: `/producto/${encodeURIComponent(id)}` } };
+}
 
 export default async function ProductoPage({
   params,
@@ -26,8 +42,8 @@ export default async function ProductoPage({
   const { desde } = await searchParams;
 
   const [product, pricingConfig] = await Promise.all([
-    getProductById(id),
-    getPricingConfig(),
+    getProductByIdPublico(id),
+    getPricingConfigPublica(),
   ]);
 
   if (!product) notFound();

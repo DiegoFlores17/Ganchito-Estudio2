@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
+import { invalidarCachePublico, TAG } from "@/lib/cache-tags";
 import { refreshUsdRate } from "@/lib/usd-rate";
 import { vigilarFrescura } from "@/lib/sync/alertas";
 import { proveedoresConConector } from "@/lib/sync/conectores";
@@ -49,6 +50,9 @@ export async function GET(request: Request) {
   // 300) se refresca ya, sin esperar los 5 minutos.
   if (resultado.status === "aplicado") {
     try {
+      // Un dolar nuevo mueve el precio de todo CDO: la config de precios
+      // cacheada de la tienda (y el piso/techo del filtro) ya no vale.
+      invalidarCachePublico([TAG.pricing]);
       revalidatePath("/");
     } catch (error) {
       console.error("[usd-rate] No se pudo revalidar la home:", error);

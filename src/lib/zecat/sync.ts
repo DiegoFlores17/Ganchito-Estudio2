@@ -11,6 +11,13 @@ import {
   toDecimalOrNull,
 } from "./normalize";
 import type { ZecatFamily, ZecatGenericProduct, ZecatImage } from "./types";
+import {
+  calcularPublicHash,
+  clasificarCambio,
+  invalidaCache,
+  type ClaseCambio,
+  type DatosPublicos,
+} from "@/lib/sync/cambios";
 
 async function resolveCategoryId(
   family: ZecatFamily | undefined
@@ -94,6 +101,10 @@ export interface SyncProductResult {
   variantesDesactivadas: number;
   /// true si el producto vino sin ninguna variante vendible y quedo inactivo.
   sinVariantes: boolean;
+  /// Product.id: para invalidar la cache publica de su ficha.
+  productId: string;
+  /// Que cambio respecto de lo que habia (ver lib/sync/cambios.ts).
+  cambio: ClaseCambio;
 }
 
 /// Sincroniza un solo producto (detalle completo) contra la base.
@@ -135,6 +146,67 @@ export async function syncProduct(
   // Fuera de la transaccion a proposito — ver el comentario de la funcion.
   const categoryId = await resolveCategoryId(detail.families?.[0]);
 
+  // Imagenes y tipos de impresion se arman ANTES de la transaccion: el hash de
+  // lo publico (cambios.ts) las necesita para saber si cambio algo ANTES de
+  // escribir. Las imagenes se referencian por sku de variante; el id real se
+  // resuelve despues del upsert.
+  const imagenes = construirImagenes(detail, variants);
+  // Zecat trae un registro POR NIVEL DE PRECIO interno (ej: "Bordado 20KP" y
+  // "Bordado 22KP" son ids distintos con distinto costo/setup), pero todos
+  // comparten el mismo name visible ("Bordado"). Nosotros solo mostramos que
+  // TECNICA admite el producto (sin precios, ver PrintingInfo), asi que se
+  // deduplica por nombre — si no, un producto con 3 niveles de "Bordado"
+  // mostraba "Bordado" repetido 3 veces.
+  const tiposImpresion = [
+    ...new Map((detail.printing_types ?? []).map((type) => [type.name, type])).values(),
+  ];
+  const areasImpresion = detail.printing_areas ?? [];
+
+  const activo = (detail.published ?? true) && !sinVariantes;
+  const dimensiones = {
+    heightCm: toDecimalOrNull(detail.dimensions?.height),
+    widthCm: toDecimalOrNull(detail.dimensions?.width),
+    lengthCm: toDecimalOrNull(detail.dimensions?.length),
+    weightG: toDecimalOrNull(detail.dimensions?.weight),
+  };
+  const atributosDeVariante = new Map(
+    variants.map((variant) => [variant.sku, mapVariantAttributes(variant)])
+  );
+  const datosPublicos: DatosPublicos = {
+    name: detail.name,
+    description: detail.description ?? null,
+    currency: Currency.ARS,
+    minOrderQuantity: detail.minimum_application_quantity ?? null,
+    ...dimensiones,
+    active: activo,
+    categoryId,
+    variantes: variants.map((variant) => {
+      const { colorName, sizeName, materialName } = atributosDeVariante.get(variant.sku)!;
+      const discount = discountBySku.get(variant.sku) ?? null;
+      return {
+        sku: variant.sku,
+        colorName,
+        colorHex: null,
+        sizeName,
+        materialName,
+        costPrice: costBySku.get(variant.sku)!,
+        discountPercent: discount?.percent ?? null,
+        discountTiers: discount?.tiers ?? null,
+        active: variant.active ?? true,
+      };
+    }),
+    imagenes,
+    areasImpresion: areasImpresion.map((area) => ({
+      externalId: String(area.id),
+      name: area.name,
+      heightCm: toDecimalOrNull(area.height_centimeters),
+      widthCm: toDecimalOrNull(area.width_centimeters),
+    })),
+    tiposImpresion: tiposImpresion.map((t) => ({ name: t.name })),
+    atributos: [],
+  };
+  const publicHash = calcularPublicHash(datosPublicos);
+
   return prisma.$transaction(async (tx) => {
 
     const productData = {
@@ -171,24 +243,42 @@ export async function syncProduct(
       // Se conserva crudo: no es un minimo de venta, pero es informacion
       // del proveedor que puede servir despues.
       supplierMinOrderQuantity: detail.minimum_order_quantity ?? null,
-      heightCm: toDecimalOrNull(detail.dimensions?.height),
-      widthCm: toDecimalOrNull(detail.dimensions?.width),
-      lengthCm: toDecimalOrNull(detail.dimensions?.length),
-      weightG: toDecimalOrNull(detail.dimensions?.weight),
-      active: (detail.published ?? true) && !sinVariantes,
+      ...dimensiones,
+      active: activo,
       categoryId,
+      publicHash,
       lastSyncedAt: new Date(),
     };
 
+    // UNA consulta antes de escribir: la huella anterior y el stock de las
+    // variantes, para clasificar el cambio (cambios.ts).
     const existing = await tx.product.findUnique({
       where: { zecatId: String(detail.id) },
-      select: { id: true },
+      select: {
+        id: true,
+        publicHash: true,
+        variants: { select: { sku: true, stock: true, reservedStock: true } },
+      },
     });
+
+    const cambio = clasificarCambio(
+      existing ? { publicHash: existing.publicHash, variantes: existing.variants } : null,
+      publicHash,
+      variants.map((v) => ({
+        sku: v.sku,
+        stock: parseStock(v.stock),
+        reservedStock: parseStock(v.reservedStock),
+      }))
+    );
+    // La marca de "invalidacion pendiente" va en la MISMA escritura que el
+    // cambio: o quedan los dos o ninguno (ver Product.invalidacionPendienteDesde).
+    // Sin marca (undefined) no se toca: una pendiente anterior sigue vigente.
+    const marca = invalidaCache(cambio) ? { invalidacionPendienteDesde: new Date() } : {};
 
     const product = await tx.product.upsert({
       where: { zecatId: String(detail.id) },
-      update: productData,
-      create: { zecatId: String(detail.id), ...productData },
+      update: { ...productData, ...marca },
+      create: { zecatId: String(detail.id), ...productData, ...marca },
     });
 
     // Variantes: upsert por sku, es la clave real (no duplica en cada corrida).
@@ -274,45 +364,19 @@ export async function syncProduct(
     });
     const variantIdBySku = new Map(dbVariants.map((v) => [v.sku, v.id]));
 
-    const productImages = (detail.images ?? [])
-      .map((image, index) =>
-        toImageCreateInput(image, index, product.id, null, detail.id)
-      )
-      .filter((image): image is NonNullable<typeof image> => image !== null);
-
-    const variantImages = variants.flatMap((variant) =>
-      (variant.images ?? [])
-        .map((image, index) =>
-          toImageCreateInput(
-            image,
-            index,
-            product.id,
-            variantIdBySku.get(variant.sku) ?? null,
-            detail.id
-          )
-        )
-        .filter((image): image is NonNullable<typeof image> => image !== null)
-    );
-
-    // Zecat a veces manda MAS de una imagen con main:true (visto en los
-    // productos 5156 y 4137: dos imagenes de producto marcadas main). Como
-    // el catalogo hace take:1 sin orderBy, cual se muestra queda al azar.
-    // Gana la primera en orden de aparicion; el resto se degrada.
-    const allImages = [...productImages, ...variantImages];
-    let mainVisto = false;
-    for (const image of allImages) {
-      if (!image.isMain) continue;
-      if (mainVisto) image.isMain = false;
-      mainVisto = true;
+    if (imagenes.length) {
+      await tx.productImage.createMany({
+        data: imagenes.map(({ variantSku, ...imagen }) => ({
+          ...imagen,
+          productId: product.id,
+          variantId: variantSku ? (variantIdBySku.get(variantSku) ?? null) : null,
+        })),
+      });
     }
 
-    if (allImages.length) {
-      await tx.productImage.createMany({ data: allImages });
-    }
-
-    if (detail.printing_areas?.length) {
+    if (areasImpresion.length) {
       await tx.printingArea.createMany({
-        data: detail.printing_areas.map((area) => ({
+        data: areasImpresion.map((area) => ({
           productId: product.id,
           zecatAreaId: String(area.id),
           name: area.name,
@@ -322,18 +386,9 @@ export async function syncProduct(
       });
     }
 
-    if (detail.printing_types?.length) {
-      // Zecat trae un registro POR NIVEL DE PRECIO interno (ej: "Bordado
-      // 20KP" y "Bordado 22KP" son ids distintos con distinto costo/setup),
-      // pero todos comparten el mismo name visible ("Bordado"). Nosotros
-      // solo mostramos que TECNICA admite el producto (sin precios, ver
-      // PrintingInfo), asi que se deduplica por nombre — si no, un producto
-      // con 3 niveles de "Bordado" mostraba "Bordado" repetido 3 veces.
-      const uniquePrintingTypes = new Map(
-        detail.printing_types.map((type) => [type.name, type])
-      );
+    if (tiposImpresion.length) {
       await tx.productPrintingType.createMany({
-        data: [...uniquePrintingTypes.values()].map((type) => ({
+        data: tiposImpresion.map((type) => ({
           productId: product.id,
           zecatTypeId: String(type.id),
           name: type.name,
@@ -345,15 +400,46 @@ export async function syncProduct(
       outcome: existing ? "updated" : "created",
       variantesDesactivadas: desactivadas.count,
       sinVariantes,
+      productId: product.id,
+      cambio,
     } satisfies SyncProductResult;
   });
 }
 
-function toImageCreateInput(
+/// Las imagenes del producto y de sus variantes, listas para escribir y para
+/// hashear. Cada una referencia su variante por sku (null = del producto).
+function construirImagenes(
+  detail: ZecatGenericProduct,
+  variants: ReturnType<typeof flattenVariants>
+) {
+  const productImages = (detail.images ?? [])
+    .map((image, index) => toImagen(image, index, null, detail.id))
+    .filter((image): image is NonNullable<typeof image> => image !== null);
+
+  const variantImages = variants.flatMap((variant) =>
+    (variant.images ?? [])
+      .map((image, index) => toImagen(image, index, variant.sku, detail.id))
+      .filter((image): image is NonNullable<typeof image> => image !== null)
+  );
+
+  // Zecat a veces manda MAS de una imagen con main:true (visto en los
+  // productos 5156 y 4137: dos imagenes de producto marcadas main). Como
+  // el catalogo hace take:1 sin orderBy, cual se muestra queda al azar.
+  // Gana la primera en orden de aparicion; el resto se degrada.
+  const todas = [...productImages, ...variantImages];
+  let mainVisto = false;
+  for (const image of todas) {
+    if (!image.isMain) continue;
+    if (mainVisto) image.isMain = false;
+    mainVisto = true;
+  }
+  return todas;
+}
+
+function toImagen(
   image: ZecatImage,
   index: number,
-  productId: string,
-  variantId: string | null,
+  variantSku: string | null,
   zecatId: string | number
 ) {
   const url = resolveImageUrl(image);
@@ -363,14 +449,13 @@ function toImageCreateInput(
   // Mismo criterio que discount_partner: fallar visible.
   if (!url) {
     console.warn(
-      `[zecat-sync] Imagen descartada del producto ${zecatId}: sin image_url/imageUrl (indice ${index}${variantId ? ", variante" : ""}).`
+      `[zecat-sync] Imagen descartada del producto ${zecatId}: sin image_url/imageUrl (indice ${index}${variantSku ? ", variante" : ""}).`
     );
     return null;
   }
 
   return {
-    productId,
-    variantId,
+    variantSku,
     url,
     isMain: image.main ?? false,
     sortOrder: index,

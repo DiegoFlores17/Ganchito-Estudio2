@@ -290,6 +290,73 @@ con `TZ=UTC` y `TZ=Asia/Tokyo`.
 
 ---
 
+## Cache pública de la tienda (2026-10-20) — en producción desde el 2026-10-21
+
+**Por qué:** los bots que recorren `/producto/[id]` mantenían despierta la base de Neon (scale-to-zero necesita 5 min sin consultas) y cada request de la tienda pegaba a la base. Ahora las lecturas públicas van por `unstable_cache`, que en Vercel usa el Data Cache regional compartido (persiste entre deploys).
+
+**Por qué `unstable_cache` y no `use cache`:** `use cache` exige `cacheComponents`, que cambia el modelo de cache de toda la app (rompe `export const revalidate` de la home, pide Suspense en todos lados) y sin handler remoto es memoria por instancia en serverless.
+
+### Piezas
+- `src/lib/cache-tags.ts`: tags + `invalidarCachePublico()` (único punto de invalidación; `revalidateTag(tag, { expire: 0 })`, deduplica, no tira fuera de Next) + `invalidarPorCambios()`. **No** importa nada cacheado.
+- `src/lib/cache-publico.ts` (`cachear`) y `src/lib/cache-serializar.ts`: `unstable_cache` guarda JSON, así que `Decimal` y `Date` se serializan con marca y se rehidratan al volver. Los consumidores reciben los mismos tipos que con la base directa.
+- `src/lib/lectura-publica.ts`: los lectores cacheados. **Solo los usa la tienda.** Los originales (`catalog.ts`, `product.ts`, `pricing.ts`, `site-config.ts`, `home.ts`) siguen intactos.
+- `src/lib/sync/cambios.ts`: clasifica cada producto del sync (`publico` / `stock-cero` / `stock-menor` / `sin-cambio`) con `Product.publicHash`, y marca los cambios a invalidar en `Product.invalidacionPendienteDesde` (misma migración, `add_product_public_hash`). Solo `publico` y `stock-cero` invalidan; `stock-cero` = el disponible cruza el cero en cualquier sentido. **Ya no hay regla del 20 %**: +-50 % sin cruzar el cero es `stock-menor` y lo absorbe el TTL (la ficha avisa si el pedido supera el stock).
+- `src/lib/sync/invalidaciones.ts`: el barrido durable (ver abajo).
+
+### Tags y TTL
+| Lector | Tags (todos llevan `store`) | TTL |
+|---|---|---|
+| config de precios (solo lee; si falta la fila cae al original) | `pricing` | 1 h |
+| contacto | `site` | 24 h |
+| menú | `menu`, `categories` | 6 h |
+| opciones de filtro (con piso/techo de precio) | `catalog`, `pricing` | 1 h |
+| grilla sin búsqueda ni filtro de precio | `catalog`, `categories` | 6 h |
+| ficha | `product:{id}`, `categories` | 24 h |
+| destacados y tiles de la home | `catalog` | 6 h |
+
+La **búsqueda por texto y el filtro de precio no se cachean** (claves sin tope). La ficha con id de forma inválida (no es un cuid) devuelve null sin tocar base ni cache, y una ficha inexistente no se guarda. El **precio de venta nunca se cachea**: se guardan costos y config por separado y se multiplica al renderizar.
+
+### Quién invalida qué
+| Camino | Tags |
+|---|---|
+| `updatePricingConfig` (incluye el AUTO), `refreshUsdRateNow` (si aplicó), cron usd-rate (si `aplicado`) | `pricing` |
+| `updateSiteConfig` | `site` |
+| `saveProduct`, `toggleProductActive`, `deleteProduct` | `product:{id}`, `catalog`, `menu` |
+| acciones de categorías | `categories`, `menu`, `catalog` |
+| tick del sync (cron **y** panel), sea cual sea su estado: barrido de marcas | `product:{id}` de cada producto marcado (`publico`/`stock-cero`/pausa) + `catalog`, `menu`; si hay más de 200, `store` |
+| `pausarAusentes`, `pausarSinConfirmacion` | `product:{id}` de lo pausado, `catalog`, `menu` |
+| botón «Refrescar tienda» (Configuración, solo super-admin) | `store` y borra todas las marcas |
+
+El tick incluye lo pausado por costo no calculable (Zecat), los apagados por foto (CDO) y los ausentes que pausa el cierre: todos cuentan como `publico` (`active` cambió). `avanzarCorrida` devuelve `cambios.productIds` solo para diagnóstico: la invalidación sale de las marcas de la base.
+
+### Invalidación durable (marcas en la base)
+Invalidar es un efecto de proceso, no de base: si la invocación muere entre el commit del producto y `revalidateTag`, el producto queda cambiado y cacheado viejo hasta el TTL, sin rastro. Por eso:
+1. El conector escribe `invalidacionPendienteDesde = now()` **en la misma transacción** que el cambio (upsert del producto, pausa por costo, `pausar()` de ausentes, `pausarSinConfirmacion`).
+2. **Cada invocación** del cron del sync y **cada tick del panel**, sea cual sea el resultado (`avanzo`, `completa`, `fallo`, `ocupado`, `sin-corrida`, o que tire), corre `barrerInvalidacionesPendientes()`: lee las marcas, pide la invalidación y **recién después** las limpia, solo las de los ids que acaba de invalidar y solo si la marca sigue siendo la que leyó (compare-and-set sobre la fecha: una marca renovada o posterior queda en pie).
+3. Si hay más de 200 marcas (típico: la primera corrida tras desplegar) se invalida `store` en vez de un tag por producto, para no pegarle al límite de revalidaciones por segundo.
+
+Orden: marca (con el commit) → invalidar → limpiar. Una muerte entre el commit y la invalidación, o entre la invalidación y la limpieza, la reintenta la próxima invocación (al menos una vez).
+
+**Ventana residual, sin adornos:** `revalidateTag` solo *encola*; el pedido real a la plataforma corre al final del request. Si la invocación muere después de limpiar la marca pero antes de que ese pedido se ejecute (o la plataforma lo rechaza, p. ej. 429), el cambio queda sin invalidar y sin marca hasta el TTL o «Refrescar tienda». Son milisegundos, pero existe.
+
+**Efectos a conocer:** un sync por consola deja marcas (no puede invalidar) que barre la próxima invocación del cron. El cron barre **antes** de mirar `autoSyncEnabled`: con el interruptor apagado no sincroniza nada pero sí barre las marcas. Toda pausa (ausentes, `pausarSinConfirmacion`, costo no calculable, toggle/eliminar manual) pone `publicHash = null` en la misma escritura, para que la reactivación (el proveedor lo devuelve igual) clasifique `publico`. «Refrescar tienda» toma la hora antes de invalidar `store` y borra solo las marcas `<=` esa hora.
+
+### Lo que NO puede invalidar
+La consola (`sync:zecat`, `sync:cdo`), las migraciones y las ediciones manuales en la base corren fuera de Next. La tienda se pone al día por TTL (hasta 6 h catálogo/menú, 24 h fichas/contacto) o con **«Refrescar tienda»**. También entra por TTL: un cambio de nombre de categoría que llega por sync, y el stock menor (a propósito). El sync por consola deja marcas que barre el próximo cron.
+
+### Si cambia la forma de lo que devuelve un lector
+`unstable_cache` arma la clave con `fn.toString()` + keyParts + argumentos, y el closure que envuelve a todos los lectores (`cachear`) nunca cambia. Editar el `select`/`include` de un lector **no** cambia la clave, y el Data Cache persiste entre deploys: seguiría sirviendo la forma vieja. **Subir `VERSION_FORMA` en `src/lib/cache-publico.ts`** cada vez que cambie lo que devuelve algún lector cacheado.
+
+### La cotización NUNCA lee de la cache
+`cotizar/actions.ts` y todo `admin/**` leen de la base. Lo verifica `scripts/audit-verify-cache.ts` (recorre los imports de forma transitiva y además prueba en runtime que cambiar el margen en la base mueve la cotización sin mover la cache).
+
+### Para recordar
+- Migración `add_product_public_hash` (`publicHash` e `invalidacionPendienteDesde`): **aplicada en Neon el 2026-10-21** con `migrate deploy` y la guarda de destino, antes del push. Branch de backup previa: `backup-pre-cache-2026-10-21`. Sin las columnas, todos los syncs fallan.
+- **Ficha sin tope de stock** (`purchase-panel.tsx`): la cantidad ya no se recorta al stock informado; si lo supera aparece «Pedido mayor al stock informado; lo confirmamos al cotizar.» (en el selector y en cada línea del pedido). Con stock 0 sigue «Consultar disponibilidad». Las filas de la tabla de precios por encima del stock siguen atenuadas, solo como pista.
+- Tras la primera corrida en producción todos los productos salen como `publico` (hash null): una invalidación grande una sola vez.
+- `<link rel="canonical">` de la ficha: `/producto/{id}` sin `?desde=` (vía `generateMetadata`, sin consultar la base). Sale absoluto solo si `NEXT_PUBLIC_SITE_URL` está cargada (alimenta `metadataBase` en el layout raíz): verificado en local, con la variable sale `https://…/producto/{id}`; sin ella (el `.env` local no la tiene) sale relativo `/producto/{id}`, que los buscadores también aceptan. En Vercel está cargada en Production (`https://ganchitoestudio.com`, confirmado por Diego el 2026-10-21).
+- Verificación: `DATABASE_URL=…/ganchito_estudio_c_test npx tsx scripts/audit-verify-cache.ts`.
+
 ## Incidente del 8/10: 54 ausentes
 
 Dato de Diego. Zecat sacó **54 productos de golpe** y el umbral frenó el
@@ -1106,7 +1173,7 @@ Cualquier trabajo de performance o de feedback de carga se valida en Vercel.
 Datos de Diego del 2026-10-15; los límites de los planes son los que informan
 Neon y Vercel, no se midieron acá.
 
-- **Neon, plan gratuito: 100 CU-hora por proyecto por mes** (~400 h a
+- **(Histórico, hasta el 2026-10-20) Neon, plan gratuito: 100 CU-hora por proyecto por mes** (~400 h a
   0,25 CU). **Si se agotan, la base se suspende hasta el mes siguiente: la
   tienda deja de funcionar.**
   - Estimado con las ventanas de 30 min: ~15 CU-hora/mes del cron. El riesgo
@@ -1116,6 +1183,31 @@ Neon y Vercel, no se midieron acá.
     mes pasa de 70 CU-hora, pasar a **Launch** (pago por uso).
   - Ojo también con el almacenamiento: ver el ítem de PENDIENTES sobre el
     tamaño de la base, que crece en cada sync.
+- **Neon en Launch (pago por uso) desde el 2026-10-20**, a USD 0,106 por
+  CU-hora. El plan gratuito se agotó (98,4% del mes) por bots que recorrían
+  las fichas; el período de consumo se reinició con el upgrade, así que lo
+  gastado en el plan gratuito no cuenta para la cuota.
+  - **Compute fijo en 0,25 CU** (mínimo = máximo, sin autoscaling) en el
+    endpoint `ep-odd-dawn-ac0k242h`. **Si se sube, se pierde el techo de
+    gasto**: la cuota de abajo se calculó a 0,25 CU.
+  - **Aviso de gasto de USD 5** configurado en la consola de Neon (mails a
+    USD 4 y USD 5). Es solo aviso, no corta nada. Incluye almacenamiento y
+    transferencia, que la cuota no cubre.
+  - **Tope duro: `quota.compute_time_seconds` = 509.400** (~141,5 CU-hora,
+    ~USD 15/mes), puesto por API en el proyecto `silent-hill-04029136`. Cuenta
+    todos los computes del proyecto, incluidas las branches de backup con
+    compute activo. **Al alcanzarlo se suspenden todos los computes y la base
+    queda caída hasta el 1 del mes siguiente** (`consumption_period_end`); no
+    se levanta sola con una conexión nueva. Se levanta con un `PATCH` a
+    `/api/v2/projects/silent-hill-04029136` que ponga la cuota en un valor
+    mayor al consumo actual, o en `0` (sin límite). Los contadores se
+    reinician solos en cada período: no hay que tocarla todos los meses.
+  - **Defaults de endpoints en 0,25 CU** (`default_endpoint_settings`, mínimo
+    y máximo), para que un compute nuevo —por ejemplo el de una branch de
+    backup— no nazca con autoscaling hasta 8 CU.
+  - **Gotcha del PATCH de settings:** la API rechaza el body entero si lleva
+    `hipaa` (aunque sea `false`, el valor que ya tiene). Al mandar `settings`
+    completos para no pisar `allowed_ips`, hay que sacar `hipaa`.
 - **Vercel Pro: Spend Management** con presupuesto de **20 USD de consumo
   extra** y la **pausa encendida**. El cliente pidió no superar **40 USD/mes**
   (20 de cuota + 20 de extra). **Si se pausa, caen `ganchito-estudio2` e
@@ -1597,6 +1689,17 @@ idénticas por navegación (el cache es por request, no debilita el chequeo).
 
 Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
+- **Cache pública: la primera corrida de cada proveedor invalida todas las
+  fichas una vez.** `publicHash` arranca en null en las 1.021 filas, así que
+  la primera corrida de Zecat y la primera de CDO clasifican todo como
+  `publico`, marcan todo y el barrido invalida `store` (más de 200 marcas).
+  Qué mirar: que esas corridas terminen DONE, que después no queden marcas
+  colgadas (`invalidacionPendienteDesde` en null) y que la corrida siguiente
+  marque solo el ~8 % (cambio público o cruce de cero).
+- **Tiempo despierta de Neon, 2026-10-22 contra 2026-10-21.** La cache pública
+  se deployó el 21; el 22 hay que comparar el tiempo activo del compute (consola
+  de Neon → Monitoring, o el consumo del período) contra el del 21. Es la
+  medida de si la cache cumplió su objetivo.
 - **La primera corrida automática de CDO: 2026-10-16 a las 07:00 ART.** Qué
   mirar en `/admin/proveedores`: una corrida con origen "automática" que
   termine DONE dentro de la ventana (07:00 a 07:29), estado OK o A_REVISAR

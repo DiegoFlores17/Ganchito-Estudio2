@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { invalidarCachePublico, TAG } from "@/lib/cache-tags";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getMenuGroups, resolverMenuGroup } from "@/lib/admin-categories";
 import { GRUPO_SIN_AGRUPAR, esGrupoReservado } from "@/lib/menu-groups";
@@ -14,6 +15,9 @@ export interface CategoryActionResult {
 /// Todo lo que toca el mapeo cambia lo que ve el cliente en el filtro Y el
 /// menu del header, que esta en el layout de TODAS las paginas de la tienda.
 function revalidarCatalogo() {
+  // Cache de datos de la tienda: nombres y slugs (categories), el menu del
+  // header (menu) y la grilla/filtros que agrupan por categoria (catalog).
+  invalidarCachePublico([TAG.categories, TAG.menu, TAG.catalog]);
   revalidatePath("/admin/categorias");
   revalidatePath("/catalogo");
   // El layout, no una ruta: el menu vive en el Header y lo ven todas.

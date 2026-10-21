@@ -9,9 +9,9 @@ import {
 } from "@/components/icons/contact-icons";
 import {
   buildContactView,
-  getSiteConfig,
   type ContactKind,
 } from "@/lib/site-config";
+import { getSiteConfigPublica } from "@/lib/lectura-publica";
 
 /// El icono se elige por el TIPO de dato, que viene de buildContactView, y no
 /// adivinando por el contenido del texto.
@@ -30,7 +30,7 @@ const ICONOS: Record<ContactKind, (props: { className?: string }) => React.React
 const CLASES_ICONO = "h-[18px] w-[18px] shrink-0";
 
 export async function Footer() {
-  const contacto = buildContactView(await getSiteConfig());
+  const contacto = buildContactView(await getSiteConfigPublica());
 
   return (
     <footer className="bg-primary-dark text-white">

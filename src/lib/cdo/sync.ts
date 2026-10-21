@@ -13,6 +13,13 @@ import {
   type ImageProbe,
 } from "./normalize";
 import type { CdoCategory, CdoProduct } from "./types";
+import {
+  calcularPublicHash,
+  clasificarCambio,
+  invalidaCache,
+  type ClaseCambio,
+  type DatosPublicos,
+} from "@/lib/sync/cambios";
 
 export interface CdoSyncSummary {
   total: number;
@@ -123,6 +130,10 @@ export async function syncCdoProduct(
   /// "retenido" si conservo su estado por el tope.
   sinFoto?: "apagado" | "retenido";
   fotos: "con-foto" | "sin-foto" | "indeterminado";
+  /// Product.id: para invalidar la cache publica de su ficha.
+  productId: string;
+  /// Que cambio respecto de lo que habia (ver lib/sync/cambios.ts).
+  cambio: ClaseCambio;
 }> {
   const variants = product.variants ?? [];
   const icons = splitIcons(product.icons);
@@ -155,10 +166,77 @@ export async function syncCdoProduct(
   // Fuera de la transaccion a proposito — ver resolveCategoryId.
   const categoryId = await resolveCategoryId(product.categories?.[0]);
 
+  // Variantes vendibles, resueltas ANTES de la transaccion: el hash de lo
+  // publico (cambios.ts) las necesita para decidir si hay que invalidar la
+  // cache, y se calcula antes del upsert.
+  const filas: Array<{
+    variant: (typeof variants)[number];
+    sku: string;
+    costPrice: NonNullable<ReturnType<typeof extractCostPrice>>;
+    stock: number;
+    reservedStock: number;
+  }> = [];
+  for (const variant of variants) {
+    const costPrice = extractCostPrice(variant);
+    // Sin net_price no se puede vender: se saltea la variante en vez de
+    // inventar un costo. Y se LOGUEA — un descarte mudo es como se pierden
+    // productos sin que nadie se entere (la leccion de las imagenes de
+    // Zecat). Si esto empieza a aparecer, CDO cambio algo.
+    if (!costPrice) {
+      summary.variantesSinPrecio.push({
+        cdoId: product.id,
+        name: product.name,
+        variantId: variant.id,
+      });
+      console.warn(
+        `[cdo-sync] Variante ${variant.id} del producto ${product.id} (${product.name}) SIN net_price: se saltea.`
+      );
+      continue;
+    }
+    const sku = buildSku(product.id, variant);
+    if (!(variant.sku ?? "").trim()) summary.skuSintetico++;
+    const { stock, reservedStock } = mapStock(variant);
+    filas.push({ variant, sku, costPrice, stock, reservedStock });
+  }
+
+  // Imagenes a escribir, por sku de variante. La foto principal del PRODUCTO
+  // sale de la primera imagen usable de CUALQUIER variante, no
+  // necesariamente de la primera.
+  //
+  // Importa mas de lo que parece: getFeaturedProducts exige
+  // `images: { some: { isMain: true } }`, asi que un producto sin imagen
+  // marcada como principal no aparece nunca en la home.
+  let yaMarcoPrincipal = false;
+  const imagenes: Array<{ url: string; isMain: boolean; sortOrder: number; variantSku: string | null }> = [];
+  for (const variant of variants) {
+    const variantSku = buildSku(product.id, variant);
+    variantImageUrls(variant, probes).forEach((url, index) => {
+      const esPrincipal = !yaMarcoPrincipal;
+      if (esPrincipal) yaMarcoPrincipal = true;
+      // La principal se guarda a nivel producto (variantId null) para que la
+      // card del catalogo la encuentre; el resto queda por variante.
+      imagenes.push({ url, isMain: esPrincipal, sortOrder: index, variantSku: esPrincipal ? null : variantSku });
+    });
+  }
+
+  const tiposImpresion = [
+    ...new Map(icons.printingTypes.filter((i) => i.label).map((i) => [i.label as string, i])).values(),
+  ];
+  const atributos = [
+    ...new Map(icons.attributes.filter((i) => i.label).map((i) => [i.label as string, i])).values(),
+  ];
+
   return prisma.$transaction(async (tx) => {
+    // UNA consulta antes de escribir: estado, huella anterior y stock de las
+    // variantes, para clasificar el cambio (cambios.ts).
     const existing = await tx.product.findUnique({
       where: { cdoId: String(product.id) },
-      select: { id: true, active: true },
+      select: {
+        id: true,
+        active: true,
+        publicHash: true,
+        variants: { select: { sku: true, stock: true, reservedStock: true } },
+      },
     });
 
     // Foto indeterminada (no se pudo medir y nunca se midio): el producto
@@ -180,6 +258,52 @@ export async function syncCdoProduct(
           ? false
           : (existing?.active ?? false);
 
+    const activo = activoPorFotos && !sinVariantes;
+
+    // Un retenido NO reescribe sus imagenes: lo publico son las que ya tiene,
+    // no las recien medidas. Es el unico caso en que hay que leerlas.
+    const imagenesPublicas = retenido
+      ? (
+          await tx.productImage.findMany({
+            where: { productId: existing!.id },
+            select: { url: true, isMain: true, sortOrder: true, variant: { select: { sku: true } } },
+          })
+        ).map((i) => ({ url: i.url, isMain: i.isMain, sortOrder: i.sortOrder, variantSku: i.variant?.sku ?? null }))
+      : imagenes;
+
+    const datosPublicos: DatosPublicos = {
+      name: product.name,
+      description: product.description ?? null,
+      currency: Currency.USD,
+      minOrderQuantity: null,
+      heightCm: null,
+      widthCm: null,
+      lengthCm: null,
+      weightG: null,
+      active: activo,
+      categoryId,
+      variantes: filas.map((f) => ({
+        sku: f.sku,
+        colorName: f.variant.color?.name ?? null,
+        colorHex: f.variant.color?.hex_code ?? null,
+        sizeName: null,
+        materialName: null,
+        costPrice: f.costPrice,
+        discountPercent: null,
+        discountTiers: null,
+        active: true,
+      })),
+      imagenes: imagenesPublicas,
+      areasImpresion: [],
+      tiposImpresion: tiposImpresion.map((i) => ({ name: i.label as string })),
+      atributos: atributos.map((i) => ({
+        externalId: String(i.id),
+        name: i.label as string,
+        iconUrl: i.picture ?? null,
+      })),
+    };
+    const publicHash = calcularPublicHash(datosPublicos);
+
     const productData = {
       origin: ProductOrigin.CDO,
       // El code de CDO (ej. "BP161"): es la clave del detalle
@@ -199,42 +323,29 @@ export async function syncCdoProduct(
       //
       // CDO tampoco tiene flag de publicado, asi que active sale de si el
       // producto tiene alguna foto usable — y alguna variante vendible.
-      active: activoPorFotos && !sinVariantes,
+      active: activo,
       categoryId,
+      publicHash,
       lastSyncedAt: new Date(),
     };
 
+    const cambio = clasificarCambio(
+      existing ? { publicHash: existing.publicHash, variantes: existing.variants } : null,
+      publicHash,
+      filas.map((f) => ({ sku: f.sku, stock: f.stock, reservedStock: f.reservedStock }))
+    );
+    // La marca de "invalidacion pendiente" va en la MISMA escritura que el
+    // cambio (ver Product.invalidacionPendienteDesde). Sin marca no se toca.
+    const marca = invalidaCache(cambio) ? { invalidacionPendienteDesde: new Date() } : {};
+
     const saved = await tx.product.upsert({
       where: { cdoId: String(product.id) },
-      update: productData,
-      create: { cdoId: String(product.id), ...productData },
+      update: { ...productData, ...marca },
+      create: { cdoId: String(product.id), ...productData, ...marca },
     });
 
     // Variantes: upsert por sku, que es la clave real.
-    const skusRecibidos: string[] = [];
-    for (const variant of variants) {
-      const costPrice = extractCostPrice(variant);
-      // Sin net_price no se puede vender: se saltea la variante en vez de
-      // inventar un costo. Y se LOGUEA — un descarte mudo es como se pierden
-      // productos sin que nadie se entere (la leccion de las imagenes de
-      // Zecat). Si esto empieza a aparecer, CDO cambio algo.
-      if (!costPrice) {
-        summary.variantesSinPrecio.push({
-          cdoId: product.id,
-          name: product.name,
-          variantId: variant.id,
-        });
-        console.warn(
-          `[cdo-sync] Variante ${variant.id} del producto ${product.id} (${product.name}) SIN net_price: se saltea.`
-        );
-        continue;
-      }
-
-      const sku = buildSku(product.id, variant);
-      skusRecibidos.push(sku);
-      if (!(variant.sku ?? "").trim()) summary.skuSintetico++;
-
-      const { stock, reservedStock } = mapStock(variant);
+    for (const { variant, sku, costPrice, stock, reservedStock } of filas) {
       const variantData = {
         productId: saved.id,
         colorName: variant.color?.name ?? null,
@@ -259,7 +370,7 @@ export async function syncCdoProduct(
     // ya emitidas. Si vuelven, el upsert de arriba las reactiva. Mismo
     // criterio que el conector de Zecat.
     const desactivadas = await tx.productVariant.updateMany({
-      where: { productId: saved.id, sku: { notIn: skusRecibidos }, active: true },
+      where: { productId: saved.id, sku: { notIn: filas.map((f) => f.sku) }, active: true },
       data: { active: false },
     });
 
@@ -277,61 +388,30 @@ export async function syncCdoProduct(
     });
     const variantIdBySku = new Map(dbVariants.map((v) => [v.sku, v.id]));
 
-    // La foto principal del PRODUCTO sale de la primera imagen usable de
-    // CUALQUIER variante, no necesariamente de la primera.
-    //
-    // Importa mas de lo que parece: getFeaturedProducts exige
-    // `images: { some: { isMain: true } }`, asi que un producto sin imagen
-    // marcada como principal no aparece nunca en la home.
-    let yaMarcoPrincipal = false;
-    const imageRows: Prisma.ProductImageCreateManyInput[] = [];
-
-    for (const variant of variants) {
-      const variantId = variantIdBySku.get(buildSku(product.id, variant)) ?? null;
-      const urls = variantImageUrls(variant, probes);
-
-      urls.forEach((url, index) => {
-        const esPrincipal = !yaMarcoPrincipal;
-        if (esPrincipal) yaMarcoPrincipal = true;
-
-        imageRows.push({
+    if (imagenes.length && !retenido) {
+      await tx.productImage.createMany({
+        data: imagenes.map(({ variantSku, ...imagen }) => ({
+          ...imagen,
           productId: saved.id,
-          // La principal se guarda a nivel producto (variantId null) para que
-          // la card del catalogo la encuentre; el resto queda por variante.
-          variantId: esPrincipal ? null : variantId,
-          url,
-          isMain: esPrincipal,
-          sortOrder: index,
-        });
+          variantId: variantSku ? (variantIdBySku.get(variantSku) ?? null) : null,
+        })),
       });
     }
 
-    if (imageRows.length && !retenido) {
-      await tx.productImage.createMany({ data: imageRows });
-    }
-
-    if (icons.printingTypes.length) {
+    if (tiposImpresion.length) {
       // Deduplicado por nombre, mismo criterio que el conector de Zecat: en la
       // ficha solo mostramos QUE tecnica admite el producto.
-      const porNombre = new Map(
-        icons.printingTypes
-          .filter((i) => i.label)
-          .map((i) => [i.label as string, i])
-      );
       await tx.productPrintingType.createMany({
-        data: [...porNombre.values()].map((icon) => ({
+        data: tiposImpresion.map((icon) => ({
           productId: saved.id,
           name: icon.label as string,
         })),
       });
     }
 
-    if (icons.attributes.length) {
-      const porNombre = new Map(
-        icons.attributes.filter((i) => i.label).map((i) => [i.label as string, i])
-      );
+    if (atributos.length) {
       await tx.productAttribute.createMany({
-        data: [...porNombre.values()].map((icon) => ({
+        data: atributos.map((icon) => ({
           productId: saved.id,
           externalId: String(icon.id),
           name: icon.label as string,
@@ -348,6 +428,8 @@ export async function syncCdoProduct(
       variantesDesactivadas: desactivadas.count,
       sinFoto: retenido ? ("retenido" as const) : quedaSinFoto ? ("apagado" as const) : undefined,
       fotos,
+      productId: saved.id,
+      cambio,
     };
   });
 }

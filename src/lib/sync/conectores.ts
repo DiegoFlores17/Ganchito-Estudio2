@@ -21,6 +21,7 @@ import {
   type CdoSyncSummary,
 } from "@/lib/cdo/sync";
 import type { CdoProduct } from "@/lib/cdo/types";
+import type { ClaseCambio } from "@/lib/sync/cambios";
 
 /// Resumen descartable para syncCdoProduct (lo llenaba la corrida entera de
 /// la consola vieja; en el motor se loguea producto por producto).
@@ -80,6 +81,11 @@ export interface ResultadoSincronizar {
   /// El producto estaba activo y se quedo sin foto usable: "apagado" si se
   /// apago, "retenido" si conservo su estado por el tope (ver motor.ts).
   sinFoto?: "apagado" | "retenido";
+  /// Product.id y que cambio en el (cambios.ts). El motor los usa para
+  /// invalidar la cache publica de la tienda. Un producto pausado por no
+  /// poder calcular su costo cuenta como "publico": su `active` cambio.
+  productId?: string;
+  cambio?: ClaseCambio;
 }
 
 /// Lo que el motor le dice al conector sobre la corrida en curso.
@@ -140,21 +146,40 @@ const zecat: Conector = {
           `[zecat-sync] Producto ${p.id} (${p.name}) vino SIN variantes: queda inactivo hasta que vuelvan.`
         );
       }
-      return { resultado: r.outcome === "created" ? "creado" : "actualizado", monedaSospechosa };
+      return {
+        resultado: r.outcome === "created" ? "creado" : "actualizado",
+        monedaSospechosa,
+        productId: r.productId,
+        cambio: r.cambio,
+      };
     } catch (error) {
       // Sin costo calculable NO puede quedar a la venta el precio viejo: si
       // el producto ya existia, se pausa. "Un producto faltante y visible es
       // preferible a uno con precio inflado que nadie detecta."
       if (error instanceof ZecatPricingError) {
+        // Primero los ids: la cache publica de cada ficha pausada hay que
+        // invalidarla, y updateMany solo devuelve el conteo.
+        const afectados = await prisma.product.findMany({
+          where: { zecatId: String(p.id), active: true },
+          select: { id: true },
+        });
         const pausado = await prisma.product.updateMany({
           where: { zecatId: String(p.id), active: true },
-          data: { active: false },
+          // La marca va en la misma escritura: ver Product.invalidacionPendienteDesde.
+          // publicHash: null: la reactivacion (el proveedor lo devuelve igual) tiene que
+          // clasificar "publico"; con el hash del estado activo daria sin-cambio.
+          data: { active: false, publicHash: null, invalidacionPendienteDesde: new Date() },
         });
         if (pausado.count > 0) {
           console.warn(
             `[zecat-sync] Producto ${p.id} PAUSADO: existia con el costo viejo y no se pudo recalcular.`
           );
-          return { resultado: "pausado", monedaSospechosa };
+          return {
+            resultado: "pausado",
+            monedaSospechosa,
+            productId: afectados[0]?.id,
+            cambio: "publico",
+          };
         }
       }
       throw error;
@@ -270,6 +295,8 @@ const cdo: Conector = {
       resultado: r.outcome === "created" ? "creado" : "actualizado",
       monedaSospechosa: false,
       sinFoto: r.sinFoto,
+      productId: r.productId,
+      cambio: r.cambio,
     };
   },
   async confirmarAusente(id) {

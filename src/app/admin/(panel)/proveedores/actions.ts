@@ -3,9 +3,12 @@
 import { ProductOrigin } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { invalidarCachePublico, tagsPorProductos } from "@/lib/cache-tags";
+import { barrerSinFallar } from "@/lib/sync/invalidaciones";
 import { requireAdmin, requireSuperAdmin } from "@/lib/admin-auth";
 import {
   origenDeCorrida,
+  pausadosDeError,
   pausarAusentesDeCorrida,
   pausarSinConfirmacion as pausarSinConfirmacionDeLib,
   type SyncRunSummary,
@@ -67,7 +70,16 @@ export async function syncTick(
     return { estado: "fallo", error: "Este proveedor todavía no se puede sincronizar desde el panel." };
   }
 
-  const tick = await avanzarCorrida(provider, admin.email, { esCron: false, siguiendo });
+  // Barrido de invalidaciones pendientes en CADA tick, sea cual sea su
+  // estado (y aunque tire): el sync escribe producto por producto y deja una
+  // marca en la base por cada cambio que el cliente nota. Ver
+  // lib/sync/invalidaciones.ts.
+  let tick;
+  try {
+    tick = await avanzarCorrida(provider, admin.email, { esCron: false, siguiendo });
+  } finally {
+    await barrerSinFallar("proveedores");
+  }
 
   if (tick.estado === "completa") {
     // Los costos pueden haber cambiado: el catalogo publico se refresca.
@@ -146,8 +158,13 @@ export async function pausarAusentes(runId: string): Promise<PausarAusentesResul
   // Gate propio: una Server Action es un endpoint, se puede invocar sin
   // pasar por la pantalla.
   const admin = await requireAdmin();
+  // Lo ya pausado se invalida aunque una tanda posterior tire: el producto
+  // quedo inactivo en la base y la ficha cacheada no lo sabe. Los ids viajan
+  // adjuntos al error (ver pausadosDeError en lib/sync-run.ts).
+  let pausadosIds: string[] = [];
   try {
     const r = await pausarAusentesDeCorrida(runId, admin.email);
+    pausadosIds = r.pausadosIds;
     revalidatePath("/admin/proveedores");
     revalidatePath("/catalogo");
     revalidatePath("/");
@@ -159,10 +176,15 @@ export async function pausarAusentes(runId: string): Promise<PausarAusentesResul
       restantes: r.restantes,
     };
   } catch (error) {
+    pausadosIds = pausadosDeError(error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "No se pudo pausar.",
     };
+  } finally {
+    invalidarCachePublico(tagsPorProductos(pausadosIds));
+    // pausar() deja la marca de invalidacion pendiente: el barrido la limpia.
+    await barrerSinFallar("proveedores");
   }
 }
 
@@ -180,8 +202,12 @@ export async function pausarSinConfirmacion(
   // Gate propio: una Server Action es un endpoint, se puede invocar sin
   // pasar por la pantalla.
   const admin = await requireAdmin();
+  // Una sola transaccion en la lib: si tira, no se pauso nada. El finally
+  // cubre el caso de que algo tire DESPUES de pausar (revalidatePath).
+  let productIds: string[] = [];
   try {
     const r = await pausarSinConfirmacionDeLib(provider, externalIds, admin.email);
+    productIds = r.productIds;
     revalidatePath("/admin/proveedores");
     revalidatePath("/catalogo");
     revalidatePath("/");
@@ -191,5 +217,8 @@ export async function pausarSinConfirmacion(
       success: false,
       error: error instanceof Error ? error.message : "No se pudo pausar.",
     };
+  } finally {
+    invalidarCachePublico(tagsPorProductos(productIds));
+    await barrerSinFallar("proveedores");
   }
 }

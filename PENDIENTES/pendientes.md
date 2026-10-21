@@ -605,6 +605,15 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       runtime.
 - [ ] Confirmar si el token de Zecat es de preprod o producción y apuntar la
       `ZECAT_API_URL` correcta.
+- [ ] **Sacar `DATABASE_URL` del entorno Preview de Vercel, con cuidado.**
+      Hoy está asignada a Production **y** Preview con el valor de Neon
+      (verificado por Diego el 2026-10-21). No usamos previews —se trabaja
+      sobre `main`—, pero un preview que se dispare (una rama pusheada por
+      error, un PR) correría contra la base de PRODUCCIÓN, incluidos los
+      crons y las Server Actions que escriben. Cuidado al editarla: el
+      2026-10-21 se guardó por error sin valor y hubo que volver a cargarla.
+      Al quitarla, desmarcar solo Preview y confirmar después que
+      Production sigue teniendo el valor.
 
 ## Funcionalidad futura (post primer release)
 

@@ -499,6 +499,36 @@ model Product {
   attributes        ProductAttribute[]
   quoteItems        QuoteItem[]
 
+  /// Huella (sha256) de TODO lo que el cliente ve de este producto: nombre,
+  /// descripcion, categoria, variantes con su costo, imagenes, tecnicas, etc.
+  /// NO incluye stock ni lastSyncedAt.
+  ///
+  /// Para que sirve: el sync la compara contra la que calcula de lo que va a
+  /// escribir, y asi sabe si hay que invalidar la cache publica de la tienda
+  /// (lib/sync/cambios.ts). Sin esto habria que invalidar en cada escritura,
+  /// o sea en todas las corridas. Null = nunca calculada (productos previos a
+  /// la columna y los manuales): el primer sync los trata como cambiados.
+  publicHash        String?
+
+  /// "Este producto cambio y la cache publica de la tienda todavia no se
+  /// enteró". El conector la pone EN LA MISMA transaccion que escribe el
+  /// cambio (o la pausa); quien invalida (el barrido que corre el cron y el
+  /// tick del panel, ver lib/sync/invalidaciones.ts) la limpia DESPUES de
+  /// pedir la invalidacion, y solo la de los ids que acaba de invalidar.
+  ///
+  /// Para que sirve: invalidar la cache es un efecto de proceso, no de base.
+  /// Si la invocacion muere entre el commit del producto y revalidateTag, el
+  /// producto queda cambiado en la base y cacheado viejo hasta que venza el
+  /// TTL (horas), sin rastro. Con la marca en la base, la proxima invocacion
+  /// lo ve y lo reintenta. Es "al menos una vez": invalidar de mas es barato.
+  ///
+  /// Null = nada pendiente. Se barre (lib/sync/invalidaciones.ts) en CADA
+  /// invocacion del cron del sync, tambien con el interruptor
+  /// autoSyncEnabled apagado, y en cada tick del panel. Un sync por consola
+  /// (fuera de Next, no puede invalidar) deja marcas que barre la proxima
+  /// invocacion del cron. «Refrescar tienda» borra las anteriores a su pedido.
+  invalidacionPendienteDesde DateTime?
+
   /// Marca de la última vez que el conector actualizó este producto.
   /// Útil para detectar productos "huérfanos" (que Zecat ya no devuelve).
   lastSyncedAt      DateTime?

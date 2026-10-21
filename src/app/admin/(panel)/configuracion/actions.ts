@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { invalidarCachePublico, TAG } from "@/lib/cache-tags";
+import { limpiarTodasLasMarcas } from "@/lib/sync/invalidaciones";
 import { requireSuperAdmin } from "@/lib/admin-auth";
 import { UsdRateMode } from "@prisma/client";
 import { getPricingConfig } from "@/lib/pricing";
@@ -67,8 +69,17 @@ export async function updatePricingConfig(
   // Pasar a AUTO tiene que APLICAR el oficial, no esperar seis horas. Si la
   // API falla, refreshUsdRate no escribe nada y queda el valor que se acaba
   // de guardar — nunca cero.
-  if (modo === UsdRateMode.AUTO) {
-    await refreshUsdRate();
+  // try/finally: el update de arriba ya quedo escrito. Si refreshUsdRate tira,
+  // la invalidacion igual tiene que correr, o la tienda seguiria mostrando el
+  // margen/IVA viejos hasta que venza el TTL.
+  try {
+    if (modo === UsdRateMode.AUTO) {
+      await refreshUsdRate();
+    }
+  } finally {
+    // Despues del AUTO: si el oficial se aplico, la fila ya tiene el valor
+    // final. Margen, IVA y dolar viven en la config de precios cacheada.
+    invalidarCachePublico([TAG.pricing]);
   }
 
   revalidatePath("/admin/configuracion");
@@ -151,6 +162,7 @@ export async function updateSiteConfig(
     create: { id: 1, ...datos },
   });
 
+  invalidarCachePublico([TAG.site]);
   revalidatePath("/admin/configuracion");
   // El footer vive en el layout de la tienda, asi que estos datos salen en
   // TODAS las paginas publicas. layout: true revalida el arbol entero en vez
@@ -169,8 +181,31 @@ export async function refreshUsdRateNow() {
   revalidatePath("/admin/configuracion");
   // Si se aplico, cambia el precio de todo lo que cotiza en dolares.
   if (resultado.status === "aplicado") {
+    invalidarCachePublico([TAG.pricing]);
     revalidatePath("/catalogo");
     revalidatePath("/");
   }
   return resultado;
+}
+
+/// Tira TODA la cache publica de la tienda (tag `store`) y limpia todas las
+/// marcas de invalidacion pendiente (ya no queda nada que invalidar). Solo
+/// super admin.
+///
+/// Para lo que no puede invalidar solo: un sync corrido desde la consola, una
+/// migracion o una edicion a mano en la base. Sin esto la tienda se pone al
+/// dia sola cuando vence el TTL (hasta 6 h en catalogo y menu, 24 h en fichas
+/// y contacto); con el boton, en la proxima visita.
+export async function refrescarTienda(): Promise<{ success: boolean }> {
+  await requireSuperAdmin();
+  // La hora se toma ANTES de invalidar: solo se borran las marcas que ya
+  // existian cuando se pidio la invalidacion. Una marca posterior (un tick que
+  // escribe en este momento) sigue pendiente para el proximo barrido.
+  const hasta = new Date();
+  invalidarCachePublico([TAG.store]);
+  await limpiarTodasLasMarcas(hasta);
+  // La home y el catalogo se sirven prerenderizados: ademas de la cache de
+  // datos hay que marcar las rutas.
+  revalidatePath("/", "layout");
+  return { success: true };
 }

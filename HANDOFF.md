@@ -145,6 +145,22 @@ registra sobre una corrida y no hay ninguna (comentario en `alertas.ts`). Por
 eso la primera corrida de un proveedor nuevo se hace a mano desde el panel,
 antes de encender su interruptor.
 
+**Verificado con una falla real (2026-10-20, Zecat).** La corrida del cron de
+las 06:00:12 ART (`cmvggd8cm000006jvc1k0x5gd`) recibió un **502 Bad Gateway**
+de Zecat al armar la lista (`/generic_product?page=1&limit=100`). El circuito
+completo funcionó solo:
+1. **Corte sin escribir:** FAILED a las 06:00:23, sin tocar ningún producto.
+2. **Alerta:** mail de FALLANDO a las 06:00 (`alertedAt` + nota `Alerta:
+   FALLANDO` en la corrida).
+3. **Reintento a los 10 minutos** (`ESPERA_TRAS_FALLA_MS`): el cron arrancó
+   otra corrida a las 06:11:11.
+4. **Corrida completa:** DONE a las 06:13:27, 582 de 582, sin fallidos.
+5. **Mail de resuelto** a las 06:13 (nota `Alerta: OK`).
+
+Diego confirmó que los dos mails llegaron, cada uno en su hilo. La base no
+tuvo nada que ver: respondió en todo momento (el upgrade de Neon a Launch fue
+recién a las 11:31 ART).
+
 ### Panel (`/admin/proveedores`)
 
 - **Estado del proveedor**, en el encabezado y como punto en el menú. Prioridad:

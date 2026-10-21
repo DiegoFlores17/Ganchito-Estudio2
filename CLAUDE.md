@@ -436,6 +436,14 @@ tanto, sin buscar nada en particular.
   conclusión equivocada: un conteo dio 656 contra los 641 de producción porque
   los zombies solo se pausaron en Neon. **La primera pregunta ante cualquier
   query —propia o de un diagnóstico ajeno— es contra qué base corrió.**
+- **Las fechas leídas con `pg` desde la Mac salen corridas 3 horas.** Las
+  columnas de Prisma son `timestamp` SIN zona horaria y guardan UTC, pero el
+  cliente `pg` de Node las interpreta como hora local (ART) y al mostrarlas
+  como ISO les suma 3 horas: una corrida de las 06:00 ART (09:00 UTC) aparece
+  como `12:00Z`. Ya produjo un dato falso en un informe. Formatear en la base
+  (`to_char("startedAt", 'YYYY-MM-DD HH24:MI:SS')` es UTC; para ART,
+  `"startedAt" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires'`)
+  o tratar el valor crudo como UTC.
 - **Vercel NO aplica migraciones.** Neon se migra a mano, y siempre ANTES de pushear
   código que lea columnas nuevas.
 

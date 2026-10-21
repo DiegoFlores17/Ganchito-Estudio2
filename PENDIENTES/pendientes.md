@@ -290,6 +290,13 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       los dos (`ALERT_EMAIL` acepta varios destinatarios), o a nadie de su
       lado. Ojo que el texto de las alertas está escrito para alguien que
       puede verificar en la web del proveedor y usar el panel.
+- [ ] **El mail de FALLANDO tiene que decir qué hacer.** Hoy avisa que la
+      sincronización falló, pero no qué se espera de quien lo recibe. Agregar:
+      "El sistema reintenta solo en unos minutos. Si llega el mail de
+      resuelto, no hace falta hacer nada. Si no llega en una hora, revisá el
+      panel de proveedores." Es lo que pasó el 2026-10-20 (502 de Zecat):
+      reintento a los 10 min y mail de resuelto a las 06:13, sin intervención.
+      El texto vive en `src/lib/sync/alertas.ts`.
 - [x] **Ausentes que nunca se pueden verificar quedaban activos y en verde
       — RESUELTO (`736db8a`, 2026-10-15).** El caso: KUPFER (CDO 17678), sin
       code guardado, "no verificado" para siempre con un texto que prometía

@@ -772,6 +772,14 @@ model Quote {
   /// src/lib/privacidad.ts). Null en las mismas cotizaciones viejas.
   privacyVersion    String?
 
+  /// Cuando un super admin borro los datos personales del cliente a pedido
+  /// (src/lib/borrado-datos.ts). La fila se ANONIMIZA, no se borra: se
+  /// conservan items, precios, estado y fechas para no romper metricas ni el
+  /// historial. Null = datos intactos.
+  personalDataErasedAt DateTime?
+  /// Email del super admin que lo hizo.
+  personalDataErasedBy String?
+
   items         QuoteItem[]
 
   createdAt     DateTime    @default(now())

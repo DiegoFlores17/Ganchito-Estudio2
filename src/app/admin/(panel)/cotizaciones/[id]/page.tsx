@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { formatDate, formatDateTime, formatPriceArs } from "@/lib/format";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
+import { AdminRole } from "@prisma/client";
+import { QuoteEraseButton } from "@/components/admin/quote-erase-button";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
 import { StatusBadge } from "@/components/admin/status-badge";
 
@@ -20,13 +22,19 @@ export default async function CotizacionDetallePage({
   // personal del panel (nombre, mail y telefono del cliente, mas su historial
   // de cotizaciones), asi que es la ultima que conviene dejar dependiendo de
   // una sola barrera.
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const { id } = await params;
   const quote = await getQuoteById(id);
   if (!quote) notFound();
 
-  const history = await getQuoteHistoryByEmail(quote.customerEmail, quote.id);
+  // Anonimizada: todas comparten el mismo email fijo (EMAIL_ANONIMIZADO), asi
+  // que el "historial del cliente" las mezclaria entre si como si fueran de
+  // una misma persona. Sin datos, no hay cliente que agrupar.
+  const borrada = quote.personalDataErasedAt !== null;
+  const history = borrada
+    ? []
+    : await getQuoteHistoryByEmail(quote.customerEmail, quote.id);
   const total = quote.items.reduce(
     (sum, item) => sum + Number(item.unitPrice) * item.quantity,
     0
@@ -55,6 +63,22 @@ export default async function CotizacionDetallePage({
         </div>
         <QuoteStatusSelect quoteId={quote.id} initialStatus={quote.status} />
       </div>
+
+      {quote.personalDataErasedAt && (
+        <div className="mt-6 rounded-xl border border-foreground/10 bg-foreground/[0.03] p-4 text-sm">
+          <p className="font-medium text-foreground">
+            Datos personales borrados el{" "}
+            {formatDateTime(quote.personalDataErasedAt)} por{" "}
+            {quote.personalDataErasedBy ?? "un super admin"}
+          </p>
+          {/* Lo que la base no puede borrar: el aviso que llego por mail. */}
+          <p className="mt-1 text-foreground/60">
+            Falta borrar a mano el aviso de esta cotización en la casilla de
+            consultas (buscá #{quote.shortCode}) y vaciar la papelera. Resend
+            lo elimina solo a los 30 días.
+          </p>
+        </div>
+      )}
 
       <div className="mt-8 grid grid-cols-1 gap-8 md:grid-cols-3">
         <section className="md:col-span-2">
@@ -142,7 +166,7 @@ export default async function CotizacionDetallePage({
             <h2 className="text-sm font-medium text-foreground/60">Contacto</h2>
             <dl className="mt-2 flex flex-col gap-1.5 text-sm">
               <Row label="Empresa" value={quote.companyName ?? "—"} />
-              <Row label="Email" value={quote.customerEmail} />
+              <Row label="Email" value={borrada ? "—" : quote.customerEmail} />
               <Row label="Teléfono" value={quote.customerPhone ?? "—"} />
             </dl>
           </div>
@@ -160,10 +184,17 @@ export default async function CotizacionDetallePage({
               </a>
             ) : (
               <p className="mt-2 text-sm text-foreground/50">
-                No subió ningún archivo todavía.
+                {borrada
+                  ? "Se borró junto con los datos personales."
+                  : "No subió ningún archivo todavía."}
               </p>
             )}
           </div>
+
+          {/* Solo super-admin: es irreversible. La accion lo vuelve a exigir. */}
+          {!borrada && admin.role === AdminRole.SUPER_ADMIN && (
+            <QuoteEraseButton quoteId={quote.id} shortCode={quote.shortCode} />
+          )}
         </section>
       </div>
     </div>

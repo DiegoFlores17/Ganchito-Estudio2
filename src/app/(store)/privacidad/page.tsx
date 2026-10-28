@@ -66,6 +66,14 @@ export default async function PrivacidadPage() {
           directamente desde el sitio.
         </p>
         <p>
+          El responsable de la base de datos es{" "}
+          <strong className="font-medium text-foreground">
+            GANCHITO ESTUDIO S.A.S.
+          </strong>
+          , CUIT 30-71917122-9, con domicilio en Carlos Nicolle 6005, Córdoba,
+          Provincia de Córdoba, Argentina.
+        </p>
+        <p>
           Para consultas sobre esta política, escribinos a{" "}
           <Correo email={contactEmail} />.
         </p>

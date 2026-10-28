@@ -7,7 +7,8 @@
 >
 > La versión publicada hoy en `/privacidad` coincide con este texto salvo en
 > que omite todo lo marcado (se publicó sin datos inventados) y conserva los
-> puntos 1, 5 y 6 como estaban antes. Cuando el texto final
+> puntos 5 y 6 como estaban antes. El punto 1 ya publica los datos del
+> responsable; falta la inscripción en el Registro. Cuando el texto final
 > esté aprobado, se reemplaza en el sitio y se actualiza la versión.
 
 **Última actualización:** [A COMPLETAR: fecha de la versión aprobada]
@@ -21,8 +22,9 @@ Ganchito Estudio es un estudio de merchandising corporativo. Este sitio
 funciona como catálogo y canal de pedidos de cotización. No es una tienda con
 pago online: no procesamos pagos ni vendemos directamente desde el sitio.
 
-El responsable de la base de datos es **[A COMPLETAR: razón social]**, CUIT
-**[A COMPLETAR]**, con domicilio en **[A COMPLETAR]**. Inscripción en el
+El responsable de la base de datos es **GANCHITO ESTUDIO S.A.S.**, CUIT
+30-71917122-9, con domicilio en Carlos Nicolle 6005, Córdoba, Provincia de
+Córdoba, Argentina. Inscripción en el
 Registro Nacional de Bases de Datos: **[A COMPLETAR: número, o confirmar si
 corresponde inscribir]**.
 
@@ -131,16 +133,9 @@ Para ejercerlos, escribinos a **[A COMPLETAR: correo de contacto; en el sitio sa
 los plazos que fija la ley. **[A COMPLETAR por el abogado: confirmar si se
 explicitan los plazos de los arts. 14 y 16]**
 
-El titular de los datos personales tiene la facultad de ejercer el derecho
-de acceso a los mismos en forma gratuita a intervalos no inferiores a seis
-meses, salvo que se acredite un interés legítimo al efecto conforme lo
-establecido en el artículo 14, inciso 3 de la Ley Nº 25.326. La Agencia de
-Acceso a la Información Pública, en su carácter de Órgano de Control de la
-Ley Nº 25.326, tiene la atribución de atender las denuncias y reclamos que
-interpongan quienes resulten afectados en sus derechos por incumplimiento de
-las normas vigentes en materia de protección de datos personales.
-**[A COMPLETAR por el abogado: confirmar texto vigente de la leyenda de la
-Disposición DNPDP 10/2008]**
+La Agencia de Acceso a la Información Pública es el organismo de control de
+la Ley 25.326 y atiende las denuncias de quienes consideren afectados sus
+derechos. **[A revisar por el abogado: ver nota legal 4]**
 
 ## 7. Seguridad
 
@@ -209,3 +204,16 @@ Relevadas sobre el código y la documentación de cada servicio el 2026-10-28.
 2. **Inscripción de la base** en el Registro Nacional de Bases de Datos.
 3. **Plazo de conservación** de cotizaciones y archivos, considerando las
    obligaciones comerciales y fiscales.
+4. **Leyenda de derechos.** La leyenda literal de la Disposición DNPDP
+   10/2008 ("…a intervalos no inferiores a seis meses…") **no va**: esa
+   disposición fue derogada por el art. 1 de la Resolución AAIP 14/2018
+   (B.O. 9/3/2018). El sitio conserva el texto actual de la sección de
+   derechos. Para confirmar: el art. 3 de esa misma resolución pide incluir
+   un texto propio ("LA AGENCIA DE ACCESO A LA INFORMACIÓN PÚBLICA, en su
+   carácter de Órgano de Control de la Ley N° 25.326, tiene la atribución de
+   atender las denuncias y reclamos que interpongan quienes resulten
+   afectados en sus derechos por incumplimiento de las normas vigentes en
+   materia de protección de datos personales"), y el sitio hoy lo
+   **parafrasea**. Decidir si alcanza con la paráfrasis o conviene el texto
+   literal. Fuente:
+   https://www.argentina.gob.ar/normativa/nacional/resoluci%C3%B3n-14-2018-307621/texto

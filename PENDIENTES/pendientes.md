@@ -5,6 +5,44 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
 
 ---
 
+## Privacidad (2026-10-28) — lo construido está en HANDOFF, sección "Privacidad"
+
+- [ ] **Mandar `docs/privacidad-borrador-abogado.md` al abogado.** Lo que
+      tiene que completar o decidir (todo marcado [A COMPLETAR]):
+      - **H — conservación:** plazo para cotizaciones y archivos, y para las
+        copias de respaldo. Hoy se guardan indefinidamente.
+      - **I — responsable:** razón social, CUIT, domicilio, e inscripción en
+        el Registro Nacional de Bases de Datos (o si corresponde).
+      - **J — derechos:** la leyenda de la AAIP (Disp. 10/2008) con su texto
+        vigente, y si se explicitan los plazos de los arts. 14 y 16.
+      - **Transferencia internacional (art. 12):** Brasil y EE.UU. no
+        figurarían como adecuados (Disp. 60/2016). Si alcanza el
+        consentimiento del checkbox o hacen falta cláusulas con los
+        proveedores.
+- [x] **Regiones de Blob y de Resend.** Confirmadas por Diego en los paneles
+      el 2026-10-28: Blob en `gru1` y Resend en São Paulo, con el
+      seguimiento de aperturas y clics desactivado. Ya están en `/privacidad`
+      y en el borrador.
+- [ ] **Un Blob propio para local, separado del de producción.** Hoy el
+      store `ganchito-estudio2-blob` está conectado a todos los entornos, y
+      el `BLOB_READ_WRITE_TOKEN` del `.env` local es el del store real. Probar
+      en local el borrado de datos (o cualquier subida o borrado) puede tocar
+      archivos reales de clientes. Crear un store aparte (en `gru1`, para no
+      mezclar regiones), conectarlo solo a Development, y cambiar el token del
+      `.env`. Recién ahí se puede ejercitar el `del()` real en local; hoy el
+      script lo inyecta justamente por esto.
+- [ ] **Con el texto aprobado:** reemplazar `/privacidad` y mover
+      `POLITICA_PRIVACIDAD_VERSION` (`src/lib/privacidad.ts`) a la fecha
+      nueva. Las cotizaciones viejas conservan la versión que aceptaron.
+- [ ] **Plazo de conservación, cuando el abogado lo fije:** hoy no hay nada
+      que borre solo. Con el plazo definido, se evalúa un job que anonimice
+      las que lo superen, reusando la lógica de `src/lib/borrado-datos.ts`
+      (hoy pide un super admin y el código tipeado: un job necesita su
+      propia entrada).
+- [ ] **Aviso de cookies: NO hace falta hoy** (solo almacenamiento técnico
+      indispensable, sin analítica). Si algún día se suma analítica o un
+      píxel, se revisa esto y la política.
+
 ## Flujo de cotización
 
 - [x] **Notificación por email a Ganchito cuando entra una cotización.**

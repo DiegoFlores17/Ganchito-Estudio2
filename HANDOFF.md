@@ -3,12 +3,10 @@
 Registro del estado real del proyecto para poder retomar sin reconstruir contexto.
 Se actualiza al final de cada tanda de trabajo.
 
-**Última actualización:** 2026-10-15 — sync automático de proveedores
-completo en producción: Zecat (etapa D, verificada) y CDO (etapa E, primera
-corrida hecha; falta ver la primera automática). Ventanas del cron de 30
-minutos. Ausentes que no se pueden verificar y "Pausar sin confirmación".
-**Branch:** `main`. Último commit de código: `736db8a` (ausentes que no se
-pueden verificar). Esta actualización de docs va en un commit aparte, después.
+**Última actualización:** 2026-10-28 — privacidad: política corregida,
+checkbox obligatorio en `/cotizar` con fecha y versión, y borrado de datos
+personales a pedido. **Branch:** `main` (mergeada desde `privacidad`). Las
+dos migraciones se aplicaron en Neon ANTES del push (ver "Privacidad" abajo).
 
 La auditoría pre-entrega (`AUDITORIA.md`) ya está en `main`: los hallazgos
 1/3/4/6 se atacaron, y los 2/5/7/9 quedaron en PENDIENTES con su cuándo. La
@@ -34,6 +32,135 @@ vista pública — decisión revisada, ver la sección "Cotización por WhatsApp
 > Este archivo es el estado del TRABAJO. Para el contexto de negocio y las
 > decisiones cerradas, ver `CLAUDE.md`. Para el backlog largo, ver
 > `PENDIENTES/pendientes.md`.
+
+---
+
+## Privacidad (2026-10-28) — en `main`
+
+### Política publicada (`/privacidad`)
+Se corrigió contra el código: el aviso por mail le llega a **Ganchito**, no
+al cliente (antes decía "para mandarte la cotización"); el carrito vive en
+`localStorage` (`ganchito:cotizacion`, sin datos personales) y el visitante
+común no recibe cookies propias (solo los admins, las de Auth.js; Vercel
+puede poner la de su desafío anti-bot); nombre y email obligatorios,
+teléfono y empresa opcionales; WhatsApp/Meta como tercero; registros técnicos
+de Vercel; los proveedores con nombre (Vercel, Neon, Resend, Google
+Workspace) y que la base, las funciones, los archivos y el envío de avisos
+están en Brasil (la casilla es Google Workspace y WhatsApp lo procesa Meta).
+
+**Regla:** la página pública no lleva datos sin confirmar. Lo que no se pudo
+confirmar se redacta sin el dato ("por un período limitado", "otros
+países"), nunca con uno supuesto. El texto completo con lo que falta
+(responsable, CUIT, domicilio, plazos, leyenda AAIP) está en
+`docs/privacidad-borrador-abogado.md`, con [A COMPLETAR].
+
+Datos de los servicios, con su fuente (2026-10-28):
+- Vercel, logs de runtime: 1 día en Pro ([docs](https://vercel.com/docs/logs/runtime)).
+- Vercel Blob (`ganchito-estudio2-blob`): **`gru1`, São Paulo**, confirmado
+  por Diego en el panel. La región se elige al crear el store y no se puede
+  cambiar. Hoy ese store está conectado a TODOS los entornos, local incluido
+  (ver PENDIENTES).
+- Resend: **São Paulo**, confirmado por Diego en el panel; seguimiento de
+  aperturas y clics desactivado. Ojo: el SPF de `send.send.ganchitoestudio.com`
+  apunta a IPs de AWS en EE.UU. y parecía indicar esa región: no era así. La
+  región se lee en el panel, no en el DNS. Retención: 30 días según su página
+  de precios. **No hay API para borrar un mail enviado.**
+- Google Workspace: el MX del dominio es `smtp.google.com`.
+
+### Aceptación en `/cotizar`
+Checkbox obligatorio "Leí y acepto la Política de privacidad" (link en otra
+pestaña). Reemplaza al texto "Al enviar aceptás…": los datos son los
+indispensables, pero se procesan fuera de Argentina, y esa transferencia
+pide consentimiento expreso. `submitQuote` rechaza si no llega
+`privacyAccepted=on`, **antes** de subir el logo o escribir nada, y guarda
+`privacyAcceptedAt` (hora del servidor) y `privacyVersion`.
+
+**La versión es una sola constante:** `POLITICA_PRIVACIDAD_VERSION` en
+`src/lib/privacidad.ts` (fecha ISO del texto). De ahí salen la "Última
+actualización" de la página y lo que se guarda en cada cotización. **Si
+cambia el texto de la política, se cambia esa constante**, nunca con
+`new Date()`.
+
+Las cotizaciones anteriores quedan con las dos columnas en null: no
+aceptaron nada y no se inventa (sin backfill).
+
+Sin marcar, el globito nativo del navegador se reemplaza por un aviso propio
+en violeta debajo del checkbox: `onInvalid` con `preventDefault()` suprime
+solo el de ese campo (nombre y email conservan el nativo), y como sin el
+globito el navegador no lleva el foco, se lo lleva a mano. `required` sigue
+frenando el envío, así que WhatsApp no abre una ventana en blanco.
+
+### Borrado de datos a pedido (`src/lib/borrado-datos.ts`)
+Botón "Borrar datos personales" en el detalle de la cotización, **solo
+SUPER_ADMIN** (la acción pide `requireSuperAdmin` y la lib vuelve a chequear
+el rol contra la base). Se confirma tipeando el `shortCode`.
+- **Anonimiza, no borra la fila:** nombre → "Datos borrados", email →
+  `datos-borrados@anonimizado.invalid` (la columna es NOT NULL; `.invalid`
+  está reservado), teléfono, empresa, notas y logo → null. Se conservan
+  `shortCode`, estado, fechas, ítems, precios y la aceptación de la política.
+  Borrar la fila se llevaba en cascada los ítems y las métricas.
+- **El logo de Blob se borra PRIMERO.** Si falla, no se toca nada y se puede
+  reintentar. `del()` no tira si el blob ya no existe (documentado por
+  Vercel), así que el reintento después de un fallo a medias pasa limpio. Se
+  borra por la dirección sin `?download=1`.
+- Logos viejos `/api/uploads/...` (relativos, de antes de Blob, `7f645fa`):
+  esa ruta y su carpeta ya no existen; se anonimiza sin llamar a Blob y queda
+  en el log. Un logo **absoluto en otro host** (dominio propio de Blob, otro
+  storage) NO se asume vacío: se frena sin tocar nada, porque anonimizar
+  dejaría un archivo público sin ninguna referencia para encontrarlo.
+- Si la acción tira (ej. se cae la base después de borrar el blob), el
+  botón muestra "Probá de nuevo" en vez de la pantalla de error: reintentar
+  es seguro.
+- **Idempotente:** una segunda vez devuelve ok sin tocar nada, y el update
+  está condicionado a `personalDataErasedAt IS NULL`: dos confirmaciones
+  simultáneas no pisan la fecha ni el autor de la primera.
+- Registro: `personalDataErasedAt` y `personalDataErasedBy` (email del
+  super admin). El detalle muestra "Datos personales borrados el … por …" y
+  el recordatorio de borrar a mano el aviso en la casilla de consultas
+  (buscando `#shortCode`) y vaciar la papelera; Resend lo elimina solo a los
+  30 días.
+- **Todas las anonimizadas comparten el email fijo:** el detalle no muestra
+  "historial del cliente" para una anonimizada (las mezclaría entre sí). Un
+  cliente con varias cotizaciones se borra cotización por cotización (el
+  historial del detalle las lista antes de borrar).
+- Las copias de las branches de backup de Neon y los logs de Vercel no se
+  borran con esto.
+
+### Verificación (local)
+- `scripts/audit-verify-cotizar.ts` (incluye los rechazos sin aceptar),
+  `audit-verify-whatsapp.ts`, `audit-verify-email.ts` y
+  `audit-verify-borrado-datos.ts` (27 checks: rechaza ADMIN común y código
+  equivocado, falla limpio si Blob falla, conserva ítems y total, idempotente,
+  logo viejo relativo, logo en host desconocido). No cubre la capa
+  `requireSuperAdmin` de la acción (pide sesión: se probó en el navegador) ni
+  dos confirmaciones simultáneas (las cubre el `updateMany` condicionado, sin
+  test). En este último el borrado de Blob va **inyectado**: el script
+  no escribe en el store real.
+- Chrome real contra `next start`: sin marcar no sale ningún POST; marcado
+  guarda fecha y versión; `/privacidad` sin desborde a 390 px; el panel
+  muestra bien cotizaciones viejas y nuevas.
+- **`next start` en local necesita `AUTH_TRUST_HOST=true`** para que el panel
+  acepte la sesión (en Vercel lo infiere solo). Sin eso, `/admin` redirige al
+  login y el log dice `UntrustedHost`: es el entorno, no un bug.
+
+### Orden de deploy (las DOS migraciones, en este orden)
+**Hecho el 2026-10-28.** Neon migrado a las 11:14 ART: `migrate status`
+mostraba faltantes exactamente las dos, quedó limpio después, y una consulta
+READ ONLY confirmó las cuatro columnas nullable en `quotes` (6 cotizaciones,
+ninguna con aceptación todavía). Backup previo: la branch se llama
+**`backup-pre-cache-2026-10-21`** pero es la de ESTE deploy (creada por
+Diego el 2026-10-28 11:07 ART, con el nombre viejo); el backup del 21/10 ya
+no existe como branch aparte.
+
+1. Diego saca la branch de backup en Neon.
+2. `prisma migrate deploy` contra Neon con la URL de `.env.neon` y la guarda
+   de destino. Aplica `20261028120000_add_quote_privacy_acceptance` y
+   `20261028130000_add_quote_personal_data_erasure`. Nunca a mano.
+3. `migrate status` limpio.
+4. Recién ahí, merge y push. El código ESCRIBE las columnas nuevas: sin
+   migrar, **toda cotización falla**.
+5. `/cotizar` está cacheado 6 h: una pestaña abierta antes del deploy no
+   tiene el checkbox y recibe "tenés que aceptar…" hasta que recargue.
 
 ---
 
@@ -1721,6 +1848,12 @@ idénticas por navegación (el cache es por request, no debilita el chequeo).
 
 Cosas construidas cuyo funcionamiento en producción todavía no se confirmó:
 
+- **Privacidad (en producción desde el 2026-10-28).** Falta:
+  una cotización real con el checkbox (que guarde fecha y versión en Neon),
+  y un borrado de datos de punta a punta sobre una cotización de prueba con
+  logo, mirando que el archivo desaparezca de Blob. El `del()` real contra
+  Blob **no se ejercitó**: el script lo inyecta para no escribir en el store.
+
 - **Cache pública: la primera corrida de cada proveedor invalida todas las
   fichas una vez.** `publicHash` arranca en null en las 1.021 filas, así que
   la primera corrida de Zecat y la primera de CDO clasifican todo como
@@ -2749,6 +2882,10 @@ Resumen de entonces:
 ---
 
 ## Próximo paso concreto
+
+**Privacidad:** en producción. Falta que Diego envíe una cotización real
+(que guarde fecha y versión en Neon) y mandar
+`docs/privacidad-borrador-abogado.md` al abogado.
 
 El sync automático de los dos proveedores quedó en producción. Lo que falta
 de esa tanda es **mirar**, no construir:

@@ -764,6 +764,14 @@ model Quote {
   logoUrl       String?
   notes         String?     @db.Text
 
+  /// Cuando el cliente marco "Lei y acepto la Politica de privacidad". La
+  /// pone el SERVIDOR al guardar, nunca el cliente. Null en las cotizaciones
+  /// anteriores al checkbox: no aceptaron nada y no se inventa (sin backfill).
+  privacyAcceptedAt DateTime?
+  /// Version de la politica aceptada (`POLITICA_PRIVACIDAD_VERSION` en
+  /// src/lib/privacidad.ts). Null en las mismas cotizaciones viejas.
+  privacyVersion    String?
+
   items         QuoteItem[]
 
   createdAt     DateTime    @default(now())

@@ -18,6 +18,7 @@ import {
   type QuoteMessageLine,
 } from "@/lib/quote-message";
 import { Prisma } from "@prisma/client";
+import { POLITICA_PRIVACIDAD_VERSION } from "@/lib/privacidad";
 import {
   QUOTE_LOGO_EXTENSIONS,
   saveUploadedFile,
@@ -297,6 +298,8 @@ export async function submitQuote(
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const itemsRaw = String(formData.get("items") ?? "[]");
   const logo = formData.get("logo");
+  // Un checkbox marcado llega como "on"; sin marcar, no llega.
+  const privacyAccepted = formData.get("privacyAccepted") === "on";
 
   if (!customerName) {
     return { success: false, error: "Falta el nombre." };
@@ -309,6 +312,15 @@ export async function submitQuote(
       success: false,
       error:
         "El teléfono no parece válido. Si es de Argentina, escribilo sin el código de país (ej: 351 235-0995); si es del exterior, empezá con + y el código.",
+    };
+  }
+  // Antes de subir el logo y de tocar la base: sin aceptacion no se guarda
+  // ningun dato del cliente, tampoco su archivo. El `required` del checkbox
+  // no alcanza — esta accion se puede llamar sin pasar por el formulario.
+  if (!privacyAccepted) {
+    return {
+      success: false,
+      error: "Para enviar la solicitud tenés que aceptar la Política de privacidad.",
     };
   }
 
@@ -497,6 +509,10 @@ export async function submitQuote(
           companyName,
           logoUrl,
           notes,
+          // Fecha del servidor y version de la constante: nada de lo que
+          // diga el cliente sobre cuando o que acepto.
+          privacyAcceptedAt: new Date(),
+          privacyVersion: POLITICA_PRIVACIDAD_VERSION,
           items: { create: quoteItemsData },
         },
         select: { id: true, shortCode: true },

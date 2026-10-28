@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import { getSiteConfigPublica } from "@/lib/lectura-publica";
+import {
+  formatearVersionPolitica,
+  POLITICA_PRIVACIDAD_VERSION,
+} from "@/lib/privacidad";
 
 export const metadata: Metadata = {
   title: "Política de Privacidad · Ganchito Estudio",
@@ -7,20 +11,30 @@ export const metadata: Metadata = {
     "Qué datos recolectamos, para qué los usamos y qué derechos tenés sobre ellos.",
 };
 
-/// Fecha de última actualización del TEXTO, escrita a mano.
+/// Fecha de última actualización del TEXTO. Sale de la misma constante que
+/// se guarda en cada cotización como versión aceptada (ver
+/// src/lib/privacidad.ts): si cambia el contenido, se mueve ahí.
 ///
 /// No se usa `new Date()`: eso mostraría la fecha del build y diría que la
-/// política cambió cada vez que se deploya cualquier cosa. La fecha de una
-/// política es una afirmación sobre el contenido, así que se mueve sólo cuando
-/// el contenido se mueve.
-const ULTIMA_ACTUALIZACION = "15 de septiembre de 2026";
+/// política cambió cada vez que se deploya cualquier cosa.
+const ULTIMA_ACTUALIZACION = formatearVersionPolitica(
+  POLITICA_PRIVACIDAD_VERSION
+);
 
 /// El contenido es TEXTO LEGAL revisado por el cliente y no se edita sin que
 /// él lo pida. Cada afirmación se verificó contra el código antes de
-/// publicarse: los campos que pide el formulario, que los logos van a Vercel
-/// Blob con `access: "public"`, que no hay analytics ni píxeles de terceros,
-/// que las fuentes están auto-hospedadas, y que las fotos del catálogo se
-/// cargan desde servidores de los proveedores.
+/// publicarse: los campos que pide el formulario (y cuáles son obligatorios),
+/// que los logos van a Vercel Blob con `access: "public"`, que el aviso por
+/// mail le llega a Ganchito y no al cliente, que no hay analytics ni píxeles
+/// de terceros, que las fuentes están auto-hospedadas, que el carrito vive en
+/// localStorage, y que las fotos del catálogo se cargan desde servidores de
+/// los proveedores. Las regiones se confirmaron en los paneles el
+/// 2026-10-28: funciones y Blob en `gru1`, Neon en `sa-east-1`, Resend en
+/// São Paulo. Si alguna cambia (otro store, otra región), este texto deja de
+/// ser cierto.
+///
+/// La versión completa para el abogado, con los datos que faltan marcados,
+/// está en docs/privacidad-borrador-abogado.md.
 ///
 /// Si el sitio cambia lo que hace —un campo nuevo en el formulario, una
 /// herramienta de analytics, pagos online— esta página queda desactualizada y
@@ -62,17 +76,19 @@ export default async function PrivacidadPage() {
           <strong className="font-medium text-foreground">
             Cuando pedís una cotización
           </strong>
-          , te pedimos:
+          , te pedimos tu{" "}
+          <strong className="font-medium text-foreground">
+            nombre y correo electrónico
+          </strong>{" "}
+          (obligatorios) y, si querés,{" "}
+          <strong className="font-medium text-foreground">
+            teléfono y nombre de tu empresa
+          </strong>
+          .
         </p>
-        <ul className="ml-5 list-disc space-y-1">
-          <li>Nombre</li>
-          <li>Correo electrónico</li>
-          <li>Teléfono</li>
-          <li>Nombre de tu empresa</li>
-        </ul>
         <p>
           Estos datos los ingresás vos voluntariamente en el formulario. Sin
-          ellos no podemos responderte la cotización.
+          nombre y correo no podemos responderte la cotización.
         </p>
         <p>
           <strong className="font-medium text-foreground">
@@ -90,16 +106,32 @@ export default async function PrivacidadPage() {
           Si adjuntás tu logo o arte para que lo veamos, el archivo se almacena
           en nuestro servicio de alojamiento con una dirección larga e
           impredecible, que no publicamos en ningún lado ni aparece en
-          buscadores. Aun así, no requiere contraseña: quien tenga la dirección
-          exacta puede verlo. Si tu arte es confidencial, escribinos antes de
-          subirlo.
+          buscadores: solo la usamos internamente, y figura en el aviso que
+          recibimos por correo y en nuestro panel. Aun así, no requiere
+          contraseña: quien tenga la dirección exacta puede verlo. Si tu arte es
+          confidencial, escribinos antes de subirlo.
         </p>
         <p>
           <strong className="font-medium text-foreground">
-            Datos de navegación.
+            Almacenamiento en tu navegador.
           </strong>{" "}
-          El sitio usa cookies técnicas necesarias para funcionar. No usamos
-          cookies de publicidad ni de seguimiento de terceros.
+          Guardamos en tu navegador (almacenamiento local) los productos que
+          vas agregando a tu pedido, para que no se pierdan si cerrás la
+          página. No contiene tus datos personales y podés borrarlo desde la
+          configuración de tu navegador. Nuestro proveedor de alojamiento puede
+          poner una cookie técnica de seguridad para distinguir visitantes
+          reales de programas automáticos. No usamos cookies de publicidad, de
+          analítica ni de seguimiento.
+        </p>
+        <p>
+          <strong className="font-medium text-foreground">
+            Registros técnicos.
+          </strong>{" "}
+          Nuestro proveedor de alojamiento registra datos técnicos de cada
+          visita, como la dirección IP, el navegador y la página solicitada,
+          por seguridad y para que el sitio funcione. Esos registros se
+          conservan por un período limitado y no los usamos para
+          identificarte ni para armar perfiles.
         </p>
         <p>
           <strong className="font-medium text-foreground">
@@ -129,22 +161,43 @@ export default async function PrivacidadPage() {
         <ul className="ml-5 list-disc space-y-1">
           <li>
             <strong className="font-medium text-foreground">
-              Alojamiento del sitio y base de datos:
+              Vercel:
             </strong>{" "}
-            proveedores de infraestructura en la nube, con servidores fuera de
-            Argentina.
+            alojamiento del sitio y de los archivos que subís.
+          </li>
+          <li>
+            <strong className="font-medium text-foreground">Neon:</strong> base
+            de datos donde se guarda tu cotización.
+          </li>
+          <li>
+            <strong className="font-medium text-foreground">Resend:</strong>{" "}
+            envío de avisos por correo. Cuando enviás una solicitud, nos manda
+            un aviso <em>a nosotros</em> con tus datos y tu pedido. No te
+            enviamos un correo automático: te respondemos por email o WhatsApp.
           </li>
           <li>
             <strong className="font-medium text-foreground">
-              Envío de correos:
+              Google Workspace:
             </strong>{" "}
-            un servicio de email transaccional, para mandarte la cotización.
+            nuestra casilla de correo, donde queda ese aviso.
           </li>
         </ul>
         <p>
-          Estos proveedores acceden a los datos solo para prestarnos el
-          servicio. Al usar el sitio, aceptás que tus datos puedan procesarse en
-          servidores ubicados fuera de Argentina.
+          La base de datos, los servidores del sitio, los archivos que subís y
+          el envío de los avisos están en Brasil. La casilla de correo donde
+          queda el aviso es de Google Workspace, y el mensaje de WhatsApp lo
+          procesa Meta, cada uno según sus propias condiciones. Estos
+          proveedores acceden a los datos solo para prestarnos el servicio. Al
+          marcar la casilla de aceptación del formulario de cotización,
+          consentís que tus datos se procesen en servidores ubicados fuera de
+          Argentina.
+        </p>
+        <p>
+          <strong className="font-medium text-foreground">WhatsApp.</strong>{" "}
+          Al enviar la solicitud, se abre WhatsApp con un mensaje ya armado que
+          incluye tu nombre, empresa, email y los productos. Si decidís
+          enviarlo, ese mensaje lo procesa WhatsApp (Meta Platforms) según su
+          propia política de privacidad.
         </p>
         <p>
           También podemos compartir información si una autoridad competente lo

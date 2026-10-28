@@ -29,6 +29,9 @@ export default function CotizarPage() {
   const [loadingItems, setLoadingItems] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Aviso propio del checkbox de privacidad, en lugar del globito nativo del
+  // navegador (que sale en su idioma y con su estilo, no el de la tienda).
+  const [privacyMissing, setPrivacyMissing] = useState(false);
   // Productos del borrador que ya no se pueden cotizar. Se muestran, no se
   // descartan en silencio: si al cliente le desaparece un item sin aviso, va
   // a pensar que se olvido de agregarlo.
@@ -470,6 +473,64 @@ export default function CotizarPage() {
           />
         </Field>
 
+        {/* Checkbox obligatorio (antes era solo un texto informativo). Los
+            datos son los indispensables para responder, pero se guardan y se
+            procesan en servidores fuera de Argentina, y esa transferencia
+            necesita un consentimiento expreso que un "al enviar aceptás" no
+            da. El servidor valida igual: `required` es comodidad, no
+            seguridad (la Server Action es un endpoint).
+
+            El link abre en otra pestaña para que leer la política no haga
+            perder lo que el cliente ya cargó en el formulario.
+
+            Sin marcar, `required` sigue frenando el envío, pero el globito
+            nativo se reemplaza por un aviso propio: `preventDefault()` en el
+            evento `invalid` suprime SOLO el de este campo (nombre y email
+            conservan el suyo). Como sin el globito el navegador tampoco lleva
+            el foco, se lo lleva a mano. */}
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-start gap-3 text-sm text-foreground/80">
+            <input
+              type="checkbox"
+              name="privacyAccepted"
+              required
+              aria-invalid={privacyMissing}
+              aria-describedby={privacyMissing ? "privacy-error" : undefined}
+              onInvalid={(event) => {
+                event.preventDefault();
+                setPrivacyMissing(true);
+                event.currentTarget.focus();
+              }}
+              onChange={(event) => {
+                if (event.currentTarget.checked) setPrivacyMissing(false);
+              }}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+            />
+            <span>
+              Leí y acepto la{" "}
+              <Link
+                href="/privacidad"
+                target="_blank"
+                rel="noopener"
+                className="text-primary underline underline-offset-2 transition-colors hover:text-primary-light"
+              >
+                Política de privacidad
+              </Link>
+              <span className="text-primary"> *</span>
+            </span>
+          </label>
+          {privacyMissing && (
+            <p
+              id="privacy-error"
+              role="alert"
+              className="ml-7 text-xs font-medium text-primary-dark"
+            >
+              Para enviar la solicitud tenés que aceptar la Política de
+              privacidad.
+            </p>
+          )}
+        </div>
+
         {error && (
           <p className="rounded-lg bg-primary-dark/5 px-4 py-3 text-sm text-primary-dark">
             {error}
@@ -484,25 +545,6 @@ export default function CotizarPage() {
         >
           {isPending ? "Enviando..." : "Enviar solicitud de cotización"}
         </button>
-
-        {/* Texto informativo, NO un checkbox obligatorio.
-        
-            Un checkbox de "acepto" agrega un paso mas para cerrar la unica
-            conversion del sitio, y como consentimiento no aporta gran cosa:
-            los datos que se piden son los indispensables para responder la
-            cotizacion que el cliente esta pidiendo. Lo que si corresponde es
-            que pueda LEER que se hace con ellos antes de mandarlos, y para eso
-            alcanza con el link visible junto al boton. */}
-        <p className="text-xs text-foreground/50">
-          Al enviar aceptás nuestra{" "}
-          <Link
-            href="/privacidad"
-            className="text-foreground/70 underline underline-offset-2 transition-colors hover:text-primary"
-          >
-            política de privacidad
-          </Link>
-          .
-        </p>
       </form>
     </div>
   );

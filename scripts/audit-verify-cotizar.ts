@@ -2,6 +2,7 @@
 // prueba las acciones publicas de /cotizar contra la base LOCAL.
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma";
+import { POLITICA_PRIVACIDAD_VERSION } from "../src/lib/privacidad";
 import {
   getQuoteItemsSummary,
   submitQuote,
@@ -62,6 +63,7 @@ async function main() {
       { productId: vivo.id, variantSku: sku, quantity: 2 },
       { productId: pausado.id, variantSku: skuPausado, quantity: 1 },
     ]));
+    fd.set("privacyAccepted", "on");
     const r = await submitQuote(fd);
     console.log("[submit] success:", r.success, "| omitidos:", r.omittedProducts, "(esperado: nombre del pausado)");
 
@@ -70,13 +72,31 @@ async function main() {
     fd2.set("customerName", "Test");
     fd2.set("customerEmail", "t@t.co");
     fd2.set("items", JSON.stringify([{ productId: vivo.id, variantSku: sku, quantity: -3 }]));
+    fd2.set("privacyAccepted", "on");
     const r2 = await submitQuote(fd2);
     console.log("[submit] solo negativa -> success:", r2.success, "| error:", r2.error, "(esperado: false + 'Agrega al menos...')");
 
-    // 5) La cotizacion creada en (3) conserva SOLO la linea valida, con cantidad 2.
+    // 4b) Politica de privacidad: sin el checkbox (o con un valor que no es
+    //     "on") se rechaza llamando la accion directo, sin crear nada.
+    const antes = await prisma.quote.count();
+    for (const valor of [null, "", "off", "true"]) {
+      const fd3 = new FormData();
+      fd3.set("customerName", "Sin Aceptar");
+      fd3.set("customerEmail", "sinaceptar@test.local");
+      fd3.set("items", JSON.stringify([{ productId: vivo.id, variantSku: sku, quantity: 1 }]));
+      if (valor !== null) fd3.set("privacyAccepted", valor);
+      const r3 = await submitQuote(fd3);
+      console.log(`[privacidad] privacyAccepted=${JSON.stringify(valor)} -> success:`, r3.success, "| error:", r3.error, "(esperado: false + 'tenés que aceptar...')");
+    }
+    console.log("[privacidad] cotizaciones creadas sin aceptar:", (await prisma.quote.count()) - antes, "(esperado 0)");
+
+    // 5) La cotizacion creada en (3) conserva SOLO la linea valida, con cantidad 2,
+    //    y guarda la aceptacion con fecha del servidor y la version vigente.
     if (r.quoteId) {
       const q = await prisma.quote.findUnique({ where: { id: r.quoteId }, include: { items: true } });
       console.log("[db] items guardados:", q?.items.length, "| quantity:", q?.items[0]?.quantity, "(esperado 1 y 2)");
+      const segundos = q?.privacyAcceptedAt ? Math.abs(Date.now() - q.privacyAcceptedAt.getTime()) / 1000 : null;
+      console.log("[db] privacyVersion:", q?.privacyVersion, `(esperado ${POLITICA_PRIVACIDAD_VERSION})`, "| privacyAcceptedAt hace", segundos, "s (esperado < 60)");
       await prisma.quote.delete({ where: { id: r.quoteId } });
       console.log("[db] cotizacion de prueba borrada");
     }

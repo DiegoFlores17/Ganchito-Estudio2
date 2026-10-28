@@ -33,6 +33,7 @@ async function main() {
     fd.set("items", JSON.stringify([
       { productId: producto.id, variantSku: producto.variants[0].sku, quantity: 3 },
     ]));
+    fd.set("privacyAccepted", "on");
     const r = await submitQuote(fd);
 
     console.log("[submit] success:", r.success, "| shortCode:", r.shortCode);

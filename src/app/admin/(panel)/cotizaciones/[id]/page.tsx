@@ -4,6 +4,7 @@ import { formatDate, formatDateTime, formatPriceArs } from "@/lib/format";
 import { requireAdmin } from "@/lib/admin-auth";
 import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
 import { AdminRole } from "@prisma/client";
+import { productosBajoMinimo } from "@/lib/quote-minimum";
 import { QuoteEraseButton } from "@/components/admin/quote-erase-button";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
 import { StatusBadge } from "@/components/admin/status-badge";
@@ -35,6 +36,9 @@ export default async function CotizacionDetallePage({
   const history = borrada
     ? []
     : await getQuoteHistoryByEmail(quote.customerEmail, quote.id);
+  // Productos debajo del minimo del proveedor (por total del producto, con el
+  // snapshot de cada linea). Solo se ve aca: el cliente no lo ve nunca.
+  const bajoMinimo = productosBajoMinimo(quote.items);
   const total = quote.items.reduce(
     (sum, item) => sum + Number(item.unitPrice) * item.quantity,
     0
@@ -105,6 +109,12 @@ export default async function CotizacionDetallePage({
                   >
                     <td className="px-4 py-3 text-foreground">
                       {item.product.name}
+                      {bajoMinimo.has(item.productId) && (
+                        <span className="mt-0.5 block text-xs font-medium text-amber-700">
+                          Debajo del mínimo del proveedor (mín.{" "}
+                          {bajoMinimo.get(item.productId)})
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-foreground/70">
                       {item.variantSku ?? "—"}

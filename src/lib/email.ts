@@ -159,6 +159,10 @@ export interface QuoteEmailInput {
     quantity: number;
     unitPriceLabel: string;
     subtotalLabel: string;
+    /// Minimo del proveedor, solo si el TOTAL del producto en la cotizacion
+    /// quedo debajo (se calcula por producto, no por linea). Null/ausente:
+    /// sin marca. Es un aviso interno: este mail es para Ganchito.
+    minimoProveedor?: number | null;
   }>;
   totalLabel: string;
   /// A donde se avisa. Sale de SiteConfig.contactEmail (editable desde el
@@ -188,6 +192,7 @@ export async function sendQuoteNotification(
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee;">
           ${escapar(l.productName)}
           ${l.variantLabel ? `<br><span style="color: #666; font-size: 13px;">${escapar(l.variantLabel)}</span>` : ""}
+          ${l.minimoProveedor ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">Debajo del mínimo del proveedor (mín. ${l.minimoProveedor})</span>` : ""}
         </td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${l.quantity}</td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${l.unitPriceLabel}</td>

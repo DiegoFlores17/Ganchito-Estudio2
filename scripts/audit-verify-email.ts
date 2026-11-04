@@ -144,6 +144,15 @@ async function main() {
     to: "consultas@ganchitoestudio.com",
   });
   check("cotizacion devuelve true y conserva replyTo", ok5 === true && enviados.at(-1)?.body.reply_to === "juan@empresa.com", JSON.stringify(enviados.at(-1)?.body.reply_to));
+
+  console.log("\n=========== COTIZACION: marca de minimo del proveedor ===========");
+  const MARCA = "Debajo del mínimo del proveedor (mín. 50)";
+  const base = { quoteId: "cmt-demo-9", shortCode: "B1B1B1", customerName: "Ana", customerEmail: "ana@e.com", customerPhone: null, companyName: null, notes: null, logoUrl: null, totalLabel: "$ 1", to: "consultas@ganchitoestudio.com" };
+  const linea = { productName: "Taza", variantLabel: null, quantity: 20, unitPriceLabel: "$ 1", subtotalLabel: "$ 20" };
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, minimoProveedor: 50 }] });
+  check("linea debajo del minimo lleva la marca", String(enviados.at(-1)?.body.html).includes(MARCA));
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, minimoProveedor: null }, { ...linea }] });
+  check("sin minimo (null/ausente): sin marca", !String(enviados.at(-1)?.body.html).includes("mínimo del proveedor"));
 }
 
 main()

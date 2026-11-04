@@ -234,11 +234,10 @@ export async function syncProduct(
       // no. Si alguna vez se toca esto, hay que verificarlo producto por
       // producto contra el backoffice, no confiando en el campo.
       currency: Currency.ARS,
-      // El minimo de compra sale de minimum_application_quantity, NO de
-      // minimum_order_quantity: ese ultimo es un umbral logistico del
-      // proveedor (Zecat vende desde 1 unidad aunque diga 4786) y usarlo
-      // como minimo de venta hacia incotizable al 21% del catalogo.
-      // Verificado contra su backoffice — ver el comentario del schema.
+      // Umbral de personalizacion SIN recargo: sale de
+      // minimum_application_quantity, NO de minimum_order_quantity (ese es
+      // un umbral logistico: Zecat vende desde 1 unidad aunque diga 4786).
+      // Tampoco es un minimo de compra — ver el comentario del schema.
       minOrderQuantity: detail.minimum_application_quantity ?? null,
       // Se conserva crudo: no es un minimo de venta, pero es informacion
       // del proveedor que puede servir despues.

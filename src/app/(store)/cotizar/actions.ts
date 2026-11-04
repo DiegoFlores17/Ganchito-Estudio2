@@ -19,7 +19,8 @@ import {
 } from "@/lib/quote-message";
 import { Prisma } from "@prisma/client";
 import { POLITICA_PRIVACIDAD_VERSION } from "@/lib/privacidad";
-import { productosBajoMinimo } from "@/lib/quote-minimum";
+import { productosConRecargo } from "@/lib/quote-minimum";
+import { lineasSobreElStock } from "@/lib/quote-stock";
 import {
   QUOTE_LOGO_EXTENSIONS,
   saveUploadedFile,
@@ -111,10 +112,6 @@ export interface QuoteItemSummary {
   subtotal: number;
   subtotalLabel: string;
   inStock: boolean;
-  /** Minimo de personalizacion del proveedor, a nivel PRODUCTO (no por
-   * variante) — para agrupar y avisar en /cotizar si la suma de lineas de
-   * este producto no lo alcanza. */
-  minOrderQuantity: number | null;
 }
 
 export interface QuoteSummaryResult {
@@ -239,7 +236,6 @@ export async function getQuoteItemsSummary(
       subtotal,
       subtotalLabel: formatPriceArs(subtotal),
       inStock: getVariantAvailableStock(variant) > 0,
-      minOrderQuantity: product.minOrderQuantity,
     });
   }
 
@@ -402,6 +398,10 @@ export async function submitQuote(
         where: { active: true },
         select: {
           sku: true,
+          // Stock para la marca interna de "pedido mayor al stock" (mail a
+          // Ganchito). No se usa para bloquear nada.
+          stock: true,
+          reservedStock: true,
           costPrice: true,
           discountPercent: true,
           discountTiers: true,
@@ -422,6 +422,9 @@ export async function submitQuote(
     minOrderQuantity: number | null;
   }> = [];
   const messageLines: QuoteMessageLine[] = [];
+  // Stock disponible de cada sku que entro, para marcar en el mail los pedidos
+  // que lo superan. Sale del mismo producto ya leido: no hay otra consulta.
+  const disponiblePorSku = new Map<string, number>();
   const omitidos: string[] = [];
   const omitidosIds = new Set<string>();
   // El tramo de descuento se elige por el total del producto, y ese total se
@@ -480,14 +483,17 @@ export async function submitQuote(
       variantSku: variant.sku,
       quantity: item.quantity,
       unitPrice,
-      // Snapshot del minimo del proveedor. No se rechaza por esto: es una
-      // cotizacion, no una venta, y rebotarla pierde el contacto. Solo se
-      // marca para Ganchito (ver lib/quote-minimum.ts).
+      // Snapshot del umbral de personalizacion sin recargo del proveedor. No
+      // se rechaza por esto: es una cotizacion, no una venta, y rebotarla
+      // pierde el contacto. Solo se marca para Ganchito (ver
+      // lib/quote-minimum.ts).
       minOrderQuantity: product.minOrderQuantity,
     });
 
     // La linea del mensaje de WhatsApp se arma ACA, con los mismos valores
     // que se congelan — no se recalcula nada al armar el texto.
+    disponiblePorSku.set(variant.sku, getVariantAvailableStock(variant));
+
     messageLines.push({
       productName: product.name,
       variantLabel:
@@ -542,8 +548,11 @@ export async function submitQuote(
   const omittedProducts = await getUnavailableNames([...omitidosIds]);
 
   // Productos cuyo total (suma de sus lineas que entraron) queda debajo del
-  // minimo del proveedor. Por PRODUCTO y no por linea, igual que /cotizar.
-  const bajoMinimo = productosBajoMinimo(quoteItemsData);
+  // umbral sin recargo del proveedor. Por PRODUCTO y no por linea, igual que
+  // /cotizar.
+  const conRecargo = productosConRecargo(quoteItemsData);
+  // Lineas cuyo pedido supera el stock del ultimo sync (por sku). Interno.
+  const sobreElStock = lineasSobreElStock(quoteItemsData, disponiblePorSku);
 
   // shortCode con retry: 31^6 combinaciones hacen el choque rarisimo, pero
   // "rarisimo" con clientes reales es "algun dia". Ante P2002 se regenera y
@@ -632,9 +641,10 @@ export async function submitQuote(
         productName: l.productName,
         variantLabel: l.variantLabel,
         quantity: l.quantity,
-        // Solo el mail a Ganchito lleva la marca; el mensaje de WhatsApp
+        // Solo el mail a Ganchito lleva las marcas; el mensaje de WhatsApp
         // (messageLines) no.
-        minimoProveedor: bajoMinimo.get(quoteItemsData[i].productId) ?? null,
+        sinRecargoDesde: conRecargo.get(quoteItemsData[i].productId) ?? null,
+        stockDisponible: sobreElStock[i],
         unitPriceLabel: formatPriceArs(l.subtotal / l.quantity),
         subtotalLabel: formatPriceArs(l.subtotal),
       })),

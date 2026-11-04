@@ -1,6 +1,8 @@
 import { Resend } from "resend";
 import { formatDateTime } from "@/lib/format";
 import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
+import { textoRecargoProveedor } from "@/lib/quote-minimum";
+import { textoPedidoMayorAlStock } from "@/lib/quote-stock";
 import { textoNoVerificado } from "@/lib/sync/textos";
 
 /// Envio de mails transaccionales (Resend). Dos usos hoy: aviso de
@@ -160,10 +162,15 @@ export interface QuoteEmailInput {
     quantity: number;
     unitPriceLabel: string;
     subtotalLabel: string;
-    /// Minimo del proveedor, solo si el TOTAL del producto en la cotizacion
-    /// quedo debajo (se calcula por producto, no por linea). Null/ausente:
-    /// sin marca. Es un aviso interno: este mail es para Ganchito.
-    minimoProveedor?: number | null;
+    /// Umbral desde el cual el proveedor NO cobra recargo de personalizacion,
+    /// solo si el TOTAL del producto en la cotizacion quedo debajo (se calcula
+    /// por producto, no por linea). Null/ausente: sin marca. Es un aviso
+    /// interno: este mail es para Ganchito.
+    sinRecargoDesde?: number | null;
+    /// Stock disponible de la variante, solo si el pedido de ese sku lo supera
+    /// (ver lib/quote-stock.ts). 0 es un valor valido ("stock: 0"); null o
+    /// ausente: sin marca. Tambien interno.
+    stockDisponible?: number | null;
   }>;
   totalLabel: string;
   /// A donde se avisa. Sale de SiteConfig.contactEmail (editable desde el
@@ -193,7 +200,8 @@ export async function sendQuoteNotification(
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee;">
           ${escapar(l.productName)}
           ${l.variantLabel ? `<br><span style="color: #666; font-size: 13px;">${escapar(l.variantLabel)}</span>` : ""}
-          ${l.minimoProveedor ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">Debajo del mínimo del proveedor (mín. ${l.minimoProveedor})</span>` : ""}
+          ${l.sinRecargoDesde ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">${textoRecargoProveedor(l.sinRecargoDesde)}</span>` : ""}
+          ${l.stockDisponible != null ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">${textoPedidoMayorAlStock(l.stockDisponible)}</span>` : ""}
         </td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${l.quantity}</td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${l.unitPriceLabel}</td>

@@ -56,7 +56,7 @@ const STOCK_FORMAT_ERROR =
 const VARIANT_PRICE_FORMAT_ERROR =
   "El costo de una variante no es válido. Escribí el número sin puntos de miles (ej: 37000).";
 const MIN_ORDER_FORMAT_ERROR =
-  "La cantidad mínima no es válida. Dejala vacía si no hay mínimo, o escribí un número entero de 1 o más.";
+  "La cantidad desde la que la personalización no tiene recargo no es válida. Dejala vacía si no aplica, o escribí un número entero de 1 o más.";
 
 /// Crea o edita un producto manual. Ambos casos comparten la misma logica:
 /// si viene "productId" en el formulario, es edicion; si no, alta.
@@ -96,9 +96,10 @@ export async function saveProduct(formData: FormData): Promise<ProductActionResu
     return { success: false, error: PRICE_FORMAT_ERROR };
   }
 
-  // Minimo de personalizacion. Vacio = sin minimo (null), que es como quedaban
-  // TODOS los productos manuales hasta ahora porque el campo no era editable.
-  // Si viene, tiene que ser un entero >= 1: un minimo de 0 no significa nada.
+  // Cantidad desde la que la personalizacion no lleva recargo del proveedor
+  // (no es un minimo de compra). Vacio = no aplica (null), que es como
+  // quedaban TODOS los productos manuales hasta ahora porque el campo no era
+  // editable. Si viene, tiene que ser un entero >= 1: 0 no significa nada.
   const minOrderRaw = String(formData.get("minOrderQuantity") ?? "").trim();
   let minOrderQuantity: number | null = null;
   if (minOrderRaw) {

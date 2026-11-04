@@ -80,3 +80,48 @@ export function removeFromQuoteCart(index: number): QuoteCartItem[] {
 export function clearQuoteCart(): void {
   writeRaw([]);
 }
+
+/// Suscripcion al carrito para `useSyncExternalStore`: cubre la misma pestana
+/// (evento propio) y las otras (evento nativo "storage").
+export function subscribeQuoteCart(onChange: () => void): () => void {
+  window.addEventListener(QUOTE_CART_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(QUOTE_CART_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/// El carrito CRUDO (string). `useSyncExternalStore` compara snapshots con
+/// Object.is: devolver un array nuevo en cada lectura loopearia, un string
+/// igual no.
+export function getQuoteCartSnapshot(): string {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+
+/// Cantidad ya guardada en el carrito, por sku, de UN producto. Ignora lineas
+/// sin sku, de otros productos y cantidades que no son un numero. Tolera un
+/// JSON roto (devuelve vacio).
+export function cantidadesEnCarritoPorSku(
+  raw: string,
+  productId: string
+): Record<string, number> {
+  const porSku: Record<string, number> = {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return porSku;
+    for (const item of parsed) {
+      if (!item || item.productId !== productId || !item.variantSku) continue;
+      const n = Number(item.quantity);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      porSku[item.variantSku] = (porSku[item.variantSku] ?? 0) + n;
+    }
+  } catch {
+    // JSON roto: sin cantidades.
+  }
+  return porSku;
+}

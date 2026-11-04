@@ -1,17 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { addToQuoteCart } from "@/lib/quote-cart";
+import {
+  addToQuoteCart,
+  cantidadesEnCarritoPorSku,
+  getQuoteCartSnapshot,
+  subscribeQuoteCart,
+} from "@/lib/quote-cart";
+import { cantidadRestante } from "@/lib/quote-stock";
 import type { EscalonPrecio } from "@/lib/pricing";
 
 const TOAST_MS = 3200;
 
-/// Aviso cuando el pedido supera el stock que informa el proveedor. No bloquea
-/// nada: el stock es una foto del ultimo sync y el cliente puede necesitar mas;
-/// lo confirmamos al cotizar.
-export const AVISO_PEDIDO_MAYOR_AL_STOCK =
-  "Pedido mayor al stock informado; lo confirmamos al cotizar.";
+/// Aviso para un carrito VIEJO: lo que el cliente guardo en otra visita puede
+/// superar el stock de hoy si un sync lo bajo. Desde la decision de los duenos
+/// (2026-11-04) la ficha ya no deja pedir mas que el stock, asi que este es el
+/// unico camino que llega a un pedido mayor al stock. No bloquea nada: se
+/// confirma al cotizar.
+export const AVISO_CARRITO_MAYOR_AL_STOCK =
+  "Lo que ya tenés en tu cotización supera el stock informado; lo confirmamos al cotizar.";
+
+/// Debajo de esta cantidad disponible se muestra "Quedan N disponibles".
+const POCO_STOCK = 3;
 
 /// Cuantos escalones de precio se muestran antes del "ver mas".
 ///
@@ -38,7 +49,6 @@ interface DraftLine {
   colorName: string | null;
   sizeName: string | null;
   quantity: number;
-  outOfStock: boolean;
 }
 
 function uniqueNonEmpty(values: (string | null)[]): string[] {
@@ -56,7 +66,6 @@ const pillClasses = (active: boolean) =>
 export function PurchasePanel({
   productId,
   variants,
-  minOrderQuantity,
   escalonesPorSku,
   bulkFromQuantity,
   fallbackPriceLabel,
@@ -64,7 +73,6 @@ export function PurchasePanel({
 }: {
   productId: string;
   variants: VariantData[];
-  minOrderQuantity: number | null;
   /// La escala de precios de cada variante: cada escalon con desde cuantas
   /// unidades rige y el precio de venta YA FORMATEADO.
   ///
@@ -155,16 +163,17 @@ export function PurchasePanel({
     return distintos.size > 1;
   }, [activeVariants, escalonesPorSku, bulkFromQuantity]);
 
-  // minOrderQuantity es el minimo REAL de compra a nivel PRODUCTO
-  // (minimum_application_quantity de Zecat, lo que su backoffice muestra
-  // como "Bonificacion del costo por debajo del minimo desde: N un.") — no
-  // es un piso por cada combinacion. Con variantes, cada linea puede ser
-  // cualquier cantidad
-  // (piso 1) y el minimo se valida sobre la SUMA de todas las lineas. Sin
-  // variantes hay una sola cantidad para todo el producto, asi que ahi si
-  // es directamente el piso de esa cantidad.
-  const minQuantity = minOrderQuantity ?? 1;
-  const lineFloor = hasVariantOptions ? 1 : minQuantity;
+  // minOrderQuantity (umbral de personalizacion sin recargo del proveedor) NO
+  // llega a este componente a proposito: es una condicion comercial del
+  // proveedor hacia Ganchito, no informacion para el cliente (mismo criterio
+  // que el porcentaje de descuento por cantidad). Solo se usa para marcas
+  // internas en el mail y el panel; ver lib/quote-minimum.ts. Tampoco es un
+  // minimo de compra: nunca bloquea ni fuerza la cantidad.
+  // El piso de cualquier cantidad es 1. Tambien arranca en 1: forzar la
+  // cantidad inicial al umbral (119 en el gorro) pondria al cliente a mirar
+  // el precio de 119 unidades sin haberlo pedido, y el precio por escalon
+  // dejaria de mostrar el de 1 unidad hasta que lo baje a mano.
+  const lineFloor = 1;
   const [quantity, setQuantity] = useState(lineFloor);
   // El texto del input va SEPARADO del numero: mientras se escribe "165"
   // el valor pasa por "1" y por "16", y validar en cada tecla le pisaria
@@ -189,23 +198,70 @@ export function PurchasePanel({
   }
 
   const available = selectedVariant ? selectedVariant.availableStock : 0;
-  const outOfStock = selectedVariant ? available <= 0 : false;
-  // La cantidad NO se recorta al stock, con o sin stock: el stock es lo que
-  // informo el ultimo sync, no un tope. Si el pedido lo supera se AVISA (ver
-  // AVISO_PEDIDO_MAYOR_AL_STOCK) y se confirma al cotizar. Lo unico que
-  // recorta es el minimo de compra.
+
+  // DECISION DE LOS DUENOS (2026-11-04): la cantidad SE LIMITA al stock
+  // disponible, como hace Zecat. Antes no se recortaba ("el stock es una foto
+  // del ultimo sync, no un tope"); se revirtio para no prometer lo que no se
+  // puede entregar. Una variante sin stock no se puede agregar, y un producto
+  // con todas las variantes en 0 queda visible pero sin poder cotizarse hasta
+  // que un sync lo reponga.
+  //
+  // El tope es el stock MENOS lo que ya esta pedido de ESA variante: lo que
+  // hay en el carrito guardado (otras visitas) mas las lineas de este
+  // borrador. Sin descontar el carrito, el tope se saltaba agregando de a
+  // una unidad en dos visitas. El server NO rechaza nada: esto es un tope de
+  // la ficha, y la marca del mail/panel cubre un carrito viejo.
+  //
+  // El umbral de recargo del proveedor no interviene ni se muestra aca.
+  const carritoRaw = useSyncExternalStore(
+    subscribeQuoteCart,
+    getQuoteCartSnapshot,
+    () => "[]"
+  );
+  const enCarrito = useMemo(
+    () => cantidadesEnCarritoPorSku(carritoRaw, productId),
+    [carritoRaw, productId]
+  );
+
+  /// Lo ya pedido de un sku: carrito guardado + lineas de este borrador.
+  function reservadoDe(sku: string): number {
+    return (
+      (enCarrito[sku] ?? 0) +
+      lines.filter((l) => l.sku === sku).reduce((sum, l) => sum + l.quantity, 0)
+    );
+  }
+
+  /// Cuanto mas se puede agregar de la variante elegida.
+  const restante = selectedVariant
+    ? cantidadRestante(available, reservadoDe(selectedVariant.sku))
+    : 0;
+  const sinCupo = restante <= 0;
+
+  // Al cambiar de variante o de lineas el tope se mueve: se corrige la
+  // cantidad al renderizar (estado derivado, mismo patron que seExpandio...
+  // abajo) en vez de hacerlo en cada handler, donde la variante todavia es la
+  // vieja.
+  if (restante > 0 && quantity > restante) {
+    setQuantity(restante);
+    setQuantityText(String(restante));
+  } else if (restante <= 0 && quantity > lineFloor) {
+    // Sin cupo no queda una cantidad vieja pegada: inflaria el escalon del
+    // precio mostrado para una variante que no se puede agregar.
+    setQuantity(lineFloor);
+    setQuantityText(String(lineFloor));
+  }
+
+  // El piso es 1 y el techo es el
+  // cupo. Sin cupo la cantidad queda en 1 y el agregar esta deshabilitado.
   function clampQuantity(value: number): number {
-    return Math.max(value, lineFloor);
+    const techo = restante > 0 ? restante : lineFloor;
+    return Math.min(Math.max(value, lineFloor), techo);
   }
 
-  /// Stock informado de un sku (0 si no figura).
-  function stockDe(sku: string): number {
-    return activeVariants.find((v) => v.sku === sku)?.availableStock ?? 0;
-  }
-
-  /// Hay stock informado y el pedido lo supera. Con stock 0 no aplica: ahi ya
-  /// sale "Consultar disponibilidad".
-  const pedidoSuperaElStock = !outOfStock && available > 0 && quantity > available;
+  /// El carrito guardado ya supera el stock de hoy (un sync lo bajo despues).
+  const carritoSuperaElStock =
+    selectedVariant !== undefined &&
+    (enCarrito[selectedVariant.sku] ?? 0) > available;
 
   /// Unico camino para mover la cantidad: mantiene numero y texto en sinc.
   function aplicarCantidad(value: number) {
@@ -235,11 +291,10 @@ export function PurchasePanel({
   /// Remera Regent eso mostraba $6.974 contra $11.218 cuando la diferencia
   /// real es contra $9.555: una comparacion inflada, peor que no avisar nada.
   ///
-  /// Ya no se recorta al stock de la nueva variante (el stock no es un tope):
-  /// solo se respeta el piso. Si la cantidad supera el stock de la nueva, el
-  /// aviso aparece solo.
+  /// El piso se respeta aca; el techo (el cupo de la NUEVA variante) lo aplica
+  /// la correccion al renderizar, cuando la variante ya cambio.
   function conservarCantidad() {
-    const n = clampQuantity(quantity);
+    const n = Math.max(quantity, lineFloor);
     setQuantity(n);
     setQuantityText(String(n));
   }
@@ -261,7 +316,9 @@ export function PurchasePanel({
   }
 
   function handleAddLine() {
-    if (!selectedVariant) return;
+    if (!selectedVariant || sinCupo) return;
+    // Defensa: nunca mas que el cupo, aunque el estado venga atrasado.
+    const cantidad = Math.min(quantity, restante);
 
     const existingIndex = lines.findIndex(
       (line) => line.sku === selectedVariant.sku
@@ -272,7 +329,7 @@ export function PurchasePanel({
         const next = [...prev];
         next[existingIndex] = {
           ...next[existingIndex],
-          quantity: next[existingIndex].quantity + quantity,
+          quantity: next[existingIndex].quantity + cantidad,
         };
         return next;
       });
@@ -284,8 +341,7 @@ export function PurchasePanel({
           sku: selectedVariant.sku,
           colorName: selectedVariant.colorName,
           sizeName: selectedVariant.sizeName,
-          quantity,
-          outOfStock,
+          quantity: cantidad,
         },
       ]);
       setNotice(null);
@@ -299,8 +355,6 @@ export function PurchasePanel({
   }
 
   const linesTotal = lines.reduce((sum, line) => sum + line.quantity, 0);
-  const minimumMet = !hasVariantOptions || linesTotal >= minQuantity;
-
   // El total del PRODUCTO que define el tramo de descuento: lo ya agregado mas
   // lo que hay en el selector. Verificado en el backoffice de Zecat que el
   // tramo se elige por el total del producto sumando todas sus variantes — 50
@@ -360,25 +414,33 @@ export function PurchasePanel({
     : escalones.slice(0, MAX_ESCALONES_VISIBLES);
   const escalonesOcultos = escalones.length - filasTabla.length;
 
-  // Un escalon por encima del stock informado de ESTA variante se atenua como
-  // PISTA, no como bloqueo: se puede pedir igual (el stock es una foto del
-  // ultimo sync) y lo confirmamos al cotizar. El precio es verdadero, asi que
+  // Un escalon por encima del stock informado de ESTA variante se atenua: la
+  // cantidad esta limitada al stock, asi que ese tramo no se puede alcanzar.
+  // El precio es verdadero y es informacion de la escala del proveedor, asi que
   // la fila no se saca.
   //
-  // Con stock 0 NO se atenua nada: ahi ya sale "Consultar disponibilidad" y
+  // Con stock 0 NO se atenua nada: ahi ya sale "Sin stock por ahora" y
   // atenuar toda la tabla seria mentir al reves.
-  const hayStockInformado = !outOfStock && available > 0;
+  const hayStockInformado = available > 0;
   const masQueElStock = (desde: number) => hayStockInformado && desde > available;
 
   function handleAddToQuote() {
     if (hasVariantOptions) {
-      if (lines.length === 0 || !minimumMet) return;
+      if (lines.length === 0) return;
+      // Se vuelve a medir el cupo contra el carrito guardado de AHORA: otra
+      // pestaña pudo sumar el mismo sku despues de armar este borrador.
+      const enCarritoAhora = cantidadesEnCarritoPorSku(getQuoteCartSnapshot(), productId);
       for (const line of lines) {
+        const variante = variants.find((v) => v.sku === line.sku);
+        const cupo = cantidadRestante(variante?.availableStock ?? 0, enCarritoAhora[line.sku] ?? 0);
+        const cantidad = Math.min(line.quantity, cupo);
+        if (cantidad <= 0) continue;
         addToQuoteCart({
           productId,
           variantSku: line.sku,
-          quantity: line.quantity,
+          quantity: cantidad,
         });
+        enCarritoAhora[line.sku] = (enCarritoAhora[line.sku] ?? 0) + cantidad;
       }
       showAddedToast(
         lines.length === 1
@@ -388,10 +450,11 @@ export function PurchasePanel({
       setLines([]);
       setNotice(null);
     } else {
+      if (sinCupo) return;
       addToQuoteCart({
         productId,
         variantSku: selectedVariant?.sku,
-        quantity,
+        quantity: Math.min(quantity, restante),
       });
       showAddedToast("Agregado a tu cotización.");
       aplicarCantidad(lineFloor);
@@ -546,41 +609,34 @@ export function PurchasePanel({
           <button
             type="button"
             onClick={() => aplicarCantidad(quantity + 1)}
+            disabled={quantity >= restante}
             className="flex h-9 w-9 items-center justify-center rounded-full border border-foreground/15 text-foreground/70 hover:border-primary disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Sumar"
           >
             +
           </button>
         </div>
-        {/* Un minimo de 1 no es un minimo: no se avisa. Desde que el minimo
-            sale del campo correcto, 624 de los 641 productos de Zecat estan
-            en 1, y anunciarlo llenaba el catalogo de un cartel que no pide
-            nada. Ademas evita el "1 unidades". */}
-        {!hasVariantOptions && minQuantity > 1 ? (
-          <p className="mt-2 text-xs text-foreground/50">
-            Cantidad mínima: {minQuantity} unidades
-          </p>
-        ) : null}
       </div>
 
       {/* Region viva SIEMPRE montada: un lector de pantalla anuncia el cambio
           de contenido, cosa que no hace con un nodo que aparece de golpe. */}
       <div aria-live="polite">
-        {pedidoSuperaElStock && (
+        {carritoSuperaElStock && (
           <p className="rounded-lg bg-primary-dark/5 px-3 py-2 text-sm text-primary-dark">
-            {AVISO_PEDIDO_MAYOR_AL_STOCK}
+            {AVISO_CARRITO_MAYOR_AL_STOCK}
           </p>
         )}
       </div>
 
-      {outOfStock ? (
+      {sinCupo ? (
         <p className="rounded-lg bg-primary-dark/5 px-3 py-2 text-sm text-primary-dark">
-          Consultar disponibilidad{hasVariantOptions ? " para esta combinación" : ""}.
-          Igual podés agregarla a tu pedido.
+          {available <= 0
+            ? `Sin stock por ahora${hasVariantOptions ? " en esta combinación" : ""}. Cuando se reponga la vas a poder cotizar.`
+            : "Ya sumaste todo el stock disponible de esta opción."}
         </p>
-      ) : hasVariantOptions && available <= minQuantity + 2 ? (
+      ) : hasVariantOptions && available <= POCO_STOCK ? (
         <p className="text-xs text-foreground/50">
-          Quedan {available} disponibles.
+          {available === 1 ? "Queda 1 disponible." : `Quedan ${available} disponibles.`}
         </p>
       ) : null}
 
@@ -589,7 +645,8 @@ export function PurchasePanel({
           <button
             type="button"
             onClick={handleAddLine}
-            className="rounded-full border border-dashed border-primary px-4 py-2.5 text-center text-sm font-medium text-primary transition-colors hover:bg-primary/5"
+            disabled={sinCupo}
+            className="rounded-full border border-dashed border-primary px-4 py-2.5 text-center text-sm font-medium text-primary transition-colors hover:bg-primary/5 disabled:cursor-not-allowed disabled:border-foreground/20 disabled:text-foreground/40 disabled:hover:bg-transparent"
           >
             + Agregar combinación{comboLabel ? ` (${comboLabel})` : ""}
           </button>
@@ -622,16 +679,6 @@ export function PurchasePanel({
                       <span className="text-foreground/60">
                         · {line.quantity} u.
                       </span>
-                      {line.outOfStock && (
-                        <span className="ml-2 rounded-full bg-primary-dark px-2 py-0.5 text-xs font-medium text-white">
-                          Consultar disponibilidad
-                        </span>
-                      )}
-                      {!line.outOfStock && stockDe(line.sku) > 0 && line.quantity > stockDe(line.sku) && (
-                        <p className="mt-0.5 text-xs text-primary-dark">
-                          {AVISO_PEDIDO_MAYOR_AL_STOCK}
-                        </p>
-                      )}
                     </div>
                     <button
                       type="button"
@@ -646,29 +693,10 @@ export function PurchasePanel({
             )}
           </div>
 
-          {/* Mismo criterio que arriba: con minimo 1, "Llevás 0 de 1 unidades
-              mínimas" no informa nada que no digan ya el estado vacío de la
-              lista y el botón deshabilitado. El aviso queda para los pocos
-              productos donde el mínimo es una condición real. */}
-          {minQuantity > 1 ? (
-            <p
-              className={
-                "text-sm " +
-                (minimumMet
-                  ? "text-foreground/50"
-                  : "font-medium text-primary-dark")
-              }
-            >
-              Llevás {linesTotal} de {minQuantity} unidades mínimas
-              {!minimumMet &&
-                ` — agregá ${minQuantity - linesTotal} más para poder cotizar este producto`}
-            </p>
-          ) : null}
-
           <button
             type="button"
             onClick={handleAddToQuote}
-            disabled={lines.length === 0 || !minimumMet}
+            disabled={lines.length === 0}
             // Marca para que la burbuja de WhatsApp se corra cuando este boton
             // esta a la vista. Va solo en el CIERRE de la accion: "+ Agregar
             // combinacion" se toca varias veces mientras se arma el pedido y
@@ -683,8 +711,9 @@ export function PurchasePanel({
         <button
           type="button"
           onClick={handleAddToQuote}
+          disabled={sinCupo}
           data-cta-principal
-          className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover"
+          className="rounded-full bg-accent px-6 py-3.5 text-center text-sm font-medium text-primary-dark transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-foreground/10 disabled:text-foreground/40"
         >
           Agregar a mi cotización
         </button>

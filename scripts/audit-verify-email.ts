@@ -145,14 +145,26 @@ async function main() {
   });
   check("cotizacion devuelve true y conserva replyTo", ok5 === true && enviados.at(-1)?.body.reply_to === "juan@empresa.com", JSON.stringify(enviados.at(-1)?.body.reply_to));
 
-  console.log("\n=========== COTIZACION: marca de minimo del proveedor ===========");
-  const MARCA = "Debajo del mínimo del proveedor (mín. 50)";
+  console.log("\n=========== COTIZACION: marca de recargo del proveedor ===========");
+  const MARCA = "Personalización con recargo del proveedor (sin recargo desde 50 un.)";
   const base = { quoteId: "cmt-demo-9", shortCode: "B1B1B1", customerName: "Ana", customerEmail: "ana@e.com", customerPhone: null, companyName: null, notes: null, logoUrl: null, totalLabel: "$ 1", to: "consultas@ganchitoestudio.com" };
   const linea = { productName: "Taza", variantLabel: null, quantity: 20, unitPriceLabel: "$ 1", subtotalLabel: "$ 20" };
-  await sendQuoteNotification({ ...base, lines: [{ ...linea, minimoProveedor: 50 }] });
-  check("linea debajo del minimo lleva la marca", String(enviados.at(-1)?.body.html).includes(MARCA));
-  await sendQuoteNotification({ ...base, lines: [{ ...linea, minimoProveedor: null }, { ...linea }] });
-  check("sin minimo (null/ausente): sin marca", !String(enviados.at(-1)?.body.html).includes("mínimo del proveedor"));
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, sinRecargoDesde: 50 }] });
+  check("linea debajo del umbral lleva la marca de recargo", String(enviados.at(-1)?.body.html).includes(MARCA));
+  check("ya no dice 'Debajo del mínimo'", !String(enviados.at(-1)?.body.html).includes("Debajo del mínimo"));
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, sinRecargoDesde: null }, { ...linea }] });
+  check("sin umbral (null/ausente): sin marca", !String(enviados.at(-1)?.body.html).includes("recargo del proveedor"));
+
+  console.log("\n=========== COTIZACION: marca de pedido mayor al stock ===========");
+  const MARCA_STOCK = "Pedido mayor al stock del último sync (stock: 7)";
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, stockDisponible: 7 }] });
+  check("linea que supera el stock lleva la marca", String(enviados.at(-1)?.body.html).includes(MARCA_STOCK));
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, stockDisponible: 0 }] });
+  check("stock 0 se escribe '(stock: 0)'", String(enviados.at(-1)?.body.html).includes("Pedido mayor al stock del último sync (stock: 0)"));
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, stockDisponible: null }, { ...linea }] });
+  check("sin dato de stock (null/ausente): sin marca", !String(enviados.at(-1)?.body.html).includes("Pedido mayor al stock"));
+  await sendQuoteNotification({ ...base, lines: [{ ...linea, sinRecargoDesde: 50, stockDisponible: 7 }] });
+  check("las dos marcas conviven en la misma linea", String(enviados.at(-1)?.body.html).includes(MARCA) && String(enviados.at(-1)?.body.html).includes(MARCA_STOCK));
 }
 
 main()

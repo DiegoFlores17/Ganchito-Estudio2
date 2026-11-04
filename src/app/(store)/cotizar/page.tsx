@@ -164,30 +164,6 @@ export default function CotizarPage() {
 
   const total = items.reduce((sum, item) => sum + item.subtotal, 0);
 
-  // Minimo de personalizacion del proveedor: es por PRODUCTO, no por linea.
-  // Si el mismo producto tiene varias lineas (distintos color/talle, de una
-  // sola visita o de varias), hay que sumarlas todas antes de comparar
-  // contra el minimo — por eso se agrupa por productId aca, sobre el estado
-  // ACTUAL de items (asi tambien refleja lineas que el cliente saco con
-  // "Quitar").
-  const belowMinimum = (() => {
-    const totals = new Map<
-      string,
-      { productName: string; total: number; min: number }
-    >();
-    for (const item of items) {
-      if (!item.minOrderQuantity) continue;
-      const entry = totals.get(item.productId) ?? {
-        productName: item.productName,
-        total: 0,
-        min: item.minOrderQuantity,
-      };
-      entry.total += item.quantity;
-      totals.set(item.productId, entry);
-    }
-    return [...totals.values()].filter((p) => p.total < p.min);
-  })();
-
   if (submitted) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-24 text-center">
@@ -383,21 +359,6 @@ export default function CotizarPage() {
           </div>
         ))}
       </div>
-
-      {belowMinimum.length > 0 && (
-        <div className="mt-6 flex flex-col gap-2">
-          {belowMinimum.map((p) => (
-            <p
-              key={p.productName}
-              className="rounded-lg border border-accent-hover/50 bg-accent/15 px-4 py-3 text-sm text-foreground"
-            >
-              <span className="font-medium">{p.productName}</span> tiene un
-              mínimo de {p.min} unidades y llevás {p.total}. Podés ajustar las
-              cantidades o enviar la cotización igual — lo vemos juntos.
-            </p>
-          ))}
-        </div>
-      )}
 
       <p className="mt-4 text-right text-lg font-medium text-foreground">
         Total: {formatPriceArs(total)}{" "}

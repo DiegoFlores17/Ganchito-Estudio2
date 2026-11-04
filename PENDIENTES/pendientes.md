@@ -108,9 +108,11 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       acabamos de sacar del catálogo.
 
       > Ojo con `customization_under_minimum_extra_cost` ($95.000, idéntico en
-      > todos los productos): dedujimos que era un cargo por comprar bajo el
-      > mínimo, pero **una compra real de 1 unidad en el backoffice de Zecat
-      > NO lo cobró**. No modelarlo hasta entender qué es realmente.
+      > todos los productos): una compra real de 1 unidad en el backoffice de
+      > Zecat NO lo cobró. Desde el 2026-11-04 sabemos que `minOrderQuantity`
+      > es el umbral de personalización sin recargo (no un mínimo de compra), así
+      > que este campo probablemente es el recargo de debajo de ese umbral.
+      > Sigue sin modelarse: hoy solo se avisa.
 
 - [ ] **Verificar el descuento 116 "Descuento por color" (50%) contra el
       backoffice.** Es el único de los cinco descuentos de nivel producto con
@@ -961,11 +963,14 @@ El proyecto está deployado y funcionando en https://ganchito-estudio2.vercel.ap
       que llegar al catálogo sea inmediato — es la acción más frecuente del
       cliente. Evaluar en contexto de la Home terminada.
 
-      - [ ] **Aviso cuando el stock de una variante es menor al minOrderQuantity.**
+      - [x] **DESCARTADO (premisa refutada el 2026-11-04: `minOrderQuantity` no es un mínimo de
+      compra, así que "no puede completar el pedido" ya no aplica; el cliente
+      cotiza igual y Ganchito ve la marca de stock.) Aviso cuando el stock de una variante es menor al minOrderQuantity.**
       Hoy se puede cargar una variante con 2 de stock en un producto con mínimo 3,
       sin ninguna advertencia. No siempre es un error (el mínimo se valida sobre el
       TOTAL del producto, así que puede completarse con otras variantes; y además
-      permitimos cotizar sin stock con "Consultar disponibilidad"). Pero hay dos
+      permitimos cotizar sin stock con "Consultar disponibilidad" — esto último ya no
+      rige desde el 2026-11-04: la cantidad se limita al stock). Pero hay dos
       casos problemáticos: producto con una sola variante donde stock < mínimo, y
       producto donde la SUMA de stock de todas las variantes < mínimo. En esos
       casos el cliente no puede completar el pedido nunca.

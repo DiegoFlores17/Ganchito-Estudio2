@@ -134,7 +134,6 @@ export default async function ProductoPage({
               availableStock: getVariantAvailableStock(v),
               active: v.active,
             }))}
-            minOrderQuantity={product.minOrderQuantity}
             escalonesPorSku={escalonesPorSku}
             bulkFromQuantity={RANGE_DISCOUNT_MIN_QUANTITY}
             leyendaPrecio={

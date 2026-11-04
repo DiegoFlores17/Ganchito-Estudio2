@@ -749,40 +749,82 @@ async function main() {
   console.log("\n=========== E. FICHA: SIN TOPE DE STOCK Y AVISO DE PEDIDO MAYOR AL STOCK ===========");
   // =========================================================================
   const panelSrc = leer("src/components/product/purchase-panel.tsx");
-  const AVISO = "Pedido mayor al stock informado; lo confirmamos al cotizar.";
+  const AVISO = "Lo que ya tenés en tu cotización supera el stock informado; lo confirmamos al cotizar.";
   check("[estatico] purchase-panel contiene el texto exacto del aviso", panelSrc.includes(`"${AVISO}"`));
-  check("[estatico] purchase-panel ya no recorta la cantidad al stock (sin maxQuantity ni Math.min contra disponible)", !/maxQuantity/.test(panelSrc) && !/Math\.min\([^)]*(available|disponible|tope)/.test(panelSrc) && !/const tope\b/.test(panelSrc));
-  check("[estatico] el boton «+» ya no se deshabilita por stock", !/disabled=\{quantity >= /.test(panelSrc));
-  check("[estatico] se conserva el piso de compra minima (lineFloor) en clampQuantity", /function clampQuantity\(value: number\): number \{\s*return Math\.max\(value, lineFloor\);/.test(panelSrc));
+  check("[estatico] purchase-panel recorta la cantidad al stock restante (Math.min contra restante) y lo documenta como decision de 2026-11-04", /Math\.min\([^)]*restante/.test(panelSrc) && panelSrc.includes("2026-11-04") && !panelSrc.includes("NO se recorta al stock"));
+  check("[estatico] el boton «+» se deshabilita al llegar al tope", /disabled=\{quantity >= restante\}/.test(panelSrc));
+  check("[estatico] el piso de cantidad es 1 y NO depende del umbral de recargo del proveedor", /const lineFloor = 1;/.test(panelSrc) && /Math\.min\(Math\.max\(value, lineFloor\), techo\)/.test(panelSrc));
+  check("[estatico] el boton de agregar ya no exige el minimo (sin minimumMet ni minQuantity)", !/minimumMet|minQuantity/.test(panelSrc) && /disabled=\{lines\.length === 0\}/.test(panelSrc));
+  check("[estatico] los textos viejos de minimo ya no estan", !panelSrc.includes("unidades mínimas") && !panelSrc.includes("Cantidad mínima") && !panelSrc.includes("para poder cotizar"));
   check("[estatico] la atenuacion de la tabla ya no dice que no se puede pedir", panelSrc.includes('"Más unidades que el stock informado"') && !panelSrc.includes("disponibles hoy") && !/no se puede pedir hoy/.test(panelSrc));
-  check("[estatico] «Consultar disponibilidad» y «Quedan N disponibles» siguen", panelSrc.includes("Consultar disponibilidad") && panelSrc.includes("Quedan {available} disponibles."));
-  check("[estatico] el aviso va en una region aria-live", /<div aria-live="polite">\s*\{pedidoSuperaElStock/.test(panelSrc));
+  check("[estatico] «Quedan N disponibles» sigue", panelSrc.includes("Quedan ${available} disponibles"));
+  check("[estatico] el aviso va en una region aria-live", /<div aria-live="polite">\s*\{carritoSuperaElStock/.test(panelSrc));
+  check("[estatico] el panel lee el carrito guardado (useSyncExternalStore) y descuenta lo que ya hay del sku", panelSrc.includes("useSyncExternalStore") && panelSrc.includes("cantidadesEnCarritoPorSku"));
+  check("[estatico] las lineas del mismo sku se descuentan del tope (reservadoDe suma carrito + lineas)", /function reservadoDe\(sku: string\)[\s\S]*?lines[\s\S]*?enCarrito/.test(panelSrc));
+  check("[estatico] «Agregar combinacion» y el CTA sin variantes se deshabilitan sin cupo", (panelSrc.match(/disabled=\{sinCupo\}/g) ?? []).length >= 2);
+  check("[estatico] ya no existe el badge «Consultar disponibilidad» ni line.outOfStock (no se puede agregar sin stock)", !panelSrc.includes("Igual podés agregarla") && !/line\.outOfStock/.test(panelSrc));
 
-  // Render real (SSR) sin variantes: la cantidad inicial es el minimo de compra.
+  // El umbral del proveedor (minOrderQuantity) NO se muestra en la tienda
+  // publica ni viaja al navegador (decision de los duenos, 2026-11-04).
+  const cotizarSrc = leer("src/app/(store)/cotizar/page.tsx");
+  const fichaSrc = leer("src/app/(store)/producto/[id]/page.tsx");
+  const accionesSrc = leer("src/app/(store)/cotizar/actions.ts");
+  const prohibido = /recargo|unidades mínimas|Cantidad mínima|sin recargo|minOrderQuantity|conRecargo|belowMinimum/i;
+  check("[privacidad] purchase-panel no menciona el umbral ni «recargo»", !prohibido.test(panelSrc.replace(/\/\/.*$/gm, "")));
+  check("[privacidad] /cotizar (page) no menciona el umbral ni «recargo»", !prohibido.test(cotizarSrc.replace(/\/\/.*$/gm, "")));
+  check("[privacidad] la ficha no le pasa minOrderQuantity al panel", !fichaSrc.includes("minOrderQuantity"));
+  const bloqueResumen = /export interface QuoteItemSummary \{[\s\S]*?\n\}/.exec(accionesSrc)?.[0] ?? "";
+  const bloquePush = /summaries\.push\(\{[\s\S]*?\n    \}\);/.exec(accionesSrc)?.[0] ?? "";
+  check("[privacidad] el resumen de /cotizar (interfaz y push) ya no envia minOrderQuantity al cliente", bloqueResumen.length > 0 && bloquePush.length > 0 && !bloqueResumen.includes("minOrderQuantity") && !bloquePush.includes("minOrderQuantity"));
+
+  // Render real (SSR) sin variantes. minOrderQuantity es el umbral de
+  // personalizacion SIN recargo, no un minimo de compra: la cantidad inicial
+  // es 1 y el texto es solo informativo.
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const { PurchasePanel } = await import("../src/components/product/purchase-panel");
-  const panel = (stock: number, minimo: number | null) =>
+  const panel = (stock: number) =>
     renderToStaticMarkup(
       createElement(PurchasePanel, {
         productId: "p1",
         variants: [{ id: "v1", sku: "S1", colorName: null, sizeName: null, materialName: null, availableStock: stock, active: true }],
-        minOrderQuantity: minimo,
         escalonesPorSku: { S1: [{ desde: 1, precio: "$ 100" }, { desde: 10, precio: "$ 90" }, { desde: 50, precio: "$ 80" }] },
         bulkFromQuantity: 2,
         fallbackPriceLabel: "$ 100",
         leyendaPrecio: "Personalización y envío se cotizan aparte",
       })
     );
-  const conAviso = panel(3, 5); //  stock 3, minimo 5 -> la cantidad inicial (5) supera el stock
-  check("[runtime] stock 3 y pedido 5: muestra el aviso (y no recorta: el input dice 5)", conAviso.includes(AVISO) && /value="5"/.test(conAviso));
-  check("[runtime] el boton «+» no esta deshabilitado con el pedido por encima del stock", !/disabled=""[^>]*aria-label="Sumar"|aria-label="Sumar"[^>]*disabled=""/.test(conAviso));
-  check("[runtime] stock 3 y pedido 5: filas de la tabla por encima del stock atenuadas con el titulo nuevo", conAviso.includes('title="Más unidades que el stock informado"'));
-  const sinAviso = panel(10, 5);
-  check("[runtime] stock 10 y pedido 5: sin aviso", !sinAviso.includes(AVISO));
-  const agotado = panel(0, 5);
-  check("[runtime] stock 0: «Consultar disponibilidad», sin aviso de stock y sin filas atenuadas", agotado.includes("Consultar disponibilidad") && !agotado.includes(AVISO) && !agotado.includes("stock informado\""));
-  check("[runtime] stock 3 y pedido 3 (igual al stock): sin aviso", !panel(3, 3).includes(AVISO));
+  const conUmbral = panel(1); // como el Gorro Cap 031: stock 1 (su umbral de 119 ya no llega al componente)
+                const agotado = panel(0);
+  check("[privacidad] el HTML de la ficha (SSR) no contiene «recargo», «mínim» ni «sin recargo»", !/recargo|mínim/i.test(conUmbral) && !/recargo|mínim/i.test(agotado));
+  check("[runtime] stock 0: mensaje de sin stock, sin aviso de carrito y sin filas atenuadas", agotado.includes("Sin stock por ahora") && !agotado.includes(AVISO) && !agotado.includes("stock informado\""));
+  const dis = (tag: string) => / disabled=""/.test(tag);
+  const btn = (html: string, nombre: string) => new RegExp(`<button[^>]*aria-label="${nombre}"[^>]*>`).exec(html)?.[0] ?? "";
+  const cta = (html: string) => /<button[^>]*data-cta-principal[^>]*>/.exec(html)?.[0] ?? "";
+  check("[runtime] stock 0: el CTA «Agregar a mi cotización» esta deshabilitado", dis(cta(agotado)));
+  check("[runtime] stock 0: el «+» esta deshabilitado", dis(btn(agotado, "Sumar")));
+  check("[runtime] stock 1 (Gorro, umbral 119): el «+» esta deshabilitado en el tope", dis(btn(conUmbral, "Sumar")));
+  check("[runtime] stock 1 (Gorro, umbral 119): el CTA esta habilitado", !dis(cta(conUmbral)));
+  check("[runtime] la cantidad inicial es 1", /value="1"/.test(panel(10)));
+  const holgado = panel(10);
+  check("[runtime] stock 10: «+» y CTA habilitados", !dis(btn(holgado, "Sumar")) && !dis(cta(holgado)));
+  check("[runtime] sin carrito (SSR) no hay aviso de carrito mayor al stock", !holgado.includes(AVISO) && !conUmbral.includes(AVISO));
+
+  // --- Helpers puros del tope ---
+  const { cantidadRestante } = await import("../src/lib/quote-stock");
+  const { cantidadesEnCarritoPorSku } = await import("../src/lib/quote-cart");
+  check("[helper] cantidadRestante: disponible 5, ya hay 3 -> 2", cantidadRestante(5, 3) === 2);
+  check("[helper] cantidadRestante: ya hay de mas (carrito viejo) -> 0, nunca negativo", cantidadRestante(5, 9) === 0 && cantidadRestante(0, 0) === 0);
+  const cart = JSON.stringify([
+    { productId: "p1", variantSku: "A", quantity: 2 },
+    { productId: "p1", variantSku: "A", quantity: 3 },
+    { productId: "p2", variantSku: "A", quantity: 9 },
+    { productId: "p1", quantity: 4 },
+    { productId: "p1", variantSku: "B", quantity: "x" },
+  ]);
+  const porSku = cantidadesEnCarritoPorSku(cart, "p1");
+  check("[helper] cantidadesEnCarritoPorSku suma por sku, solo del producto, ignora sin sku y cantidades basura", porSku["A"] === 5 && porSku["B"] === undefined && Object.keys(porSku).length === 1, JSON.stringify(porSku));
+  check("[helper] cantidadesEnCarritoPorSku tolera JSON roto", Object.keys(cantidadesEnCarritoPorSku("{no", "p1")).length === 0);
 
   // --- Limpieza ---
   await zecat.cerrar();

@@ -264,21 +264,22 @@ export function ProductForm({
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground">
-          Cantidad mínima
+          Personalización sin recargo desde (un.)
         </label>
         <input
           type="number"
           name="minOrderQuantity"
           min="1"
           step="1"
-          placeholder="Sin mínimo"
+          placeholder="Sin umbral"
           defaultValue={initialProduct?.minOrderQuantity ?? ""}
           className="rounded-lg border border-foreground/15 px-4 py-2.5 text-sm outline-none focus:border-primary sm:max-w-[12rem]"
         />
         <p className="text-xs text-foreground/50">
-          Mínimo de unidades para poder cotizar este producto. Dejalo vacío si
-          no hay mínimo. Se valida sobre el total del producto, no por cada
-          combinación de color y talle.
+          Desde cuántas unidades el proveedor no cobra recargo por personalizar.
+          No bloquea la cotización: por debajo de este número solo se avisa.
+          Dejalo vacío si no hay umbral. Se mide sobre el total del producto,
+          no por cada combinación de color y talle.
         </p>
       </div>
 

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { QuoteStatus } from "@prisma/client";
+import { getVariantAvailableStock } from "@/lib/product";
 
 export async function getQuotes({
   search,
@@ -58,4 +59,27 @@ export async function getQuoteHistoryByEmail(email: string, excludeId: string) {
       items: { select: { id: true } },
     },
   });
+}
+
+/// Estado ACTUAL de las variantes de una cotizacion, por sku: stock
+/// disponible (stock - reservedStock) y si siguen activas.
+///
+/// Se lee en vivo y NO se congela en la cotizacion: si el sync repone stock,
+/// la marca de "pedido mayor al stock" tiene que desaparecer sola. Un sku que
+/// no figura en el mapa es una variante que ya no existe; una inactiva es una
+/// que el proveedor dejo de mandar. En los dos casos el panel no marca nada.
+export async function getEstadoVivoDeVariantes(skus: string[]) {
+  const unicos = [...new Set(skus)];
+  const filas = unicos.length
+    ? await prisma.productVariant.findMany({
+        where: { sku: { in: unicos } },
+        select: { sku: true, stock: true, reservedStock: true, active: true },
+      })
+    : [];
+  return new Map(
+    filas.map((v) => [
+      v.sku,
+      { disponible: getVariantAvailableStock(v), active: v.active },
+    ])
+  );
 }

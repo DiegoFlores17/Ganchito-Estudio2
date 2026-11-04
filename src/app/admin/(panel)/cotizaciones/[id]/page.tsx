@@ -2,9 +2,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatDate, formatDateTime, formatPriceArs } from "@/lib/format";
 import { requireAdmin } from "@/lib/admin-auth";
-import { getQuoteById, getQuoteHistoryByEmail } from "@/lib/admin-quotes";
+import {
+  getEstadoVivoDeVariantes,
+  getQuoteById,
+  getQuoteHistoryByEmail,
+} from "@/lib/admin-quotes";
 import { AdminRole } from "@prisma/client";
-import { productosBajoMinimo } from "@/lib/quote-minimum";
+import { productosConRecargo, textoRecargoProveedor } from "@/lib/quote-minimum";
+import {
+  esCotizacionCerrada,
+  lineasSobreElStock,
+  textoPedidoMayorAlStock,
+} from "@/lib/quote-stock";
 import { QuoteEraseButton } from "@/components/admin/quote-erase-button";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
 import { StatusBadge } from "@/components/admin/status-badge";
@@ -36,9 +45,25 @@ export default async function CotizacionDetallePage({
   const history = borrada
     ? []
     : await getQuoteHistoryByEmail(quote.customerEmail, quote.id);
-  // Productos debajo del minimo del proveedor (por total del producto, con el
-  // snapshot de cada linea). Solo se ve aca: el cliente no lo ve nunca.
-  const bajoMinimo = productosBajoMinimo(quote.items);
+  // Productos con recargo de personalizacion del proveedor (total del producto
+  // debajo del umbral, con el snapshot de cada linea). Solo se ve aca y en
+  // el mail: el cliente no ve este umbral en ninguna parte.
+  const conRecargo = productosConRecargo(quote.items);
+  // Pedido mayor al stock, EN VIVO contra el stock de hoy (no se congela: si
+  // el sync repone, la marca desaparece). Una variante inactiva o que ya no
+  // existe no se marca: se avisa con una nota neutra. En una cotizacion
+  // cerrada (aceptada, rechazada o vencida) no se muestra nada de esto: el
+  // stock de hoy no dice nada sobre algo que ya se resolvio.
+  const cerrada = esCotizacionCerrada(quote.status);
+  const estadoVivo = cerrada
+    ? new Map<string, { disponible: number; active: boolean }>()
+    : await getEstadoVivoDeVariantes(
+        quote.items.flatMap((i) => (i.variantSku ? [i.variantSku] : []))
+      );
+  const disponiblePorSku = new Map(
+    [...estadoVivo].flatMap(([sku, v]) => (v.active ? [[sku, v.disponible] as const] : []))
+  );
+  const sobreElStock = lineasSobreElStock(quote.items, disponiblePorSku);
   const total = quote.items.reduce(
     (sum, item) => sum + Number(item.unitPrice) * item.quantity,
     0
@@ -102,17 +127,28 @@ export default async function CotizacionDetallePage({
                 </tr>
               </thead>
               <tbody>
-                {quote.items.map((item) => (
+                {quote.items.map((item, i) => (
                   <tr
                     key={item.id}
                     className="border-b border-foreground/5 last:border-0"
                   >
                     <td className="px-4 py-3 text-foreground">
                       {item.product.name}
-                      {bajoMinimo.has(item.productId) && (
+                      {conRecargo.has(item.productId) && (
                         <span className="mt-0.5 block text-xs font-medium text-amber-700">
-                          Debajo del mínimo del proveedor (mín.{" "}
-                          {bajoMinimo.get(item.productId)})
+                          {textoRecargoProveedor(conRecargo.get(item.productId)!)}
+                        </span>
+                      )}
+                      {sobreElStock[i] !== null && (
+                        <span className="mt-0.5 block text-xs font-medium text-amber-700">
+                          {textoPedidoMayorAlStock(sobreElStock[i]!)}
+                        </span>
+                      )}
+                      {!cerrada && item.variantSku && !estadoVivo.get(item.variantSku)?.active && (
+                        <span className="mt-0.5 block text-xs text-foreground/50">
+                          {estadoVivo.has(item.variantSku)
+                            ? "Variante inactiva: el proveedor dejó de mandarla"
+                            : "Variante que ya no existe en el catálogo"}
                         </span>
                       )}
                     </td>

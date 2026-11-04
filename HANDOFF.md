@@ -164,7 +164,72 @@ no existe como branch aparte.
 
 ---
 
-## Fix de cotización en el servidor (2026-11-04) — en la rama `fix-cotizacion-servidor`, SIN deployar
+## `minOrderQuantity` no es un mínimo de compra (2026-11-04) — en la rama `fix-minimo-semantica`, local, SIN deployar
+
+**Evidencia (Diego, en la tienda de Zecat):** el Gorro Cap 031 (zecat 3801,
+`minimum_application_quantity` 119) se compra desde 1 unidad con el botón
+habilitado, y el 119 aparece como "Personalización sin recargos desde 119 un.".
+Es el umbral por debajo del cual el proveedor cobra un recargo por personalizar
+(relacionado con `customization_under_minimum_extra_cost`). Esto refuta el
+comentario del 2026-09-10 que lo llamaba "mínimo REAL de compra": aquel arreglo
+(sacar `minimum_order_quantity`) fue correcto, pero el reemplazo tampoco era un
+mínimo de compra.
+
+**Qué cambió (sin migración; `prisma migrate diff` da vacío):**
+- **El umbral NO se muestra en la tienda pública (decisión de los dueños,
+  2026-11-04).** Es una condición comercial del proveedor hacia Ganchito, no
+  información para el cliente (mismo criterio que el porcentaje de descuento por
+  cantidad). Se usa SOLO para las marcas internas del mail y el panel. La ficha
+  no recibe `minOrderQuantity` como prop, `/cotizar` perdió su aviso y el
+  resumen (`QuoteItemSummary`) ya no lo manda al navegador; el cliente solo ve la
+  leyenda genérica "La personalización y el envío se cotizan aparte." Hay
+  asserts en `audit-verify-cache.ts` ("[privacidad]") para que nadie lo
+  reintroduzca. Los lectores cacheados no cambiaron de forma (`VERSION_FORMA`
+  intacta): el dato sigue en `Product`, solo dejó de cruzar al cliente.
+- Ficha: el botón ya no exige el umbral; se habilita con 1 línea, y el cartel
+  "Llevás X de N unidades mínimas" se eliminó.
+- **Cantidad inicial: 1**, ya no el umbral. Forzar 119 mostraba al cliente el
+  precio de 119 unidades sin pedirlo. Con esto también se destraban los
+  productos con stock menor al umbral (el Gorro tiene 1 de stock).
+- Mail y panel: "Personalización con recargo del proveedor (sin recargo desde X
+  un.)". `QuoteItem.minOrderQuantity` y su snapshot quedan IGUAL; solo cambió el
+  significado. Renombres: `productosBajoMinimo` -> `productosConRecargo`,
+  `minimoProveedor` -> `sinRecargoDesde`.
+- **Marca nueva de stock para Ganchito** (`src/lib/quote-stock.ts`): "Pedido
+  mayor al stock del último sync (stock: N)". En el mail se calcula al cotizar;
+  en el detalle del panel se calcula EN VIVO contra el stock actual (si el sync
+  repone, desaparece). Variante inactiva o inexistente: nota neutra, sin marca.
+  El cliente no ve nada nuevo. Es la red de seguridad del tope de stock de la
+  ficha (ver "Tope de stock", abajo): el servidor sigue sin rechazar nada.
+  En cotizaciones cerradas (ACCEPTED, REJECTED, EXPIRED) el panel no muestra
+  la marca en vivo ni las notas de variante; DRAFT, SUBMITTED y QUOTED sí.
+- **Tope de stock (decisión de los dueños, 2026-11-04; revierte "no se recorta
+  al stock").** Motivo: no prometer lo que no se puede entregar. La ficha limita
+  la cantidad al stock disponible de la variante (`stock - reservedStock`, piso
+  0): el "+" se deshabilita en el tope, lo escrito se corrige al salir del
+  campo, y una variante en 0 no se puede agregar. El tope descuenta lo que YA
+  hay de ese sku: las líneas de "Tu pedido de este producto" (incluido el caso
+  de sumar a una línea existente) y el **carrito guardado** en localStorage
+  (`ganchito:cotizacion`), que la ficha ahora lee con `useSyncExternalStore`;
+  sin eso el tope se saltaba agregando de a una unidad en dos visitas. El
+  aviso «Lo que ya tenés en tu cotización supera el stock informado; lo
+  confirmamos al cotizar.» sobrevive SOLO para un carrito viejo que un sync
+  dejó por encima del stock; no hay otro camino a un pedido mayor al stock.
+  **`submitQuote` no rechaza nada**: el tope es de la ficha, y la marca del
+  mail y del panel cubre el carrito viejo. En `/cotizar` las cantidades no se
+  editan (solo "Quitar"), así que no hay nada que limitar ahí.
+- **Consecuencia:** un producto con TODAS sus variantes en 0 sigue visible pero
+  no se puede cotizar hasta que un sync lo reponga (la ficha dice "Sin stock por
+  ahora"). Es decisión de los dueños; revisar si en la práctica molesta.
+- Etiqueta del formulario de producto del panel: "Personalización sin recargo
+  desde (un.)".
+
+Verificación: `audit-verify-cotizar`, `-email`, `-cache` (base `_c_test`),
+`-whatsapp`, `-leyendas`; Chrome real contra `next start` local.
+
+---
+
+## Fix de cotización en el servidor (2026-11-04) — DEPLOYADO
 
 Cuatro cambios en `submitQuote` / `getQuoteItemsSummary`
 (`src/app/(store)/cotizar/actions.ts`):
@@ -183,8 +248,9 @@ Cuatro cambios en `submitQuote` / `getQuoteItemsSummary`
 - **Snapshot del mínimo del proveedor** en `QuoteItem.minOrderQuantity`
   (nullable). **No se rechaza**: es una cotización, no una venta, y rebotarla
   mata el lead. Solo se MARCA, y solo para Ganchito: en el mail del aviso y en
-  el detalle del panel ("Debajo del mínimo del proveedor (mín. X)"). No va en
-  el WhatsApp ni en ninguna pantalla del cliente. El mínimo es por **producto**
+  el detalle del panel (hoy: "Personalización con recargo del proveedor (sin
+  recargo desde X un.)", ver la sección de abajo: el número NO es un mínimo de
+  compra). No va en el WhatsApp. El umbral es por **producto**
   (se suman sus líneas), igual que en `/cotizar` (`src/lib/quote-minimum.ts`).
   Las cotizaciones viejas tienen el snapshot en null y no llevan marca.
 
@@ -194,18 +260,16 @@ Cuatro cambios en `submitQuote` / `getQuoteItemsSummary`
   `audit-verify-email.ts` cubre la marca. Chrome real contra `next start`:
   detalle del panel con y sin marca, a 1280 y 390 px.
 
-### Orden de deploy
-**Pendiente.** La migración `20261104120000_add_quote_item_min_order_quantity`
-(`ALTER TABLE "quote_items" ADD COLUMN "minOrderQuantity" INTEGER`) está
-aplicada solo en local.
-
-1. Diego saca la branch de backup en Neon.
-2. Fuera de las ventanas del cron (Zecat 06:00–06:29 y 18:00–18:29, CDO
-   07:00–07:29 y 19:00–19:29 ART): `prisma migrate deploy` contra Neon con la
-   URL de `.env.neon` y la guarda de destino.
-3. `migrate status` limpio.
-4. Recién ahí, merge y push. El código ESCRIBE la columna nueva: sin migrar,
-   **toda `prisma.quote.create` falla en producción**.
+### Orden de deploy — HECHO (2026-11-04)
+- Backup de Neon `back-up-pre-remediacion`, creado 11:51 ART.
+- `migrate deploy` 11:57 ART (`20261104120000_add_quote_item_min_order_quantity`):
+  status "up to date", y verificado SOLO LECTURA que
+  `quote_items.minOrderQuantity` es integer nullable.
+- `main` avanzó (fast-forward) a `fc5f80c` y se pusheó 11:58 ART; Vercel success.
+- Chequeo en producción con navegador real de las leyendas de precio, sin
+  cotización de prueba.
+- **Pendiente:** la cotización de prueba real de Diego, y borrar el backup
+  `back-up-pre-remediacion` de Neon.
 
 ---
 
@@ -556,7 +620,7 @@ La consola (`sync:zecat`, `sync:cdo`), las migraciones y las ediciones manuales 
 
 ### Para recordar
 - Migración `add_product_public_hash` (`publicHash` e `invalidacionPendienteDesde`): **aplicada en Neon el 2026-10-21** con `migrate deploy` y la guarda de destino, antes del push. Branch de backup previa: `backup-pre-cache-2026-10-21`. Sin las columnas, todos los syncs fallan.
-- **Ficha sin tope de stock** (`purchase-panel.tsx`): la cantidad ya no se recorta al stock informado; si lo supera aparece «Pedido mayor al stock informado; lo confirmamos al cotizar.» (en el selector y en cada línea del pedido). Con stock 0 sigue «Consultar disponibilidad». Las filas de la tabla de precios por encima del stock siguen atenuadas, solo como pista.
+- **Ficha sin tope de stock** (`purchase-panel.tsx`) — **REVERTIDO el 2026-11-04** (ver la sección "`minOrderQuantity` no es un mínimo de compra"): los dueños decidieron que la cantidad se LIMITA al stock disponible, como hace Zecat. Lo de este punto queda como historia.
 - Tras la primera corrida en producción todos los productos salen como `publico` (hash null): una invalidación grande una sola vez.
 - `<link rel="canonical">` de la ficha: `/producto/{id}` sin `?desde=` (vía `generateMetadata`, sin consultar la base). Sale absoluto solo si `NEXT_PUBLIC_SITE_URL` está cargada (alimenta `metadataBase` en el layout raíz): verificado en local, con la variable sale `https://…/producto/{id}`; sin ella (el `.env` local no la tiene) sale relativo `/producto/{id}`, que los buscadores también aceptan. En Vercel está cargada en Production (`https://ganchitoestudio.com`, confirmado por Diego el 2026-10-21).
 - Verificación: `DATABASE_URL=…/ganchito_estudio_c_test npx tsx scripts/audit-verify-cache.ts`.
@@ -767,9 +831,10 @@ GitHub–Vercel en los settings del proyecto.
 
 **Deployado y re-sincronizado en producción.** El mínimo de compra se tomaba
 de `minimum_order_quantity` de Zecat. No es un mínimo de venta: es un umbral
-logístico de reposición/importación del proveedor. El mínimo REAL es
-`minimum_application_quantity` — lo que el backoffice de Zecat muestra como
-"Bonificación del costo por debajo del mínimo desde: N un.".
+logístico de reposición/importación del proveedor. **Corrección del 2026-11-04:**
+`minimum_application_quantity` tampoco es un mínimo de compra: es el umbral de
+personalización SIN recargo (ver la sección "`minOrderQuantity` no es un mínimo
+de compra"). Lo de abajo se conserva como historia.
 
 ### Cómo apareció: navegando la tienda, no revisando código
 

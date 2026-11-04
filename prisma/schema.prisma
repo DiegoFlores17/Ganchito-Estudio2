@@ -458,16 +458,28 @@ model Product {
   /// La moneda sí es del producto: todas sus variantes comparten una.
   currency          Currency      @default(ARS)
 
-  /// Mínimo REAL de compra: `minimum_application_quantity` de Zecat, que en
-  /// su backoffice se muestra como "Bonificación del costo por debajo del
-  /// mínimo desde: N un.". Vale 1 en la enorme mayoría de los productos.
+  /// Umbral de personalización SIN recargo: `minimum_application_quantity`
+  /// de Zecat. NO es un mínimo de compra, aunque el nombre de la columna lo
+  /// sugiera (se conserva para no migrar). Es el número por debajo del cual
+  /// el proveedor cobra un recargo por personalizar (ver
+  /// `customization_under_minimum_extra_cost`). Vale 1 en la enorme mayoría
+  /// de los productos.
+  ///
+  /// Evidencia del 2026-11-04, en la tienda de Zecat: el Gorro Cap 031
+  /// (zecat 3801, valor 119) se compra desde 1 unidad con el botón
+  /// habilitado, y el 119 aparece como "Personalización sin recargos desde
+  /// 119 un.". Esto REFUTA el comentario del 2026-09-10 que lo llamaba
+  /// "mínimo REAL de compra" (esa fecha solo probó que `minimum_order_quantity`
+  /// tampoco lo era: los Auriculares Clean, con 9, se compran desde 1).
   ///
   /// NO confundir con `minimum_order_quantity` (guardado aparte en
-  /// `supplierMinOrderQuantity`): usar ESE como mínimo de venta hacía
-  /// incotizable al 21% del catálogo — 138 productos activos con stock
-  /// menor a su propio "mínimo". Verificado contra el backoffice de Zecat
-  /// el 2026-09-10: los Auriculares Clean (minimum_order_quantity 9) se
-  /// compran desde 1 unidad, sin recargo en el resumen de compra.
+  /// `supplierMinOrderQuantity`): usar ese como mínimo de venta hacía
+  /// incotizable al 21% del catálogo.
+  ///
+  /// USO: solo marcas INTERNAS para Ganchito (mail de aviso y detalle del
+  /// panel de cotizaciones). Es una condicion comercial del proveedor hacia
+  /// nosotros y NUNCA se muestra en la tienda publica ni viaja al navegador
+  /// (decision de los duenos, 2026-11-04). Nada lo exige ni bloquea.
   minOrderQuantity  Int?
 
   /// El `minimum_order_quantity` crudo de Zecat. NO es un mínimo de venta
@@ -801,10 +813,14 @@ model QuoteItem {
   variantSku     String?
   quantity       Int
 
-  /// Mínimo de compra del proveedor (Product.minOrderQuantity) CONGELADO al
-  /// cotizar. Solo sirve para avisarle a Ganchito que el pedido quedó debajo
-  /// del mínimo; el mínimo es por PRODUCTO (se suman las líneas), no por
-  /// línea. Null en las cotizaciones anteriores a la columna: sin marca.
+  /// Umbral de personalización sin recargo del proveedor
+  /// (Product.minOrderQuantity) CONGELADO al cotizar. NO es un mínimo de
+  /// compra: por debajo de este número el proveedor cobra un recargo por
+  /// personalizar (evidencia del 2026-11-04 en el comentario de
+  /// Product.minOrderQuantity). Solo sirve para avisarle a Ganchito que el
+  /// pedido lleva ese recargo; el umbral es por PRODUCTO (se suman las
+  /// líneas), no por línea. Null en las cotizaciones anteriores a la columna:
+  /// sin marca.
   minOrderQuantity Int?
 
   /// Técnica de impresión elegida por el cliente para este ítem.

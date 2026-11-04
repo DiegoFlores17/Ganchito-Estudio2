@@ -801,6 +801,12 @@ model QuoteItem {
   variantSku     String?
   quantity       Int
 
+  /// Mínimo de compra del proveedor (Product.minOrderQuantity) CONGELADO al
+  /// cotizar. Solo sirve para avisarle a Ganchito que el pedido quedó debajo
+  /// del mínimo; el mínimo es por PRODUCTO (se suman las líneas), no por
+  /// línea. Null en las cotizaciones anteriores a la columna: sin marca.
+  minOrderQuantity Int?
+
   /// Técnica de impresión elegida por el cliente para este ítem.
   printingType   String?
 

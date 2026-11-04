@@ -164,6 +164,51 @@ no existe como branch aparte.
 
 ---
 
+## Fix de cotización en el servidor (2026-11-04) — en la rama `fix-cotizacion-servidor`, SIN deployar
+
+Cuatro cambios en `submitQuote` / `getQuoteItemsSummary`
+(`src/app/(store)/cotizar/actions.ts`):
+
+- **Línea sin `variantSku`: se omite.** Antes tomaba `variants[0]` y cobraba
+  con el precio de otra variante, contra lo que dice `CLAUDE.md`. Ahora va a
+  `omitidos` con un `console.warn`, igual que un sku inexistente o inactivo.
+- **Todo omitido: se rechaza ANTES de subir el logo.** Antes el rechazo ya
+  existía, pero llegaba después de la subida a Blob y dejaba el archivo
+  huérfano. Ahora no se sube nada ni se escribe en la base.
+- **El tramo de descuento se calcula solo sobre las líneas que sobreviven**,
+  en dos pasadas (primero se resuelven las vivas, después se suma por
+  producto y recién ahí se valúa). Antes "1 válida + 1000 de un sku
+  inexistente" cobraba la unidad al tramo de 1001. El resumen y la cotización
+  congelada usan el mismo criterio. `src/lib/pricing.ts` no se tocó.
+- **Snapshot del mínimo del proveedor** en `QuoteItem.minOrderQuantity`
+  (nullable). **No se rechaza**: es una cotización, no una venta, y rebotarla
+  mata el lead. Solo se MARCA, y solo para Ganchito: en el mail del aviso y en
+  el detalle del panel ("Debajo del mínimo del proveedor (mín. X)"). No va en
+  el WhatsApp ni en ninguna pantalla del cliente. El mínimo es por **producto**
+  (se suman sus líneas), igual que en `/cotizar` (`src/lib/quote-minimum.ts`).
+  Las cotizaciones viejas tienen el snapshot en null y no llevan marca.
+
+### Verificación (local)
+- `scripts/audit-verify-cotizar.ts` cubre los cuatro casos (incluido el
+  tramo, con un producto local que tiene escala) y borra todo lo que crea;
+  `audit-verify-email.ts` cubre la marca. Chrome real contra `next start`:
+  detalle del panel con y sin marca, a 1280 y 390 px.
+
+### Orden de deploy
+**Pendiente.** La migración `20261104120000_add_quote_item_min_order_quantity`
+(`ALTER TABLE "quote_items" ADD COLUMN "minOrderQuantity" INTEGER`) está
+aplicada solo en local.
+
+1. Diego saca la branch de backup en Neon.
+2. Fuera de las ventanas del cron (Zecat 06:00–06:29 y 18:00–18:29, CDO
+   07:00–07:29 y 19:00–19:29 ART): `prisma migrate deploy` contra Neon con la
+   URL de `.env.neon` y la guarda de destino.
+3. `migrate status` limpio.
+4. Recién ahí, merge y push. El código ESCRIBE la columna nueva: sin migrar,
+   **toda `prisma.quote.create` falla en producción**.
+
+---
+
 ## Sync automático de proveedores (2026-10-08 al 2026-10-14)
 
 Se construyó por etapas, cada una con su script de verificación en

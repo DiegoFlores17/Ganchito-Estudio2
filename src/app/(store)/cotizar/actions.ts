@@ -19,6 +19,7 @@ import {
 } from "@/lib/quote-message";
 import { Prisma } from "@prisma/client";
 import { POLITICA_PRIVACIDAD_VERSION } from "@/lib/privacidad";
+import { productosBajoMinimo } from "@/lib/quote-minimum";
 import {
   QUOTE_LOGO_EXTENSIONS,
   saveUploadedFile,
@@ -143,11 +144,6 @@ export async function getQuoteItemsSummary(
 
   const pricingConfig = await getPricingConfig();
   const productIds = [...new Set(items.map((i) => i.productId))];
-  // ANTES del loop, no dentro: el tramo de descuento se elige por el total del
-  // producto, asi que ese total tiene que estar completo antes de valuar la
-  // primera linea.
-  const totalPorProducto = sumarPorProducto(items);
-
   const products = await prisma.product.findMany({
     // Solo productos VIVOS: un producto pausado o eliminado no se cotiza por
     // primera vez. (Las cotizaciones YA enviadas conservan sus items aunque
@@ -182,6 +178,18 @@ export async function getQuoteItemsSummary(
 
   const summaries: QuoteItemSummary[] = [];
   const unavailableIds = new Set<string>();
+  // El tramo de descuento se elige por el total del producto, y ese total se
+  // calcula en DOS pasadas: primero se resuelven las lineas que sobreviven
+  // (producto vivo, variante activa, sku presente) y recien despues se suma
+  // por producto. Sumar todo lo enviado inflaba el tramo con lineas que
+  // despues se omiten (ej: 1 valida + 1000 de un sku inexistente cobraba el
+  // tramo de 1001 una sola unidad). El resumen y la cotizacion congelada
+  // usan el mismo criterio para que muestren lo mismo.
+  const vivas: Array<{
+    item: QuoteCartItemInput;
+    product: (typeof products)[number];
+    variant: (typeof products)[number]["variants"][number];
+  }> = [];
   for (const item of items) {
     const product = byId.get(item.productId);
     // Quedo afuera del filtro (pausado/eliminado) o no existe: va al aviso.
@@ -190,7 +198,9 @@ export async function getQuoteItemsSummary(
       continue;
     }
 
-    const variant = product.variants.find((v) => v.sku === item.variantSku);
+    const variant = item.variantSku
+      ? product.variants.find((v) => v.sku === item.variantSku)
+      : undefined;
 
     // El precio sale de la VARIANTE. Si el carrito trae un sku que ya no
     // existe, se omite la linea en vez de cobrar el precio de otra variante:
@@ -202,6 +212,11 @@ export async function getQuoteItemsSummary(
       continue;
     }
 
+    vivas.push({ item, product, variant });
+  }
+  const totalPorProducto = sumarPorProducto(vivas.map((v) => v.item));
+
+  for (const { item, product, variant } of vivas) {
     const sellPrice = computeSellPriceForQuantity(
       variant,
       product.currency,
@@ -358,22 +373,6 @@ export async function submitQuote(
     };
   }
 
-  // El logo es opcional: el cliente puede cotizar sin subir el arte todavia.
-  let logoUrl: string | null = null;
-  if (logo instanceof File && logo.size > 0) {
-    try {
-      logoUrl = await saveUploadedFile(logo, {
-        subdir: "quotes",
-        allowedExtensions: QUOTE_LOGO_EXTENSIONS,
-      });
-    } catch (error) {
-      if (error instanceof UploadValidationError) {
-        return { success: false, error: error.message };
-      }
-      throw error;
-    }
-  }
-
   // Precio CONGELADO al momento de cotizar: se recalcula server-side desde el
   // costo + margen + cotizacion actuales, nunca se confia en un precio que
   // venga del cliente (pudo haber sido manipulado antes de enviarse).
@@ -384,10 +383,6 @@ export async function submitQuote(
   // cliente un precio que nunca vio.
   const pricingConfig = await getPricingConfig();
   const productIds = [...new Set(items.map((i) => i.productId))];
-  // ANTES del loop, no dentro: el tramo de descuento se elige por el total del
-  // producto, asi que ese total tiene que estar completo antes de valuar la
-  // primera linea.
-  const totalPorProducto = sumarPorProducto(items);
   const products = await prisma.product.findMany({
     // Solo productos VIVOS: pausado o eliminado no se cotiza por primera
     // vez. Ojo con la distincion: las cotizaciones YA enviadas conservan sus
@@ -400,6 +395,7 @@ export async function submitQuote(
       // para el precio.
       name: true,
       currency: true,
+      minOrderQuantity: true,
       variants: {
         // Mismo criterio que el resumen: un sku desactivado (el proveedor ya
         // no lo manda) no se cotiza — la linea se omite como si no existiera.
@@ -418,10 +414,28 @@ export async function submitQuote(
 
   const productoPorId = new Map(products.map((p) => [p.id, p]));
 
-  const quoteItemsData = [];
+  const quoteItemsData: Array<{
+    productId: string;
+    variantSku: string;
+    quantity: number;
+    unitPrice: Prisma.Decimal;
+    minOrderQuantity: number | null;
+  }> = [];
   const messageLines: QuoteMessageLine[] = [];
   const omitidos: string[] = [];
   const omitidosIds = new Set<string>();
+  // El tramo de descuento se elige por el total del producto, y ese total se
+  // calcula en DOS pasadas: primero se resuelven las lineas que sobreviven
+  // (producto vivo, variante activa, sku presente) y recien despues se suma
+  // por producto. Sumar todo lo enviado inflaba el tramo con lineas que
+  // despues se omiten (ej: 1 valida + 1000 de un sku inexistente cobraba el
+  // tramo de 1001 una sola unidad). El resumen y la cotizacion congelada
+  // usan el mismo criterio para que muestren lo mismo.
+  const vivas: Array<{
+    item: QuoteCartItemInput;
+    product: (typeof products)[number];
+    variant: (typeof products)[number]["variants"][number];
+  }> = [];
   for (const item of items) {
     const product = productoPorId.get(item.productId);
     // Pausado, eliminado, o directamente inexistente: no entra.
@@ -433,17 +447,26 @@ export async function submitQuote(
 
     // Sin variantSku no hay forma de saber que precio corresponde. Antes esto
     // funcionaba porque el precio era del producto; ahora no: se omite la
-    // linea en vez de adivinar.
+    // linea en vez de adivinar (nunca se cobra con la variante de al lado).
     const variant = item.variantSku
       ? product.variants.find((v) => v.sku === item.variantSku)
-      : product.variants[0];
+      : undefined;
 
     if (!variant) {
-      omitidos.push(`variante ${item.variantSku} del producto ${item.productId} ya no existe`);
+      omitidos.push(
+        item.variantSku
+          ? `variante ${item.variantSku} del producto ${item.productId} ya no existe`
+          : `linea sin variantSku del producto ${item.productId}`
+      );
       omitidosIds.add(item.productId);
       continue;
     }
 
+    vivas.push({ item, product, variant });
+  }
+  const totalPorProducto = sumarPorProducto(vivas.map((v) => v.item));
+
+  for (const { item, product, variant } of vivas) {
     const unitPrice = computeSellPriceForQuantity(
       variant,
       product.currency,
@@ -453,9 +476,14 @@ export async function submitQuote(
 
     quoteItemsData.push({
       productId: item.productId,
-      variantSku: item.variantSku ?? null,
+      // Siempre hay sku aca: sin sku la linea se omitio arriba.
+      variantSku: variant.sku,
       quantity: item.quantity,
       unitPrice,
+      // Snapshot del minimo del proveedor. No se rechaza por esto: es una
+      // cotizacion, no una venta, y rebotarla pierde el contacto. Solo se
+      // marca para Ganchito (ver lib/quote-minimum.ts).
+      minOrderQuantity: product.minOrderQuantity,
     });
 
     // La linea del mensaje de WhatsApp se arma ACA, con los mismos valores
@@ -484,6 +512,10 @@ export async function submitQuote(
     );
   }
 
+  // Rechazo ANTES de subir el logo y de tocar la base: una cotizacion sin
+  // lineas no se crea, y el archivo del cliente tampoco se guarda. Vale para
+  // cualquier causa (producto muerto, sku inexistente o inactivo, linea sin
+  // sku): el caso es el mismo.
   if (quoteItemsData.length === 0) {
     return {
       success: false,
@@ -491,7 +523,27 @@ export async function submitQuote(
     };
   }
 
+  // El logo es opcional: el cliente puede cotizar sin subir el arte todavia.
+  let logoUrl: string | null = null;
+  if (logo instanceof File && logo.size > 0) {
+    try {
+      logoUrl = await saveUploadedFile(logo, {
+        subdir: "quotes",
+        allowedExtensions: QUOTE_LOGO_EXTENSIONS,
+      });
+    } catch (error) {
+      if (error instanceof UploadValidationError) {
+        return { success: false, error: error.message };
+      }
+      throw error;
+    }
+  }
+
   const omittedProducts = await getUnavailableNames([...omitidosIds]);
+
+  // Productos cuyo total (suma de sus lineas que entraron) queda debajo del
+  // minimo del proveedor. Por PRODUCTO y no por linea, igual que /cotizar.
+  const bajoMinimo = productosBajoMinimo(quoteItemsData);
 
   // shortCode con retry: 31^6 combinaciones hacen el choque rarisimo, pero
   // "rarisimo" con clientes reales es "algun dia". Ante P2002 se regenera y
@@ -576,10 +628,13 @@ export async function submitQuote(
       companyName,
       notes,
       logoUrl,
-      lines: messageLines.map((l) => ({
+      lines: messageLines.map((l, i) => ({
         productName: l.productName,
         variantLabel: l.variantLabel,
         quantity: l.quantity,
+        // Solo el mail a Ganchito lleva la marca; el mensaje de WhatsApp
+        // (messageLines) no.
+        minimoProveedor: bajoMinimo.get(quoteItemsData[i].productId) ?? null,
         unitPriceLabel: formatPriceArs(l.subtotal / l.quantity),
         subtotalLabel: formatPriceArs(l.subtotal),
       })),

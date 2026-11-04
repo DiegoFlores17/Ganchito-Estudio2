@@ -56,6 +56,14 @@ etapa correspondiente (la mayoría en la pasada de diseño final o en el deploy)
       propio**. Si el envío falla: log y nada más, la cotización ya está
       guardada. Link del aviso a `/admin/cotizaciones/{id}` con
       `NEXT_PUBLIC_SITE_URL` de base.
+- [ ] **"No disponible" nombra un producto que sí se cotizó.** En
+      `submitQuote` y `getQuoteItemsSummary`, `omitidosIds` / `unavailableIds`
+      se arman por `productId`. Si el cliente mandó dos líneas del mismo
+      producto y una se omite (sku inactivo o sin sku) pero la otra entra, la
+      pantalla igual lista ese producto como "no disponible", aunque está en
+      la cotización. Preexistente, no es de la rama `fix-cotizacion-servidor`.
+      Arreglo posible: avisar por línea (producto + variante) o descartar del
+      aviso los productos que tienen al menos una línea viva.
 - [ ] **Segunda capa de descuento de Zecat: falta el cableado de la UI.**
       Los DATOS ya están (`e929e28`, migración aplicada en Neon): cada
       variante guarda `discountExternalId`, `discountName`, `discountPercent`

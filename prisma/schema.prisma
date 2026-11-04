@@ -139,6 +139,17 @@ model SyncRun {
   /// apagar el catalogo entero). Ver lib/sync/motor.ts.
   sinFotoExternalIds Json @default("[]")
 
+  /// Productos de Zecat cuyos precios de personalizacion (ProductPrintingLevel)
+  /// esta corrida encontro ROTOS o PERDIDOS, como
+  /// [{ id, causa, perdia, retenido }]:
+  ///  - causa: "roto" (el set de niveles no paso la validacion) o "ausente"
+  ///    (el proveedor dejo de mandar printing_types).
+  ///  - perdia: el producto tenia niveles y ahora le quedan 0.
+  ///  - retenido: la perdida NO se aplico porque la corrida ya habia llegado
+  ///    al umbral de seguridad (o la racha seguia): conserva sus niveles
+  ///    viejos. Mismo mecanismo que sinFotoExternalIds. Ver lib/sync/niveles.ts.
+  sinNivelesExternalIds Json @default("[]")
+
   /// Ids EXTERNOS vistos en esta corrida (los de la lista congelada cuyo
   /// detalle respondio; un 404 no cuenta). Al cerrar se comparan contra los
   /// activos de la base: la diferencia son los AUSENTES. Se agrega de a un
@@ -493,6 +504,15 @@ model Product {
   /// deliberadamente literal para no afirmar lo que no verificamos.
   supplierMinOrderQuantity Int?
 
+  /// Recargo de personalizacion por pedir MENOS que `minOrderQuantity` (el
+  /// umbral sin recargo): `customization_under_minimum_extra_cost` de Zecat.
+  /// Es por PRODUCTO, no por nivel. Null = Zecat no lo manda (o el set de
+  /// niveles vino roto: ver ProductPrintingLevel).
+  ///
+  /// COSTO INTERNO, en pesos (ver ProductPrintingLevel sobre la moneda). Nunca
+  /// viaja crudo a la tienda publica. En produccion, 95000 en las muestras.
+  printingUnderMinimumCost Decimal? @db.Decimal(12, 2)
+
   /// Dimensiones (objeto `dimensions` de la API). En cm y gramos.
   heightCm          Decimal?      @db.Decimal(8, 2)
   widthCm           Decimal?      @db.Decimal(8, 2)
@@ -530,6 +550,7 @@ model Product {
   images            ProductImage[]
   printingAreas     PrintingArea[]
   printingTypes     ProductPrintingType[]
+  printingLevels    ProductPrintingLevel[]
   attributes        ProductAttribute[]
   quoteItems        QuoteItem[]
 
@@ -726,6 +747,61 @@ model ProductPrintingType {
 
   @@index([productId])
   @@map("product_printing_types")
+}
+
+/// Un NIVEL de precio de personalizacion de Zecat: una fila por cada fila de
+/// `printing_types` del detalle. Zecat trae un registro por nivel (ej:
+/// "Bordado 2KP" y "Bordado 22KP" son ids distintos con distinto costo), pero
+/// todos comparten el `name` visible ("Bordado"): por eso ProductPrintingType
+/// se deduplica por nombre y esta tabla NO.
+///
+/// COSTO INTERNO. `unit_price` es el costo de PARTNER, verificado al centavo
+/// contra el backoffice de Zecat (Bordado 2KP en el 5515: 877.40 de unitario
+/// y 46600 de preparacion). `unit_price_wepod` / `setup_price_wepod` son los
+/// de otro canal y se DESCARTAN. Este dato nunca viaja crudo a la tienda
+/// publica: el precio al cliente se calcula al leer, con margen, como el de
+/// los productos.
+///
+/// Los montos son SIEMPRE pesos, aunque el producto diga `currency: "USD"`:
+/// los mismos valores aparecen en productos marcados USD y ARS (verificado
+/// sobre las muestras: 5257 y 5515 vienen USD). Mismo criterio que el costo
+/// del producto: se ignora `currency` y no se convierte.
+///
+/// El setup NO es constante dentro de una tecnica: Transfer DTF 900 cm2 tiene
+/// 25500 y los otros niveles 12400 (3965, 4023, 5515). Y algunas tecnicas
+/// no tienen ninguna area asignada (5257: DTP, Serigrafia Plana, Laser
+/// Rotativo CO2): `zecatAreaIds` vacio es un dato valido, no un error.
+///
+/// Se reescribe con deleteMany + createMany en la transaccion del producto
+/// (como las tablas hermanas). Un set roto se escribe como CERO niveles, nunca
+/// parcial ni con precios viejos; si ademas implica perder todos los niveles
+/// de muchos productos a la vez, la corrida RETIENE los viejos (ver
+/// SyncRun.sinNivelesExternalIds y lib/sync/niveles.ts).
+model ProductPrintingLevel {
+  id          String  @id @default(cuid())
+  productId   String
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  /// `id` del printing_type en Zecat. Unico por producto.
+  zecatTypeId String
+  /// `name`: la tecnica ("Bordado", "Transfer DTF").
+  technique   String
+  /// `description` recortada: "Bordado 2KP", "Transfer DTF 900 cm2".
+  label       String
+  /// `area` del nivel, en cm2. Null si Zecat no lo manda o viene invalido.
+  areaCm2     Decimal? @db.Decimal(10, 2)
+  /// `unit_price`: costo por unidad personalizada, en pesos.
+  unitCost    Decimal @db.Decimal(12, 2)
+  /// `setup_price`: costo de preparacion (una vez), en pesos.
+  setupCost   Decimal @db.Decimal(12, 2)
+  /// Ids de las areas de impresion del producto donde aplica este nivel
+  /// (`configuration.printing_area_printing_types[].printing_area_id`).
+  /// Se corresponden con PrintingArea.zecatAreaId.
+  zecatAreaIds String[]
+
+  @@unique([productId, zecatTypeId])
+  @@index([productId])
+  @@map("product_printing_levels")
 }
 
 /// Atributos del producto que NO son técnicas de impresión: certificaciones y

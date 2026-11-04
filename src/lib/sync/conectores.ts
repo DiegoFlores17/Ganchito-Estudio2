@@ -22,6 +22,7 @@ import {
 } from "@/lib/cdo/sync";
 import type { CdoProduct } from "@/lib/cdo/types";
 import type { ClaseCambio } from "@/lib/sync/cambios";
+import type { AvisoNiveles } from "@/lib/sync/niveles";
 
 /// Resumen descartable para syncCdoProduct (lo llenaba la corrida entera de
 /// la consola vieja; en el motor se loguea producto por producto).
@@ -86,6 +87,9 @@ export interface ResultadoSincronizar {
   /// poder calcular su costo cuenta como "publico": su `active` cambio.
   productId?: string;
   cambio?: ClaseCambio;
+  /// Solo Zecat: los precios de personalizacion del producto vinieron rotos o
+  /// los perdio. Ausente = nada que anotar (ver lib/sync/niveles.ts).
+  niveles?: AvisoNiveles;
 }
 
 /// Lo que el motor le dice al conector sobre la corrida en curso.
@@ -93,6 +97,11 @@ export interface ContextoSincronizar {
   /// false cuando la corrida ya apago por "sin foto" tantos productos como
   /// el umbral de seguridad: los siguientes conservan su estado.
   puedeApagarSinFoto: boolean;
+  /// false cuando la corrida ya quito el umbral de seguridad de productos con
+  /// niveles de personalizacion (o sigue la racha): los siguientes que
+  /// perderian TODOS sus niveles conservan los viejos. Solo Zecat lo usa;
+  /// ausente = true (ver lib/sync/niveles.ts).
+  puedeQuitarNiveles?: boolean;
 }
 
 const zecat: Conector = {
@@ -124,7 +133,7 @@ const zecat: Conector = {
     const p = producto as ZecatGenericProduct;
     return !flattenVariants(p.variants).some((v) => v.active ?? true);
   },
-  async sincronizar(producto) {
+  async sincronizar(producto, contexto) {
     const p = producto as ZecatGenericProduct;
     // El campo currency de Zecat no es confiable: se loguea y se ignora (ver
     // CLAUDE.md, "Currency").
@@ -135,7 +144,7 @@ const zecat: Conector = {
       );
     }
     try {
-      const r = await syncProduct(p);
+      const r = await syncProduct(p, { puedeQuitarNiveles: contexto?.puedeQuitarNiveles });
       if (r.variantesDesactivadas > 0) {
         console.warn(
           `[zecat-sync] Producto ${p.id}: ${r.variantesDesactivadas} variante(s) desactivada(s), ya no vienen en el detalle.`
@@ -151,6 +160,7 @@ const zecat: Conector = {
         monedaSospechosa,
         productId: r.productId,
         cambio: r.cambio,
+        niveles: r.niveles.aviso ?? undefined,
       };
     } catch (error) {
       // Sin costo calculable NO puede quedar a la venta el precio viejo: si

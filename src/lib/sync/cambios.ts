@@ -67,6 +67,30 @@ export interface DatosPublicos {
   areasImpresion: Array<{ externalId: string; name: string; heightCm: Numerico; widthCm: Numerico }>;
   tiposImpresion: Array<{ name: string }>;
   atributos: Array<{ externalId: string | null; name: string; iconUrl: string | null }>;
+  /// Niveles de precio de personalizacion (ProductPrintingLevel) y recargo
+  /// bajo el minimo (Product.printingUnderMinimumCost). Solo Zecat: CDO los
+  /// deja en `undefined`, y `canonico` descarta las claves undefined, asi que
+  /// su hash NO cambia (verificado byte a byte en audit-verify-impresion.ts).
+  ///
+  /// Entran al hash porque el precio de personalizacion lo va a ver el cliente
+  /// (tandas 4b/4c): si Zecat cambia un unitario o un setup, la ficha cacheada
+  /// tiene que invalidarse. Hasta que la tienda los lea no cambia nada visible,
+  /// pero la invalidacion ya funciona cuando lo haga.
+  ///
+  /// UNA VEZ: en la primera corrida de Zecat despues del deploy, el hash de
+  /// TODOS sus productos cambia (pasan de "sin el campo" a "con el campo",
+  /// aunque sea con 0 niveles), asi que se invalida la cache entera y esa
+  /// corrida los clasifica "publico". Es esperado y se paga una sola vez.
+  nivelesImpresion?: Array<{
+    zecatTypeId: string;
+    technique: string;
+    label: string;
+    areaCm2: Numerico;
+    unitCost: Numerico;
+    setupCost: Numerico;
+    zecatAreaIds: string[];
+  }>;
+  printingUnderMinimumCost?: Numerico;
 }
 
 /// Un numero en forma canonica: 10, "10.00" y Decimal(10) dan lo mismo.
@@ -150,6 +174,23 @@ export function calcularPublicHash(d: DatosPublicos): string {
     atributos: ordenado(
       d.atributos.map((a) => ({ externalId: a.externalId, name: a.name, iconUrl: a.iconUrl }))
     ),
+    // undefined (CDO) = la clave no existe en el payload: ver `canonico`.
+    // Las areas de cada nivel se ordenan: su orden en el payload es arbitrario.
+    nivelesImpresion: d.nivelesImpresion
+      ? ordenado(
+          d.nivelesImpresion.map((n) => ({
+            zecatTypeId: n.zecatTypeId,
+            technique: n.technique,
+            label: n.label,
+            areaCm2: num(n.areaCm2),
+            unitCost: num(n.unitCost),
+            setupCost: num(n.setupCost),
+            zecatAreaIds: [...n.zecatAreaIds].sort(),
+          }))
+        )
+      : undefined,
+    printingUnderMinimumCost:
+      d.printingUnderMinimumCost === undefined ? undefined : num(d.printingUnderMinimumCost),
   });
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }

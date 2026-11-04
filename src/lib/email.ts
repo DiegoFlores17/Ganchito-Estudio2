@@ -336,6 +336,23 @@ export type SyncAlertInput =
       apagados: AusenteAlerta[];
       retenidos: AusenteAlerta[];
     }
+  /// Productos de Zecat que perdieron (o iban a perder) todos sus precios de
+  /// personalizacion: la corrida llego al tope, o hay demasiados con el set
+  /// roto. Ver lib/sync/niveles.ts.
+  | {
+      motivo: "niveles";
+      provider: string;
+      runId: string;
+      /// La corrida anterior ya habia llegado al tope: esta no quito ninguno.
+      racha: boolean;
+      umbral: number;
+      /// Los que perdieron todos sus niveles y se aplico.
+      quitados: AusenteAlerta[];
+      /// Los que iban a perderlos y se retuvieron (conservan los viejos).
+      retenidos: AusenteAlerta[];
+      /// Cuantos productos tenian el set roto en la corrida (incluye retenidos).
+      rotos: number;
+    }
   /// Envio de prueba pedido desde el panel.
   | { motivo: "prueba"; provider: string; pedidoPor: string };
 
@@ -565,6 +582,68 @@ export function armarAlerta(
   <h2 style="${ESTILO_SUBTITULO}">Los ${r} retenidos (siguen a la venta)</h2>
   ${tabla(input.retenidos)}
   ${a ? `<h2 style="${ESTILO_SUBTITULO}">Los ${a} apagados</h2>${tabla(input.apagados)}` : ""}
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+    };
+  }
+
+  if (input.motivo === "niveles") {
+    const q = input.quitados.length;
+    const r = input.retenidos.length;
+    const tabla = (lista: AusenteAlerta[]) => `
+  <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px; font-size: 14px;">
+    <thead>
+      <tr style="text-align: left; color: #666; font-size: 13px;">
+        <th style="padding: 6px 10px;">Id</th>
+        <th style="padding: 6px 10px;">Producto</th>
+      </tr>
+    </thead>
+    <tbody>${lista
+      .map(
+        (p) => `
+      <tr>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee; color: #666;">${escapar(p.externalId)}</td>
+        <td style="padding: 6px 10px; border-bottom: 1px solid #eee;">${escapar(p.nombre ?? "(sin nombre)")}</td>
+      </tr>`
+      )
+      .join("")}</tbody>
+  </table>`;
+    const verificar = `
+  <h2 style="${ESTILO_SUBTITULO}">Cómo verificar</h2>
+  <p style="${ESTILO_PARRAFO}">Abrí 2 o 3 productos de la lista en el backoffice de ${proveedor} y mirá si siguen teniendo precios de personalización (bordado, transfer, serigrafía). Si los tienen, el cambio es del lado de ${proveedor} (un campo renombrado o una respuesta degradada). Si ya no los tienen, los sacaron de verdad.</p>`;
+    if (r === 0) {
+      // Sin retencion: hay mas productos con el set roto que el umbral.
+      return {
+        titulo: `Sync de ${proveedor}: ${input.rotos} productos con precios de personalización rotos (${cuando})`,
+        cuerpo: `
+  <p style="${ESTILO_PARRAFO}">En esta sincronización, <strong>${input.rotos} productos</strong> vinieron con los precios de personalización inválidos (un monto que no es número, un id repetido, un campo faltante). Es más que el límite de seguridad (${input.umbral}).</p>
+  <p style="${ESTILO_PARRAFO}">Esos productos se guardaron <strong>sin precios de personalización</strong> y siguen a la venta: la tienda dice que la personalización se cotiza aparte. No se pausó ninguno. Ninguno tenía precios antes, así que no se perdió nada.</p>
+  ${verificar}
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+      };
+    }
+    if (input.racha) {
+      return {
+        titulo: `Sync de ${proveedor}: sigue la racha de precios de personalización, ${r} retenidos (${cuando})`,
+        cuerpo: `
+  <p style="${ESTILO_PARRAFO}"><strong>La racha sigue.</strong> La sincronización anterior ya había llegado al límite de productos que pierden todos sus precios de personalización, y en esta <strong>${r} productos</strong> volvieron a venir sin ninguno (o con el set roto): más que el límite de seguridad (${input.umbral}).</p>
+  <p style="${ESTILO_PARRAFO}">Mientras dure la racha <strong>no se le quita el precio de personalización a ningún producto</strong>: los ${r} conservan los que tenían. Así un cambio de contrato de ${proveedor} borra, como mucho, lo que borró la primera corrida. La racha se corta sola cuando una sincronización termina por debajo del límite.</p>
+  ${verificar}
+  <h2 style="${ESTILO_SUBTITULO}">Los ${r} retenidos (conservan sus precios)</h2>
+  ${tabla(input.retenidos)}
+  <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
+      };
+    }
+    return {
+      titulo: `Sync de ${proveedor}: demasiados productos sin precios de personalización, ${r} retenidos (${cuando})`,
+      cuerpo: `
+  <p style="${ESTILO_PARRAFO}">En esta sincronización, <strong>${q + r} productos</strong> que tenían precios de personalización vinieron sin ninguno (o con el set roto). Es más que el límite de seguridad (${input.umbral}).</p>
+  <p style="${ESTILO_PARRAFO}">Se aplicó a los primeros <strong>${q}</strong>, hasta llegar al límite. Los otros <strong>${r}</strong> se retuvieron: conservan los precios que tenían, porque tantos de golpe suelen ser un cambio o una falla de ${proveedor}, no precios borrados. Ninguno se pausó.</p>
+  ${verificar}
+  <h2 style="${ESTILO_SUBTITULO}">Cómo resolver</h2>
+  <p style="${ESTILO_PARRAFO}">Si fue una falla, no hace falta hacer nada: la próxima sincronización que reciba los precios los deja al día. Si los sacaron de verdad, los retenidos se actualizan en las próximas corridas, de a lo que permita el límite. Si se repite varias corridas seguidas, avisale a quien opera el sistema.</p>
+  <h2 style="${ESTILO_SUBTITULO}">Los ${r} retenidos (conservan sus precios)</h2>
+  ${tabla(input.retenidos)}
+  ${q ? `<h2 style="${ESTILO_SUBTITULO}">Los ${q} a los que se les quitó</h2>${tabla(input.quitados)}` : ""}
   <p style="${ESTILO_NOTA}">Corrida ${escapar(input.runId)}</p>`,
     };
   }

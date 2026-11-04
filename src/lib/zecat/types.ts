@@ -102,9 +102,30 @@ export interface ZecatPrintingArea {
   width_centimeters?: number | null;
 }
 
+/// Una fila de `printing_types`: un NIVEL de precio de personalizacion (ver
+/// ProductPrintingLevel en el schema). Solo los campos que consumimos: el
+/// payload trae muchos mas (tiempos, wepod, laser_color...).
 export interface ZecatPrintingType {
   id: string | number;
+  /// La tecnica visible ("Bordado"); varios niveles comparten el mismo name.
   name: string;
+  /// El nivel ("Bordado 2KP"). Suele traer espacios al final.
+  description?: string | null;
+  /// COSTO de partner, en pesos (aunque el producto diga USD). Verificado al
+  /// centavo contra el backoffice. NO confundir con `unit_price_wepod`, que
+  /// es de otro canal y se descarta.
+  unit_price?: number | string | null;
+  /// Costo de preparacion (una vez), en pesos.
+  setup_price?: number | string | null;
+  /// Area del nivel en cm2.
+  area?: number | string | null;
+  /// Si vienen en true, el nivel no cobra el primer logo / la preparacion: no
+  /// sabemos modelarlo, asi que el set se considera roto (ver impresion.ts).
+  first_logo_free?: boolean | null;
+  setup_free?: boolean | null;
+  configuration?: {
+    printing_area_printing_types?: Array<{ printing_area_id?: string | number | null }> | null;
+  } | null;
 }
 
 export interface ZecatGenericProduct {
@@ -122,6 +143,9 @@ export interface ZecatGenericProduct {
   /// Cap 031 (119) se compra desde 1 unidad y el 119 se muestra como
   /// "Personalizacion sin recargos desde 119 un." (verificado 2026-11-04).
   minimum_application_quantity?: number | null;
+  /// Recargo de personalizacion cuando se pide menos que
+  /// `minimum_application_quantity`. Por producto, en pesos.
+  customization_under_minimum_extra_cost?: number | string | null;
   currency?: "ARS" | "USD" | string;
   published?: boolean;
 

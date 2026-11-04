@@ -102,6 +102,24 @@ export function SyncRunSummaryLine({
       </span>
     );
   }
+  if ((s.retenidosNiveles?.length ?? 0) > 0) {
+    avisos.push(
+      <span className="font-medium text-primary-dark">
+        ⚠ {s.retenidosNiveles!.length} con precios de personalización retenidos
+        {s.rachaNiveles
+          ? " (sigue la racha: no se quitó ninguno)"
+          : ` (se llegó al límite de ${s.quitadosNiveles?.length ?? 0} quitados)`}
+        : conservan los que tenían
+      </span>
+    );
+  }
+  if ((s.nivelesRotos?.length ?? 0) > 0) {
+    avisos.push(
+      <span className="text-primary-dark">
+        {s.nivelesRotos!.length} con los precios de personalización inválidos
+      </span>
+    );
+  }
   if ((s.apagadosSinFoto?.length ?? 0) > 0) {
     avisos.push(
       <span className="text-primary-dark">

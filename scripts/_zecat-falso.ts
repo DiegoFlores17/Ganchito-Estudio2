@@ -24,10 +24,20 @@ export interface EstadoFalso {
   /// Variaciones por id sobre el detalle base (stock y nombre). Opcional: los
   /// scripts que no lo usan no cambian.
   variaciones?: Map<string, { stock?: string; name?: string }>;
+  /// Precios de personalizacion por id (printing_types y el recargo bajo el
+  /// minimo). Opcional: sin entrada, el detalle sale sin esos campos, como
+  /// siempre. Los usa audit-verify-impresion.ts.
+  impresion?: Map<string, { printing_types?: unknown[]; customization_under_minimum_extra_cost?: unknown }>;
 }
 
-export function detalleFalso(id: string, variantes: boolean, variacion?: { stock?: string; name?: string }) {
+export function detalleFalso(
+  id: string,
+  variantes: boolean,
+  variacion?: { stock?: string; name?: string },
+  impresion?: { printing_types?: unknown[]; customization_under_minimum_extra_cost?: unknown }
+) {
   return {
+    ...(impresion ?? {}),
     id,
     name: variacion?.name ?? `Producto C ${id}`,
     description: "Prueba etapa C",
@@ -81,7 +91,7 @@ export async function levantarZecatFalso(estado: EstadoFalso) {
       const c = estado.detalle.get(id) ?? "ok";
       if (c === "404") return json(404, { message: "not found" });
       if (c === "500") return json(500, { message: "error" });
-      return json(200, { generic_product: detalleFalso(id, c === "ok", estado.variaciones?.get(id)) });
+      return json(200, { generic_product: detalleFalso(id, c === "ok", estado.variaciones?.get(id), estado.impresion?.get(id)) });
     }
     return json(404, { message: "ruta desconocida" });
   });

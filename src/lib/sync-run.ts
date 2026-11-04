@@ -2,6 +2,7 @@ import { Prisma, ProductOrigin, SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendSyncAlert, type AusenteAlerta } from "@/lib/email";
 import { MOTIVO_FUERA_DE_TOPE } from "@/lib/sync/textos";
+import { topeNiveles, ultimaEntradaPorId, type EntradaNiveles } from "@/lib/sync/niveles";
 import { conectorDe } from "@/lib/sync/conectores";
 
 /// Lock + progreso + historial de las corridas de sincronizacion. El lock
@@ -82,6 +83,22 @@ export interface SyncRunSummary {
   topeSinFoto?: boolean;
   /// true si esta corrida arranco con la racha activa (no apago ninguno).
   rachaSinFoto?: boolean;
+  /// Precios de personalizacion de Zecat (ProductPrintingLevel), ver
+  /// lib/sync/niveles.ts. Opcionales: las corridas anteriores no los tienen.
+  /// - nivelesRotos: productos cuyo set de niveles no paso la validacion
+  ///   (se escribieron con 0 niveles, o se retuvo el viejo).
+  /// - quitadosNiveles: perdian TODOS sus niveles (rotos o ausentes) y la
+  ///   perdida SE APLICO.
+  /// - retenidosNiveles: perdian todos, pero la corrida ya habia llegado al
+  ///   umbral: conservan los viejos.
+  nivelesRotos?: string[];
+  quitadosNiveles?: string[];
+  retenidosNiveles?: string[];
+  /// true si esta corrida llego al tope de perdidas de niveles. Mientras la
+  /// ultima corrida completa lo tenga, la siguiente no quita ninguno (racha).
+  topeNiveles?: boolean;
+  /// true si esta corrida arranco con la racha activa (no quito ninguno).
+  rachaNiveles?: boolean;
   /// Nombre de cada id de las listas de arriba, para mostrar algo legible
   /// sin consultar el estado actual (que puede haber cambiado).
   nombres: Record<string, string>;
@@ -378,6 +395,35 @@ export async function finishSyncRun(runId: string) {
     }
   }
 
+  // Precios de personalizacion (Zecat): mismo criterio de tope por racha que
+  // el de "sin foto" (ver lib/sync/niveles.ts). El umbral es el mismo.
+  const entradasNiveles = ultimaEntradaPorId(run.sinNivelesExternalIds as unknown as EntradaNiveles[]);
+  const nivelesRotos = entradasNiveles.filter((e) => e.causa === "roto").map((e) => e.id);
+  const quitadosNiveles = entradasNiveles.filter((e) => e.perdia && !e.retenido).map((e) => e.id);
+  const retenidosNiveles = entradasNiveles.filter((e) => e.retenido).map((e) => e.id);
+  const rachaNiveles = await rachaNivelesActiva(run.provider, runId);
+  const tope = topeNiveles({ retenidos: retenidosNiveles.length, umbral, racha: rachaNiveles });
+  // Se avisa si se llego al tope, o si hay mas rotos que el umbral aunque no
+  // haya retencion (ej: la primera corrida despues del deploy, cuando nadie
+  // tenia niveles todavia y TODOS vienen rotos: no hay nada que retener, pero
+  // es un cambio de contrato igual).
+  if (tope || nivelesRotos.length > umbral) {
+    try {
+      await sendSyncAlert({
+        provider: run.provider,
+        motivo: "niveles",
+        runId,
+        racha: rachaNiveles,
+        umbral,
+        quitados: await describirAusentes(run.provider, quitadosNiveles),
+        retenidos: await describirAusentes(run.provider, retenidosNiveles),
+        rotos: nivelesRotos.length,
+      });
+    } catch (error) {
+      console.error("[sync-run] No se pudo mandar la alerta de precios de personalizacion:", error);
+    }
+  }
+
   let variantes: Awaited<ReturnType<typeof revisarVariantes>>;
   try {
     variantes = await revisarVariantes(run, umbral, supplier);
@@ -418,11 +464,17 @@ export async function finishSyncRun(runId: string) {
     retenidosSinFoto,
     topeSinFoto,
     rachaSinFoto,
+    nivelesRotos,
+    quitadosNiveles,
+    retenidosNiveles,
+    topeNiveles: tope,
+    rachaNiveles,
     nombres: await nombresDe(run.provider, [
       ...missing,
       ...pausedMissing,
       ...apagadosSinFoto,
       ...retenidosSinFoto,
+      ...retenidosNiveles,
     ]).catch(
       (error) => {
         // Cosmetico: sin nombres el panel muestra los ids. No rompe el cierre.
@@ -461,6 +513,18 @@ export async function rachaSinFotoActiva(provider: ProductOrigin, excluir: strin
     select: { summary: true },
   });
   return anterior ? leerSummary(anterior)?.topeSinFoto === true : false;
+}
+
+/// true si la ULTIMA corrida completa del proveedor (sin contar `excluir`)
+/// llego al tope de perdidas de niveles de personalizacion. Misma logica de
+/// racha que rachaSinFotoActiva: ver lib/sync/niveles.ts.
+export async function rachaNivelesActiva(provider: ProductOrigin, excluir: string): Promise<boolean> {
+  const anterior = await prisma.syncRun.findFirst({
+    where: { provider, status: SyncRunStatus.DONE, id: { not: excluir } },
+    orderBy: { finishedAt: "desc" },
+    select: { summary: true },
+  });
+  return anterior ? leerSummary(anterior)?.topeNiveles === true : false;
 }
 
 /// Lee el resumen de una corrida. Null en las anteriores al campo: el panel

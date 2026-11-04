@@ -10,6 +10,7 @@ import {
   slugifyFamily,
   toDecimalOrNull,
 } from "./normalize";
+import { normalizarImpresion, type NivelImpresion } from "./impresion";
 import type { ZecatFamily, ZecatGenericProduct, ZecatImage } from "./types";
 import {
   calcularPublicHash,
@@ -18,6 +19,7 @@ import {
   type ClaseCambio,
   type DatosPublicos,
 } from "@/lib/sync/cambios";
+import { decidirNiveles, type AvisoNiveles } from "@/lib/sync/niveles";
 
 async function resolveCategoryId(
   family: ZecatFamily | undefined
@@ -105,6 +107,29 @@ export interface SyncProductResult {
   productId: string;
   /// Que cambio respecto de lo que habia (ver lib/sync/cambios.ts).
   cambio: ClaseCambio;
+  /// Que paso con los precios de personalizacion (ProductPrintingLevel).
+  niveles: ResultadoNiveles;
+}
+
+/// Lo que paso con los niveles de impresion de un producto en esta corrida.
+export interface ResultadoNiveles {
+  /// El set vino roto (no paso la validacion): se escribio con CERO niveles
+  /// (o se retuvo el viejo). Los motivos ya salieron por console.warn.
+  roto: boolean;
+  /// Tenia niveles y el set nuevo no tiene ninguno (roto O ausente).
+  perdia: boolean;
+  /// La perdida NO se aplico (sin cupo en la corrida): conserva los viejos.
+  retenido: boolean;
+  /// Lo que el motor anota en la corrida; null si no hay nada que anotar.
+  aviso: AvisoNiveles | null;
+}
+
+export interface OpcionesSyncProduct {
+  /// false cuando la corrida ya quito tantos niveles como permite el umbral
+  /// de seguridad (o sigue la racha): los productos que perderian TODOS sus
+  /// niveles conservan los viejos. Default true (consola de un solo producto).
+  /// Ver lib/sync/niveles.ts.
+  puedeQuitarNiveles?: boolean;
 }
 
 /// Sincroniza un solo producto (detalle completo) contra la base.
@@ -113,8 +138,10 @@ export interface SyncProductResult {
 /// falla a mitad de camino, no queda el producto con imágenes borradas
 /// y sin recrear.
 export async function syncProduct(
-  detail: ZecatGenericProduct
+  detail: ZecatGenericProduct,
+  opciones: OpcionesSyncProduct = {}
 ): Promise<SyncProductResult> {
+  const puedeQuitarNiveles = opciones.puedeQuitarNiveles ?? true;
   const variants = flattenVariants(detail.variants);
 
   // Un producto sin ninguna variante vendible no se puede cotizar: queda
@@ -157,10 +184,33 @@ export async function syncProduct(
   // TECNICA admite el producto (sin precios, ver PrintingInfo), asi que se
   // deduplica por nombre — si no, un producto con 3 niveles de "Bordado"
   // mostraba "Bordado" repetido 3 veces.
+  //
+  // Se descartan las filas SIN name antes de deduplicar: ProductPrintingType.name
+  // es obligatorio y un `undefined` hacia reventar la transaccion entera del
+  // producto (quedaba "fallido" y con los datos viejos), cuando un set de
+  // impresion roto tiene que degradar a "0 niveles", no tumbar al producto.
+  // El set roto ya se loguea mas abajo (normalizarImpresion).
   const tiposImpresion = [
-    ...new Map((detail.printing_types ?? []).map((type) => [type.name, type])).values(),
+    ...new Map(
+      (detail.printing_types ?? [])
+        .filter((type) => typeof type?.name === "string" && type.name.trim() !== "")
+        .map((type) => [type.name, type])
+    ).values(),
   ];
   const areasImpresion = detail.printing_areas ?? [];
+
+  // Precios de personalizacion (ProductPrintingLevel), validados ANTES de la
+  // transaccion. Un set roto se escribe como CERO niveles y sin recargo, no se
+  // pausa el producto (ver impresion.ts). Se loguea para tener la lista.
+  const impresion = normalizarImpresion(detail);
+  const roto = impresion.tipo === "roto";
+  if (impresion.tipo === "roto") {
+    console.warn(
+      `[zecat-sync] Producto ${detail.id} (${detail.name}): precios de personalizacion ROTOS, se escriben 0 niveles: ${impresion.motivos.join("; ")}`
+    );
+  }
+  const nivelesNuevos: NivelImpresion[] = impresion.tipo === "ok" ? impresion.niveles : [];
+  const recargoNuevo = impresion.tipo === "ok" ? impresion.recargo : null;
 
   const activo = (detail.published ?? true) && !sinVariantes;
   const dimensiones = {
@@ -205,9 +255,60 @@ export async function syncProduct(
     tiposImpresion: tiposImpresion.map((t) => ({ name: t.name })),
     atributos: [],
   };
-  const publicHash = calcularPublicHash(datosPublicos);
 
   return prisma.$transaction(async (tx) => {
+    // UNA consulta antes de escribir: la huella anterior, el stock de las
+    // variantes (para clasificar el cambio, cambios.ts) y cuantos niveles de
+    // impresion tenia (para la guarda de perdida, niveles.ts).
+    const existing = await tx.product.findUnique({
+      where: { zecatId: String(detail.id) },
+      select: {
+        id: true,
+        publicHash: true,
+        printingUnderMinimumCost: true,
+        variants: { select: { sku: true, stock: true, reservedStock: true } },
+        _count: { select: { printingLevels: true } },
+      },
+    });
+
+    // Guarda por producto: si perdia todos los niveles y la corrida no tiene
+    // cupo, se RETIENEN los viejos (niveles y recargo). Ver niveles.ts.
+    const { perdia, retenido } = decidirNiveles({
+      tenia: existing?._count.printingLevels ?? 0,
+      nuevos: nivelesNuevos.length,
+      puedeQuitar: puedeQuitarNiveles,
+    });
+    let nivelesPublicos: NivelImpresion[] = nivelesNuevos;
+    let recargoPublico = recargoNuevo;
+    if (retenido) {
+      const viejos = await tx.productPrintingLevel.findMany({ where: { productId: existing!.id } });
+      nivelesPublicos = viejos.map((n) => ({
+        zecatTypeId: n.zecatTypeId,
+        technique: n.technique,
+        label: n.label,
+        areaCm2: n.areaCm2 === null ? null : Number(n.areaCm2),
+        unitCost: Number(n.unitCost),
+        setupCost: Number(n.setupCost),
+        zecatAreaIds: n.zecatAreaIds,
+      }));
+      recargoPublico = existing!.printingUnderMinimumCost === null ? null : Number(existing!.printingUnderMinimumCost);
+      console.warn(
+        `[zecat-sync] Producto ${detail.id} (${detail.name}): iba a perder sus ${viejos.length} niveles de personalizacion, pero la corrida llego al tope de seguridad: se RETIENEN los viejos.`
+      );
+    } else if (perdia && !roto) {
+      console.warn(
+        `[zecat-sync] Producto ${detail.id} (${detail.name}): Zecat dejo de mandar niveles de personalizacion; se escriben 0.`
+      );
+    }
+
+    // El hash refleja lo que QUEDA en la base (con retencion, los niveles
+    // viejos): asi, cuando la perdida finalmente se aplique, el hash cambia y
+    // la cache se invalida.
+    const publicHash = calcularPublicHash({
+      ...datosPublicos,
+      nivelesImpresion: nivelesPublicos,
+      printingUnderMinimumCost: recargoPublico,
+    });
 
     const productData = {
       origin: ProductOrigin.ZECAT,
@@ -245,20 +346,12 @@ export async function syncProduct(
       ...dimensiones,
       active: activo,
       categoryId,
+      // Recargo bajo el minimo (por producto). Retenido = no se toca (undefined:
+      // Prisma solo escribe los campos presentes).
+      printingUnderMinimumCost: retenido ? undefined : recargoNuevo,
       publicHash,
       lastSyncedAt: new Date(),
     };
-
-    // UNA consulta antes de escribir: la huella anterior y el stock de las
-    // variantes, para clasificar el cambio (cambios.ts).
-    const existing = await tx.product.findUnique({
-      where: { zecatId: String(detail.id) },
-      select: {
-        id: true,
-        publicHash: true,
-        variants: { select: { sku: true, stock: true, reservedStock: true } },
-      },
-    });
 
     const cambio = clasificarCambio(
       existing ? { publicHash: existing.publicHash, variantes: existing.variants } : null,
@@ -356,6 +449,11 @@ export async function syncProduct(
     await tx.productPrintingType.deleteMany({
       where: { productId: product.id },
     });
+    // Los niveles de impresion NO se deduplican (a diferencia del bloque de
+    // arriba) y, retenidos, no se tocan.
+    if (!retenido) {
+      await tx.productPrintingLevel.deleteMany({ where: { productId: product.id } });
+    }
 
     const dbVariants = await tx.productVariant.findMany({
       where: { productId: product.id },
@@ -389,9 +487,16 @@ export async function syncProduct(
       await tx.productPrintingType.createMany({
         data: tiposImpresion.map((type) => ({
           productId: product.id,
-          zecatTypeId: String(type.id),
+          zecatTypeId: type.id === null || type.id === undefined ? null : String(type.id),
           name: type.name,
         })),
+      });
+    }
+
+    // Datos de costo INTERNO: viajan solo a la base (ver el schema).
+    if (!retenido && nivelesNuevos.length) {
+      await tx.productPrintingLevel.createMany({
+        data: nivelesNuevos.map((nivel) => ({ ...nivel, productId: product.id })),
       });
     }
 
@@ -401,6 +506,16 @@ export async function syncProduct(
       sinVariantes,
       productId: product.id,
       cambio,
+      niveles: {
+        roto,
+        perdia,
+        retenido,
+        // Solo se anota lo que merece verse: un set roto, o una perdida.
+        aviso:
+          roto || perdia
+            ? { causa: roto ? "roto" : "ausente", perdia, retenido }
+            : null,
+      },
     } satisfies SyncProductResult;
   });
 }

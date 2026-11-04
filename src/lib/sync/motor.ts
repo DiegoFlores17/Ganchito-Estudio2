@@ -7,10 +7,12 @@ import {
   finishSyncRun,
   pausadosDeError,
   leerSummary,
+  rachaNivelesActiva,
   rachaSinFotoActiva,
   umbralDeSeguridad,
   type SyncRunSummary,
 } from "@/lib/sync-run";
+import { ultimaEntradaPorId, type AvisoNiveles, type EntradaNiveles } from "@/lib/sync/niveles";
 import {
   conectorDe,
   type Carga,
@@ -301,6 +303,17 @@ async function trabajar(lease: Lease, conector: Conector, acumulado: Set<string>
   const enRachaSinFoto = await rachaSinFotoActiva(conector.provider, lease.runId);
   let apagadosSinFoto = (run.sinFotoExternalIds as Array<{ retenido: boolean }>).filter((x) => !x.retenido).length;
 
+  // Mismo tope, mismo umbral y misma racha para los precios de
+  // personalizacion de Zecat (lib/sync/niveles.ts): un cambio de contrato del
+  // proveedor se ve igual que cientos de productos que "pierden" todos sus
+  // niveles, y como cada producto se escribe durante la corrida, una alerta
+  // al cierre llegaria con los precios ya borrados. Se cuenta lo APLICADO
+  // (perdia y no retenido), deduplicado por id.
+  const enRachaNiveles = await rachaNivelesActiva(conector.provider, lease.runId);
+  let quitadosNiveles = ultimaEntradaPorId(run.sinNivelesExternalIds as unknown as EntradaNiveles[]).filter(
+    (x) => x.perdia && !x.retenido
+  ).length;
+
   while (cursor < lista.length && Date.now() - inicio < presupuestoTick()) {
     const ids = lista.slice(cursor, cursor + TANDA);
     const cargas = await Promise.all(ids.map((id) => conector.cargar(id)));
@@ -319,10 +332,12 @@ async function trabajar(lease: Lease, conector: Conector, acumulado: Set<string>
     }
 
     for (let i = 0; i < ids.length; i++) {
-      const sinFoto = await procesarUno(lease, cursor + 1, ids[i], cargas[i], conector, {
+      const { sinFoto, nivelesQuitados } = await procesarUno(lease, cursor + 1, ids[i], cargas[i], conector, {
         puedeApagarSinFoto: !enRachaSinFoto && apagadosSinFoto < umbralSinFoto,
+        puedeQuitarNiveles: !enRachaNiveles && quitadosNiveles < umbralSinFoto,
       }, acumulado);
       if (sinFoto === "apagado") apagadosSinFoto++;
+      if (nivelesQuitados) quitadosNiveles++;
       cursor++;
       // Si cargar es gratis (CDO: el producto ya esta en memoria), el
       // presupuesto se mira tambien ENTRE productos: en CDO cada producto
@@ -394,9 +409,10 @@ async function procesarUno(
   conector: Conector,
   contexto: ContextoSincronizar,
   acumulado: Set<string>
-): Promise<ResultadoSincronizar["sinFoto"]> {
+): Promise<{ sinFoto: ResultadoSincronizar["sinFoto"]; nivelesQuitados: boolean }> {
   const delta = { creados: 0, actualizados: 0, pausados: 0, fallidos: 0, moneda: 0 };
   let sinFoto: ResultadoSincronizar["sinFoto"];
+  let niveles: AvisoNiveles | undefined;
   let visto = true;
   let error: { externalId: string; message: string } | null = null;
 
@@ -412,6 +428,7 @@ async function procesarUno(
     try {
       const r = await conector.sincronizar(carga.producto, contexto);
       sinFoto = r.sinFoto;
+      niveles = r.niveles;
       // Solo lo que el cliente nota: cambio publico (incluye altas, pausas y
       // apagados por foto) o stock que cruza el cero. El otro stock lo absorbe el TTL.
       if (r.productId && r.cambio && invalidaCache(r.cambio)) acumulado.add(r.productId);
@@ -439,10 +456,11 @@ async function procesarUno(
       "seenExternalIds" = CASE WHEN ${visto} THEN "seenExternalIds" || to_jsonb(${id}::text) ELSE "seenExternalIds" END,
       errors = CASE WHEN ${error !== null} THEN errors || ${JSON.stringify(error ? [error] : [])}::jsonb ELSE errors END,
       "sinFotoExternalIds" = CASE WHEN ${sinFoto !== undefined} THEN "sinFotoExternalIds" || ${JSON.stringify(sinFoto ? [{ id, retenido: sinFoto === "retenido" }] : [])}::jsonb ELSE "sinFotoExternalIds" END,
+      "sinNivelesExternalIds" = CASE WHEN ${niveles !== undefined} THEN "sinNivelesExternalIds" || ${JSON.stringify(niveles ? [{ id, ...niveles }] : [])}::jsonb ELSE "sinNivelesExternalIds" END,
       "heartbeatAt" = ${new Date()}
     WHERE id = ${lease.runId} AND "leaseUntil" = ${lease.ficha} AND status = 'RUNNING'`;
   if (filas !== 1) throw new LeasePerdido();
-  return sinFoto;
+  return { sinFoto, nivelesQuitados: !!niveles && niveles.perdia && !niveles.retenido };
 }
 
 /// Escribe en la corrida solo si el lease sigue siendo nuestro.

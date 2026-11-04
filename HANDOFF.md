@@ -485,6 +485,17 @@ Lo que trae:
 - **Tiempos medidos en local** (346 productos): **1.571 s con la caché vacía**
   (29 ticks) y **33,8 s con la caché cargada** (un tick).
 
+### Guarda de niveles de personalización (Zecat, `17e75d2`)
+
+- Una corrida deja sin niveles (`product_printing_levels`) como mucho el
+  umbral de productos que tenían niveles; los demás conservan los que tenían.
+  Usa el mismo patrón por racha que el tope de "sin foto".
+- **Cubre solo la pérdida TOTAL por producto.** Una caída parcial (por
+  ejemplo, de 16 niveles a 1) no dispara nada: suele ser un cambio genuino del
+  proveedor, mientras que el caso realista de error (un campo renombrado o un
+  formato roto) deja al producto sin ningún nivel. Si algún día hace falta
+  cubrir la caída parcial, se extiende la guarda.
+
 ### Ausentes que no se pueden verificar (`736db8a`)
 
 Sin esto, un ausente que nunca se podía verificar —el caso real: KUPFER, un

@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { formatDateTime } from "@/lib/format";
+import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
 import { textoNoVerificado } from "@/lib/sync/textos";
 
 /// Envio de mails transaccionales (Resend). Dos usos hoy: aviso de
@@ -222,7 +223,7 @@ export async function sendQuoteNotification(
   </table>
 
   <p style="text-align: right; font-size: 16px; margin: 0 0 20px;">
-    Total: <strong>${input.totalLabel}</strong> <span style="color: #666;">+ IVA</span>
+    Total: <strong>${input.totalLabel}</strong> <span style="color: #666;">+ IVA ${LEYENDAS_PRECIO.totalMensaje}</span>
   </p>
 
   ${

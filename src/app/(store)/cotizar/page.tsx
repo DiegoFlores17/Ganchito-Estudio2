@@ -11,6 +11,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { QuoteSkeleton } from "@/components/quote-skeleton";
 import { formatPriceArs } from "@/lib/format";
+import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
 import {
   clearQuoteCart,
   getQuoteCart,
@@ -401,6 +402,9 @@ export default function CotizarPage() {
       <p className="mt-4 text-right text-lg font-medium text-foreground">
         Total: {formatPriceArs(total)}{" "}
         <span className="text-sm text-foreground/50">+ IVA</span>
+      </p>
+      <p className="mt-1 text-right text-xs text-foreground/50">
+        {LEYENDAS_PRECIO.totalCotizar}
       </p>
 
       <form

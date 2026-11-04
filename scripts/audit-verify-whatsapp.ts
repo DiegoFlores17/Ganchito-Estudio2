@@ -53,7 +53,7 @@ async function main() {
     console.log("[wa] SIN link al panel (el vendedor lo recibe por mail):", !texto.includes("/admin/"));
     // formatPriceArs separa el $ con un NBSP ( ) de Intl.NumberFormat,
     // no con un espacio comun — \s matchea los dos.
-    console.log("[wa] total + IVA:", /Total estimado: \$\s?[\d.,]+ \+ IVA/.test(texto));
+    console.log("[wa] total + IVA:", /Total estimado: \$\s?[\d.,]+ \+ IVA \(\+ personalización y envío\)$/m.test(texto));
     console.log("--- mensaje ---\n" + texto + "\n---------------");
 
     // Truncado: 40 lineas largas tienen que resumirse y el link sobrevivir.

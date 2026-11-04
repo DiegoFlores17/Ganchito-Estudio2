@@ -1,12 +1,16 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { formatPriceArs } from "@/lib/format";
+import { leyendasDePrecio } from "@/lib/leyendas-precio";
 import { ProductCardImage } from "@/components/catalog/product-card-image";
 
 type ProductCardData = Prisma.ProductGetPayload<{
   include: {
     images: true;
     variants: { select: { stock: true; reservedStock: true } };
+    /// Solo la cantidad: alcanza para saber si el producto es personalizable
+    /// (>= 1 tecnica de impresion) sin traer las filas.
+    _count: { select: { printingTypes: true } };
   };
 }>;
 
@@ -32,6 +36,9 @@ export function ProductCard({
   const image = product.images[0];
   const params = new URLSearchParams();
   if (catalogQuery) params.set("desde", catalogQuery);
+  const leyendas = leyendasDePrecio({
+    personalizable: product._count.printingTypes > 0,
+  });
   const href = `/producto/${product.id}${params.size ? `?${params}` : ""}`;
 
   return (
@@ -66,6 +73,7 @@ export function ProductCard({
           {formatPriceArs(sellPrice)}{" "}
           <span className="text-sm font-normal text-foreground/45">+ IVA</span>
         </p>
+        <p className="mt-0.5 text-xs text-foreground/45">{leyendas.card}</p>
       </div>
     </Link>
   );

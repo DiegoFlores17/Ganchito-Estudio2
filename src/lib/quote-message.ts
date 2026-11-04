@@ -1,4 +1,5 @@
 import { randomInt } from "crypto";
+import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
 
 /// Genera el codigo corto de una cotizacion y arma el mensaje de WhatsApp.
 /// Solo server-side: el formato, el escape y el armado del link viven en un
@@ -83,7 +84,7 @@ export function buildQuoteMessage(input: QuoteMessageInput): string {
   const footer = [
     "",
     "",
-    `Total estimado: ${input.formatPrice(input.total)} + IVA`,
+    `Total estimado: ${input.formatPrice(input.total)} + IVA ${LEYENDAS_PRECIO.totalMensaje}`,
   ].join("\n");
 
   const itemLines = input.lines.map((line) => {
@@ -101,18 +102,22 @@ export function buildQuoteMessage(input: QuoteMessageInput): string {
   // linea "...y N mas". Header/total/link van SIEMPRE. Al presupuestar cada
   // linea se reserva el espacio del aviso de truncado, salvo en la ultima
   // (si es la ultima y entra, no hay nada que avisar).
+  //
+  // La reserva se mide sobre el aviso real con el N mas grande posible, no
+  // con un numero fijo: una reserva fija de 60 quedaba corta frente a un
+  // aviso de ~85 caracteres, y alcanzo con alargar el footer para pasarse
+  // del tope.
+  const aviso = (restantes: number) =>
+    `...y ${restantes} producto${restantes === 1 ? "" : "s"} más (ver el detalle completo con el código de arriba)`;
   const budget = MAX_MESSAGE_CHARS - header.length - footer.length;
-  const RESERVA_AVISO = 60;
+  const reservaAviso = aviso(itemLines.length).length;
   const included: string[] = [];
   let used = 0;
   for (const [i, line] of itemLines.entries()) {
     const esLaUltima = i === itemLines.length - 1;
-    const reserva = esLaUltima ? 0 : RESERVA_AVISO;
+    const reserva = esLaUltima ? 0 : reservaAviso;
     if (used + line.length + 1 + reserva > budget) {
-      const restantes = itemLines.length - i;
-      included.push(
-        `...y ${restantes} producto${restantes === 1 ? "" : "s"} más (ver el detalle completo con el código de arriba)`
-      );
+      included.push(aviso(itemLines.length - i));
       break;
     }
     included.push(line);

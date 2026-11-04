@@ -15,6 +15,7 @@ import {
 } from "@/lib/pricing";
 import { RANGE_DISCOUNT_MIN_QUANTITY } from "@/lib/zecat/normalize";
 import { formatPriceArs } from "@/lib/format";
+import { leyendasDePrecio } from "@/lib/leyendas-precio";
 
 /// La URL canonica de la ficha es SIEMPRE /producto/{id}, sin query: `desde`
 /// solo arma el link de "volver" y generaba una URL distinta por cada
@@ -136,6 +137,11 @@ export default async function ProductoPage({
             minOrderQuantity={product.minOrderQuantity}
             escalonesPorSku={escalonesPorSku}
             bulkFromQuantity={RANGE_DISCOUNT_MIN_QUANTITY}
+            leyendaPrecio={
+              leyendasDePrecio({
+                personalizable: product.printingTypes.length > 0,
+              }).ficha
+            }
             fallbackPriceLabel={
               rango ? formatPriceArs(rango.min) : formatPriceArs(0)
             }

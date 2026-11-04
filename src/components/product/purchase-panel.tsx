@@ -60,6 +60,7 @@ export function PurchasePanel({
   escalonesPorSku,
   bulkFromQuantity,
   fallbackPriceLabel,
+  leyendaPrecio,
 }: {
   productId: string;
   variants: VariantData[];
@@ -83,6 +84,9 @@ export function PurchasePanel({
   /// Que mostrar mientras no hay variante resuelta (producto sin variantes
   /// activas, o un SKU que no figura en el mapa). Es el minimo del producto.
   fallbackPriceLabel: string;
+  /// Aclaracion de lo que el precio NO incluye (personalizacion y envio).
+  /// Viene resuelta del server (lib/leyendas-precio.ts).
+  leyendaPrecio: string;
 }) {
   const activeVariants = useMemo(
     () => variants.filter((v) => v.active),
@@ -403,6 +407,7 @@ export function PurchasePanel({
           {precioMostrado}{" "}
           <span className="text-base text-foreground/50">+ IVA</span>
         </p>
+        <p className="mt-1 text-xs text-foreground/50">{leyendaPrecio}</p>
         {/* Sobria a proposito: dice QUE el precio cambia, no por que ni
             cuanto. El porcentaje del proveedor no se muestra — es su
             estructura de costos, no información para el cliente. */}

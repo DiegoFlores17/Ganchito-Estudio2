@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
 
 type PrintingArea = Prisma.PrintingAreaGetPayload<Record<string, never>>;
 type PrintingType = Prisma.ProductPrintingTypeGetPayload<Record<string, never>>;
@@ -52,7 +53,7 @@ export function PrintingInfo({
       )}
 
       <p className="text-xs text-foreground/50">
-        El logo se carga en el paso de cotización.
+        {LEYENDAS_PRECIO.impresion}
       </p>
     </div>
   );

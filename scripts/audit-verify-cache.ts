@@ -771,6 +771,7 @@ async function main() {
         escalonesPorSku: { S1: [{ desde: 1, precio: "$ 100" }, { desde: 10, precio: "$ 90" }, { desde: 50, precio: "$ 80" }] },
         bulkFromQuantity: 2,
         fallbackPriceLabel: "$ 100",
+        leyendaPrecio: "Personalización y envío se cotizan aparte",
       })
     );
   const conAviso = panel(3, 5); //  stock 3, minimo 5 -> la cantidad inicial (5) supera el stock

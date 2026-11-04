@@ -322,6 +322,9 @@ export async function getProducts({
       take: PRODUCTS_PER_PAGE,
       include: {
         images: { where: { isMain: true }, take: 1 },
+        // Cuenta de tecnicas de impresion: la card decide con ella que
+        // leyenda de "no incluye" muestra (ver lib/leyendas-precio.ts).
+        _count: { select: { printingTypes: true } },
         // costPrice va aca porque el precio ahora vive en la variante: la
         // card necesita todas para saber si muestra un precio exacto o un
         // "Desde" (ver computePriceRange).
@@ -503,6 +506,7 @@ export async function getFeaturedProducts(
     where: { id: { in: ids } },
     include: {
       images: { where: { isMain: true }, take: 1 },
+      _count: { select: { printingTypes: true } },
       variants: {
         // Mismo criterio que la grilla del catalogo: solo las activas.
         where: { active: true },

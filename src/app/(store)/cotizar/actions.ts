@@ -2,8 +2,12 @@
 
 import { QuoteStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { computeSellPriceForQuantity, getPricingConfig } from "@/lib/pricing";
-import { formatPriceArs } from "@/lib/format";
+import {
+  computePrintingPrice,
+  computeSellPriceForQuantity,
+  getPricingConfig,
+} from "@/lib/pricing";
+import { aCentavos, formatPriceArsCentavos } from "@/lib/format";
 import { getVariantAvailableStock } from "@/lib/product";
 import { sendQuoteNotification } from "@/lib/email";
 import {
@@ -21,6 +25,16 @@ import { Prisma } from "@prisma/client";
 import { POLITICA_PRIVACIDAD_VERSION } from "@/lib/privacidad";
 import { productosConRecargo } from "@/lib/quote-minimum";
 import { lineasSobreElStock } from "@/lib/quote-stock";
+import {
+  etiquetaPublica,
+  leerSeleccionesCrudas,
+  tituloArea,
+  opcionPorDefecto,
+  opcionesDeImpresion,
+  resolverSeleccion,
+  type OpcionInterna,
+} from "@/lib/quote-printing";
+import { impresionEnTotal, leyendaTotalMensaje } from "@/lib/leyendas-precio";
 import {
   QUOTE_LOGO_EXTENSIONS,
   saveUploadedFile,
@@ -101,6 +115,93 @@ async function getUnavailableNames(productIds: string[]): Promise<string[]> {
   return names;
 }
 
+/// Lo que se lee de la base para ofrecer y cotizar la personalizacion. Los
+/// costos se quedan en el servidor: al navegador viaja `OpcionImpresion`.
+const SELECT_IMPRESION = {
+  printingLevels: {
+    select: {
+      zecatTypeId: true,
+      technique: true,
+      label: true,
+      areaCm2: true,
+      zecatAreaIds: true,
+      unitCost: true,
+      setupCost: true,
+    },
+  },
+  printingAreas: {
+    select: { zecatAreaId: true, name: true, widthCm: true, heightCm: true },
+  },
+} satisfies Prisma.ProductSelect;
+
+type ProductoConImpresion = Prisma.ProductGetPayload<{ select: typeof SELECT_IMPRESION }>;
+
+/// Precio unitario de una linea tal como se congela: Decimal(12,2). Postgres
+/// redondea igual al guardar (HALF_UP para positivos); se hace ACA para que
+/// lo que el cliente ve multiplicado sea exactamente lo que se guarda, y que
+/// "cantidad x unitario" de el subtotal mostrado.
+function aCongelar(precio: Prisma.Decimal): Prisma.Decimal {
+  return precio.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+
+/// Personalizable: tiene al menos una tecnica (ProductPrintingType), tenga o
+/// no precios. Mismo criterio que la leyenda de la card.
+const SELECT_PERSONALIZABLE = {
+  _count: { select: { printingTypes: true } },
+} satisfies Prisma.ProductSelect;
+
+/// Opciones de personalizacion del producto, y el costo de cada nivel.
+function impresionDelProducto(p: ProductoConImpresion) {
+  const opciones = opcionesDeImpresion(
+    p.printingLevels.map((l) => ({
+      zecatTypeId: l.zecatTypeId,
+      technique: l.technique,
+      label: l.label,
+      areaCm2: l.areaCm2 === null ? null : Number(l.areaCm2),
+      zecatAreaIds: l.zecatAreaIds,
+    })),
+    p.printingAreas.map((a) => ({
+      zecatAreaId: a.zecatAreaId,
+      name: a.name,
+      widthCm: a.widthCm === null ? null : Number(a.widthCm),
+      heightCm: a.heightCm === null ? null : Number(a.heightCm),
+    }))
+  );
+  const costoPorNivel = new Map(p.printingLevels.map((l) => [l.zecatTypeId, l]));
+  return { opciones, costoPorNivel };
+}
+
+/// Una opcion de personalizacion tal como la ve el cliente. Sin costos, sin la
+/// etiqueta de Zecat y sin umbral: solo precio de venta y medidas.
+export interface OpcionImpresion {
+  key: string;
+  zecatTypeId: string;
+  zecatAreaId: string;
+  technique: string;
+  areaName: string;
+  sizeLabel: string;
+  unitPrice: number;
+  setupPrice: number;
+}
+
+export interface ProductPrintingSummary {
+  productId: string;
+  productName: string;
+  /// Total de unidades del producto (suma de sus lineas).
+  quantity: number;
+  opciones: OpcionImpresion[];
+  /// Clave de la opcion elegida, o "ninguna". Si no habia nada guardado (o lo
+  /// guardado ya no es una opcion), la preseleccionada: la mas chica.
+  seleccion: string;
+  /// Adicional del proveedor por cantidad chica para la cantidad ACTUAL del
+  /// producto, o null si no corresponde. Viaja el MONTO, no el umbral. Ojo:
+  /// probando cantidades (el resumen se puede pedir cuantas veces se quiera)
+  /// el umbral se puede deducir, y se acepta — es inherente a mostrar el
+  /// monto. Lo que no hacemos es publicarlo ni prometer personalizacion sin
+  /// recargo. Se suma solo si el producto lleva personalizacion.
+  surcharge: number | null;
+}
+
 export interface QuoteItemSummary {
   productId: string;
   productName: string;
@@ -108,10 +209,15 @@ export interface QuoteItemSummary {
   variantSku?: string;
   variantLabel: string | null;
   quantity: number;
+  /// Unitario congelable (2 decimales) con centavos: "$ 1.272,23".
   unitPriceLabel: string;
-  subtotal: number;
+  /// unitario x cantidad, exacto, en centavos enteros: el total se suma asi.
+  subtotalCentavos: number;
   subtotalLabel: string;
   inStock: boolean;
+  /// Tiene tecnicas de impresion. Si no aparece en `printing` (sin precios:
+  /// CDO, o Zecat sin niveles), su personalizacion se cotiza aparte.
+  personalizable: boolean;
 }
 
 export interface QuoteSummaryResult {
@@ -125,18 +231,22 @@ export interface QuoteSummaryResult {
   /// ANTES del submit: la ventana de WhatsApp se abre en el gesto del click
   /// (si no, Safari iOS la bloquea), y sin numero no hay que abrir nada.
   whatsappAvailable: boolean;
+  /// Personalizacion ofrecida, un elemento por producto que tiene opciones.
+  printing: ProductPrintingSummary[];
 }
 
 /// Resumen de los items del borrador para mostrar en /cotizar. Recalcula
 /// el precio ACTUAL desde la base (nunca confia en nada de localStorage).
 export async function getQuoteItemsSummary(
-  rawItems: QuoteCartItemInput[]
+  rawItems: QuoteCartItemInput[],
+  rawPrinting?: unknown
 ): Promise<QuoteSummaryResult> {
   const items = sanitizeItems(rawItems) ?? [];
+  const selecciones = leerSeleccionesCrudas(rawPrinting);
   const siteConfig = await getSiteConfig();
   const whatsappAvailable = whatsappUrl(siteConfig.whatsappNumber) !== null;
   if (items.length === 0) {
-    return { items: [], unavailableNames: [], whatsappAvailable };
+    return { items: [], unavailableNames: [], whatsappAvailable, printing: [] };
   }
 
   const pricingConfig = await getPricingConfig();
@@ -147,6 +257,8 @@ export async function getQuoteItemsSummary(
     // el producto muera despues — eso es el soft delete y no pasa por aca.)
     where: { id: { in: productIds }, active: true, deletedAt: null },
     include: {
+      ...SELECT_IMPRESION,
+      ...SELECT_PERSONALIZABLE,
       images: {
         where: { variantId: null },
         orderBy: [{ isMain: "desc" }, { sortOrder: "asc" }],
@@ -220,8 +332,8 @@ export async function getQuoteItemsSummary(
       pricingConfig,
       totalPorProducto.get(item.productId) ?? item.quantity
     );
-    const unitPrice = Number(sellPrice);
-    const subtotal = unitPrice * item.quantity;
+    const unitPrice = aCongelar(sellPrice);
+    const subtotal = unitPrice.times(item.quantity);
 
     summaries.push({
       productId: product.id,
@@ -232,10 +344,58 @@ export async function getQuoteItemsSummary(
         [variant?.colorName, variant?.sizeName].filter(Boolean).join(" / ") ||
         null,
       quantity: item.quantity,
-      unitPriceLabel: formatPriceArs(sellPrice),
-      subtotal,
-      subtotalLabel: formatPriceArs(subtotal),
+      unitPriceLabel: formatPriceArsCentavos(unitPrice),
+      subtotalCentavos: aCentavos(subtotal),
+      subtotalLabel: formatPriceArsCentavos(subtotal),
       inStock: getVariantAvailableStock(variant) > 0,
+      personalizable: product._count.printingTypes > 0,
+    });
+  }
+
+  // Personalizacion: una entrada por producto que sobrevivio y tiene
+  // opciones. El precio sale de la MISMA funcion y con los MISMOS datos que
+  // congela submitQuote. Del recargo viaja solo el monto; el umbral se queda
+  // aca.
+  const printing: ProductPrintingSummary[] = [];
+  for (const [productId, quantity] of totalPorProducto) {
+    const product = byId.get(productId)!;
+    const { opciones, costoPorNivel } = impresionDelProducto(product);
+    if (opciones.length === 0) continue;
+    const resuelta = resolverSeleccion(opciones, selecciones[productId]);
+    const seleccion =
+      resuelta.tipo === "ok"
+        ? resuelta.opcion.key
+        : resuelta.tipo === "ninguna"
+          ? "ninguna"
+          : opcionPorDefecto(opciones)!.key;
+    const recargo = computePrintingPrice(
+      { unitCost: new Prisma.Decimal(0), setupCost: new Prisma.Decimal(0) },
+      pricingConfig,
+      {
+        productQuantity: quantity,
+        minOrderQuantity: product.minOrderQuantity,
+        underMinimumCost: product.printingUnderMinimumCost,
+      }
+    ).surcharge;
+    printing.push({
+      productId,
+      productName: product.name,
+      quantity,
+      seleccion,
+      surcharge: recargo === null ? null : Number(recargo),
+      opciones: opciones.map((o) => {
+        const precio = computePrintingPrice(costoPorNivel.get(o.zecatTypeId)!, pricingConfig);
+        return {
+          key: o.key,
+          zecatTypeId: o.zecatTypeId,
+          zecatAreaId: o.zecatAreaId,
+          technique: o.technique,
+          areaName: tituloArea(o.areaName),
+          sizeLabel: o.sizeLabel,
+          unitPrice: Number(precio.unitPrice),
+          setupPrice: Number(precio.setupPrice),
+        };
+      }),
     });
   }
 
@@ -243,6 +403,7 @@ export async function getQuoteItemsSummary(
     items: summaries,
     unavailableNames: await getUnavailableNames([...unavailableIds]),
     whatsappAvailable,
+    printing,
   };
 }
 
@@ -308,6 +469,7 @@ export async function submitQuote(
   const companyName = String(formData.get("companyName") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const itemsRaw = String(formData.get("items") ?? "[]");
+  const printingRaw = String(formData.get("printing") ?? "{}");
   const logo = formData.get("logo");
   // Un checkbox marcado llega como "on"; sin marcar, no llega.
   const privacyAccepted = formData.get("privacyAccepted") === "on";
@@ -355,6 +517,15 @@ export async function submitQuote(
       error: "No se pudieron leer los productos de la cotización.",
     };
   }
+  // La personalizacion no rechaza nunca: un JSON roto equivale a "no vino
+  // nada" (cada producto se cotiza sin personalizar, sin marca).
+  let selecciones: Record<string, unknown> = {};
+  try {
+    selecciones = leerSeleccionesCrudas(JSON.parse(printingRaw));
+  } catch {
+    selecciones = {};
+  }
+
   const items = sanitizeItems(parsed);
   if (items === null) {
     return {
@@ -392,6 +563,11 @@ export async function submitQuote(
       name: true,
       currency: true,
       minOrderQuantity: true,
+      // Recargo de Zecat por personalizar debajo del umbral, para congelarlo
+      // en QuotePrinting. Al cliente se le mostro el monto en el resumen.
+      printingUnderMinimumCost: true,
+      ...SELECT_IMPRESION,
+      ...SELECT_PERSONALIZABLE,
       variants: {
         // Mismo criterio que el resumen: un sku desactivado (el proveedor ya
         // no lo manda) no se cotiza — la linea se omite como si no existiera.
@@ -420,6 +596,7 @@ export async function submitQuote(
     quantity: number;
     unitPrice: Prisma.Decimal;
     minOrderQuantity: number | null;
+    printingType: string | null;
   }> = [];
   const messageLines: QuoteMessageLine[] = [];
   // Stock disponible de cada sku que entro, para marcar en el mail los pedidos
@@ -469,12 +646,60 @@ export async function submitQuote(
   }
   const totalPorProducto = sumarPorProducto(vivas.map((v) => v.item));
 
-  for (const { item, product, variant } of vivas) {
-    const unitPrice = computeSellPriceForQuantity(
-      variant,
-      product.currency,
+  // Personalizacion, por PRODUCTO (el setup y el recargo son por producto).
+  // Se revalida contra las opciones de la base: lo que no es una opcion de
+  // ese producto se quita y se marca, nunca se rechaza la cotizacion.
+  const printingData: Array<{
+    productId: string;
+    opcion: OpcionInterna;
+    publicLabel: string;
+    quantity: number;
+    unitPrice: Prisma.Decimal;
+    setupPrice: Prisma.Decimal;
+    surcharge: Prisma.Decimal | null;
+  }> = [];
+  const descartadas: string[] = [];
+  for (const [productId, quantity] of totalPorProducto) {
+    const product = productoPorId.get(productId)!;
+    const { opciones, costoPorNivel } = impresionDelProducto(product);
+    const resuelta = resolverSeleccion(opciones, selecciones[productId]);
+    if (resuelta.tipo === "invalida") {
+      descartadas.push(productId);
+      continue;
+    }
+    if (resuelta.tipo !== "ok") continue;
+    const precio = computePrintingPrice(
+      costoPorNivel.get(resuelta.opcion.zecatTypeId)!,
       pricingConfig,
-      totalPorProducto.get(item.productId) ?? item.quantity
+      {
+        productQuantity: quantity,
+        minOrderQuantity: product.minOrderQuantity,
+        underMinimumCost: product.printingUnderMinimumCost,
+      }
+    );
+    printingData.push({
+      productId,
+      opcion: resuelta.opcion,
+      publicLabel: etiquetaPublica(resuelta.opcion),
+      quantity,
+      ...precio,
+    });
+  }
+  if (descartadas.length > 0) {
+    console.warn(
+      `[cotizar] Seleccion de personalizacion invalida, se quito en ${descartadas.length} producto(s): ${descartadas.join(", ")}`
+    );
+  }
+  const etiquetaPorProducto = new Map(printingData.map((p) => [p.productId, p.publicLabel]));
+
+  for (const { item, product, variant } of vivas) {
+    const unitPrice = aCongelar(
+      computeSellPriceForQuantity(
+        variant,
+        product.currency,
+        pricingConfig,
+        totalPorProducto.get(item.productId) ?? item.quantity
+      )
     );
 
     quoteItemsData.push({
@@ -488,6 +713,9 @@ export async function submitQuote(
       // pierde el contacto. Solo se marca para Ganchito (ver
       // lib/quote-minimum.ts).
       minOrderQuantity: product.minOrderQuantity,
+      // Etiqueta publica de la personalizacion del producto (la misma en
+      // todas sus lineas). Null sin personalizar.
+      printingType: etiquetaPorProducto.get(item.productId) ?? null,
     });
 
     // La linea del mensaje de WhatsApp se arma ACA, con los mismos valores
@@ -499,12 +727,9 @@ export async function submitQuote(
       variantLabel:
         [variant.colorName, variant.sizeName].filter(Boolean).join(" / ") ||
         null,
-      // printingType existe en el schema pero el flujo actual nunca lo
-      // carga (el panel de compra no pide tecnica). Si algun dia se carga,
-      // el mensaje ya lo muestra.
-      printingType: null,
+      printingType: etiquetaPorProducto.get(item.productId) ?? null,
       quantity: item.quantity,
-      subtotal: Number(unitPrice) * item.quantity,
+      subtotal: Number(unitPrice.times(item.quantity)),
     });
   }
 
@@ -575,6 +800,22 @@ export async function submitQuote(
           privacyAcceptedAt: new Date(),
           privacyVersion: POLITICA_PRIVACIDAD_VERSION,
           items: { create: quoteItemsData },
+          printings: {
+            create: printingData.map((p) => ({
+              productId: p.productId,
+              zecatTypeId: p.opcion.zecatTypeId,
+              technique: p.opcion.technique,
+              levelLabel: p.opcion.levelLabel,
+              publicLabel: p.publicLabel,
+              areaName: p.opcion.areaName,
+              quantity: p.quantity,
+              unitPrice: p.unitPrice,
+              setupPrice: p.setupPrice,
+              surcharge: p.surcharge,
+              estimated: true,
+            })),
+          },
+          printingDroppedProductIds: descartadas,
         },
         select: { id: true, shortCode: true },
       });
@@ -600,12 +841,41 @@ export async function submitQuote(
   // el destino del aviso por mail.
   const siteConfig = await getSiteConfig();
 
+  // Total que vio el cliente: productos + personalizacion (unitario congelado
+  // x cantidad) + preparacion del logo + adicional por cantidad chica.
+  // Se suma en centavos: el total es EXACTAMENTE la suma de las lineas
+  // mostradas (cada una ya es monto congelado x cantidad).
+  const totalCentavos =
+    messageLines.reduce((sum, l) => sum + aCentavos(l.subtotal), 0) +
+    printingData.reduce(
+      (sum, p) =>
+        sum +
+        aCentavos(p.unitPrice.times(p.quantity)) +
+        aCentavos(p.setupPrice) +
+        aCentavos(p.surcharge ?? 0),
+      0
+    );
+  const total = totalCentavos / 100;
+  // Personalizables sin precio (CDO, Zecat sin niveles): su personalizacion
+  // se cotiza aparte. Los "Sin personalizar" elegidos a proposito no.
+  const sinPrecio = [...totalPorProducto.keys()].filter((id) => {
+    const product = productoPorId.get(id)!;
+    return (
+      product._count.printingTypes > 0 &&
+      impresionDelProducto(product).opciones.length === 0
+    );
+  }).length;
+  const sufijoTotal = leyendaTotalMensaje(
+    impresionEnTotal({ conImpresion: printingData.length, sinPrecio })
+  );
+  const conPersonalizacion = new Set(printingData.map((p) => p.productId));
+  const nombrePorProducto = new Map(products.map((p) => [p.id, p.name]));
+
   let waUrl: string | null = null;
   const waDigits = siteConfig.whatsappNumber
     ? normalizeWhatsappNumber(siteConfig.whatsappNumber)
     : "";
   if (waDigits) {
-    const total = messageLines.reduce((sum, l) => sum + l.subtotal, 0);
     const message = buildQuoteMessage({
       shortCode: quote.shortCode,
       customerName,
@@ -613,7 +883,8 @@ export async function submitQuote(
       customerEmail,
       lines: messageLines,
       total,
-      formatPrice: (v) => formatPriceArs(v),
+      sufijoTotal,
+      formatPrice: (v) => formatPriceArsCentavos(v),
     });
     waUrl = buildWaUrl(waDigits, message);
   }
@@ -644,13 +915,25 @@ export async function submitQuote(
         // Solo el mail a Ganchito lleva las marcas; el mensaje de WhatsApp
         // (messageLines) no.
         sinRecargoDesde: conRecargo.get(quoteItemsData[i].productId) ?? null,
+        conPersonalizacion: conPersonalizacion.has(quoteItemsData[i].productId),
         stockDisponible: sobreElStock[i],
-        unitPriceLabel: formatPriceArs(l.subtotal / l.quantity),
-        subtotalLabel: formatPriceArs(l.subtotal),
+        unitPriceLabel: formatPriceArsCentavos(quoteItemsData[i].unitPrice),
+        subtotalLabel: formatPriceArsCentavos(l.subtotal),
       })),
-      totalLabel: formatPriceArs(
-        messageLines.reduce((sum, l) => sum + l.subtotal, 0)
-      ),
+      printing: printingData.map((p) => ({
+        productName: nombrePorProducto.get(p.productId) ?? p.productId,
+        publicLabel: p.publicLabel,
+        levelLabel: p.opcion.levelLabel,
+        quantity: p.quantity,
+        unitPriceLabel: formatPriceArsCentavos(p.unitPrice),
+        subtotalLabel: formatPriceArsCentavos(p.unitPrice.times(p.quantity)),
+        setupLabel: formatPriceArsCentavos(p.setupPrice),
+        surchargeLabel: p.surcharge ? formatPriceArsCentavos(p.surcharge) : null,
+        sinRecargoDesde: p.surcharge ? conRecargo.get(p.productId) ?? null : null,
+      })),
+      droppedPrintingNames: descartadas.map((id) => nombrePorProducto.get(id) ?? id),
+      totalLabel: formatPriceArsCentavos(total),
+      sufijoTotal,
       to: siteConfig.contactEmail,
     });
   } else {

@@ -209,6 +209,11 @@ export async function syncProduct(
       `[zecat-sync] Producto ${detail.id} (${detail.name}): precios de personalizacion ROTOS, se escriben 0 niveles: ${impresion.motivos.join("; ")}`
     );
   }
+  if (impresion.tipo === "ok" && impresion.avisos.length > 0) {
+    console.warn(
+      `[zecat-sync] Producto ${detail.id} (${detail.name}): etiqueta y area de personalizacion no coinciden: ${impresion.avisos.join("; ")}`
+    );
+  }
   const nivelesNuevos: NivelImpresion[] = impresion.tipo === "ok" ? impresion.niveles : [];
   const recargoNuevo = impresion.tipo === "ok" ? impresion.recargo : null;
 

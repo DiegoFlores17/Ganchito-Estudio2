@@ -35,6 +35,8 @@ export type ResultadoImpresion =
       niveles: NivelImpresion[];
       /// Null si Zecat no manda el recargo.
       recargo: number | null;
+      /// Rarezas que NO rompen el set: se loguean para tener la lista.
+      avisos: string[];
     }
   | { tipo: "roto"; motivos: string[] };
 
@@ -57,6 +59,13 @@ function monto(v: unknown): number | null {
   return Number(new Prisma.Decimal(n).toDecimalPlaces(2).toString());
 }
 
+/// Los cm² que dice la etiqueta ("Transfer DTF 900 cm2" -> 900), o null si la
+/// etiqueta no habla de cm² (el bordado se rotula en KP).
+export function cm2DeLaEtiqueta(label: string): number | null {
+  const m = /(\d+(?:[.,]\d+)?)\s*cm(?:2|²)/i.exec(label);
+  return m ? Number(m[1].replace(",", ".")) : null;
+}
+
 function texto(v: unknown): string | null {
   if (typeof v !== "string" && typeof v !== "number") return null;
   const t = String(v).trim();
@@ -77,6 +86,7 @@ export function normalizarImpresion(detail: ZecatGenericProduct): ResultadoImpre
   }
 
   const niveles: NivelImpresion[] = [];
+  const avisos: string[] = [];
   const vistos = new Set<string>();
   const filas: ZecatPrintingType[] = Array.isArray(detail.printing_types) ? detail.printing_types : [];
   filas.forEach((fila, i) => {
@@ -125,11 +135,20 @@ export function normalizarImpresion(detail: ZecatGenericProduct): ResultadoImpre
       ),
     ];
 
+    // Manda el CAMPO NUMERICO `area`; la etiqueta es texto. Si no coinciden
+    // (3965: "Transfer DTF 900 cm2" con area 1100) se avisa y se sigue: no es
+    // un set roto, pero conviene tener la lista.
+    const label = texto(fila.description) ?? name;
+    const enEtiqueta = cm2DeLaEtiqueta(label);
+    if (enEtiqueta !== null && areaCm2 !== null && enEtiqueta !== areaCm2) {
+      avisos.push(`${donde} (id ${id}): la etiqueta "${label}" dice ${enEtiqueta} cm2 pero area es ${areaCm2}; se usa area`);
+    }
+
     niveles.push({
       zecatTypeId: id,
       technique: name,
       // Sin description, el label cae al name: no es un error.
-      label: texto(fila.description) ?? name,
+      label,
       areaCm2,
       unitCost,
       setupCost,
@@ -138,5 +157,5 @@ export function normalizarImpresion(detail: ZecatGenericProduct): ResultadoImpre
   });
 
   if (motivos.length > 0) return { tipo: "roto", motivos };
-  return { tipo: "ok", niveles, recargo };
+  return { tipo: "ok", niveles, recargo, avisos };
 }

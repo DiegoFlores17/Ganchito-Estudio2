@@ -33,6 +33,21 @@ export function textoRecargoProveedor(sinRecargoDesde: number): string {
   return `Personalización con recargo del proveedor (sin recargo desde ${sinRecargoDesde} un.)`;
 }
 
+/// Nota interna para un producto debajo del umbral que se cotizo SIN
+/// personalizacion: no hay recargo que cobrar, pero si el cliente despues
+/// quiere personalizarlo, lo lleva. No afirma una personalizacion que no hay.
+export function textoBajoUmbralSinPersonalizar(sinRecargoDesde: number): string {
+  return `Bajo el umbral del proveedor: si se personaliza, lleva recargo (sin recargo desde ${sinRecargoDesde} un.)`;
+}
+
+/// La marca que corresponde a un producto debajo del umbral, segun haya
+/// quedado con personalizacion o sin ella.
+export function textoUmbral(sinRecargoDesde: number, conPersonalizacion: boolean): string {
+  return conPersonalizacion
+    ? textoRecargoProveedor(sinRecargoDesde)
+    : textoBajoUmbralSinPersonalizar(sinRecargoDesde);
+}
+
 /// Productos de la cotizacion cuyo total queda debajo del umbral sin recargo.
 /// Devuelve productId -> umbral.
 export function productosConRecargo(

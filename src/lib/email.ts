@@ -1,7 +1,8 @@
 import { Resend } from "resend";
 import { formatDateTime } from "@/lib/format";
 import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
-import { textoRecargoProveedor } from "@/lib/quote-minimum";
+import { textoRecargoProveedor, textoUmbral } from "@/lib/quote-minimum";
+import { TEXTO_SELECCION_DESCARTADA } from "@/lib/quote-printing";
 import { textoPedidoMayorAlStock } from "@/lib/quote-stock";
 import { textoNoVerificado } from "@/lib/sync/textos";
 
@@ -167,12 +168,40 @@ export interface QuoteEmailInput {
     /// por producto, no por linea). Null/ausente: sin marca. Es un aviso
     /// interno: este mail es para Ganchito.
     sinRecargoDesde?: number | null;
+    /// Si el producto quedo CON personalizacion. Decide el texto de la marca
+    /// del umbral: con personalizacion lleva recargo; sin ella, solo se avisa
+    /// que lo llevaria si se personaliza. Ausente: con (mails viejos).
+    conPersonalizacion?: boolean;
     /// Stock disponible de la variante, solo si el pedido de ese sku lo supera
     /// (ver lib/quote-stock.ts). 0 es un valor valido ("stock: 0"); null o
     /// ausente: sin marca. Tambien interno.
     stockDisponible?: number | null;
   }>;
+  /// Personalizacion congelada, una por producto (ver QuotePrinting).
+  printing?: Array<{
+    productName: string;
+    /// La que vio el cliente ("Bordado · hasta 3,1 × 3,1 cm · FRENTE (estimado)").
+    publicLabel: string;
+    /// La de Zecat ("Bordado 2KP"). Interna.
+    levelLabel: string;
+    quantity: number;
+    unitPriceLabel: string;
+    subtotalLabel: string;
+    setupLabel: string;
+    /// Adicional del proveedor por cantidad chica (recargo por personalizar
+    /// debajo del umbral). El cliente lo vio como linea aparte y esta en su
+    /// total; el umbral, en cambio, sigue siendo interno.
+    surchargeLabel: string | null;
+    /// Umbral sin recargo, solo para la nota interna. Null sin recargo.
+    sinRecargoDesde?: number | null;
+  }>;
+  /// Productos cuya seleccion de personalizacion no era valida y se quito.
+  droppedPrintingNames?: string[];
+  /// Total que vio el cliente (productos + personalizacion + preparacion +
+  /// adicional por cantidad chica).
   totalLabel: string;
+  /// Aclaracion que sigue al "+ IVA" (ver leyendaTotalMensaje).
+  sufijoTotal?: string;
   /// A donde se avisa. Sale de SiteConfig.contactEmail (editable desde el
   /// panel): un aviso de cotizacion es negocio, no configuracion tecnica.
   to: string;
@@ -200,7 +229,7 @@ export async function sendQuoteNotification(
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee;">
           ${escapar(l.productName)}
           ${l.variantLabel ? `<br><span style="color: #666; font-size: 13px;">${escapar(l.variantLabel)}</span>` : ""}
-          ${l.sinRecargoDesde ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">${textoRecargoProveedor(l.sinRecargoDesde)}</span>` : ""}
+          ${l.sinRecargoDesde ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">${textoUmbral(l.sinRecargoDesde, l.conPersonalizacion ?? true)}</span>` : ""}
           ${l.stockDisponible != null ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">${textoPedidoMayorAlStock(l.stockDisponible)}</span>` : ""}
         </td>
         <td style="padding: 8px 12px; border-bottom: 1px solid #eee; text-align: right;">${l.quantity}</td>
@@ -209,6 +238,38 @@ export async function sendQuoteNotification(
       </tr>`
     )
     .join("");
+
+  const ESTILO_CELDA = "padding: 8px 12px; border-bottom: 1px solid #eee;";
+  const filasImpresion = (input.printing ?? [])
+    .map(
+      (p) => `
+      <tr>
+        <td style="${ESTILO_CELDA}">
+          Personalización — ${escapar(p.productName)}
+          <br><span style="color: #666; font-size: 13px;">${escapar(p.publicLabel)} · nivel ${escapar(p.levelLabel)}</span>
+        </td>
+        <td style="${ESTILO_CELDA} text-align: right;">${p.quantity}</td>
+        <td style="${ESTILO_CELDA} text-align: right;">${p.unitPriceLabel}</td>
+        <td style="${ESTILO_CELDA} text-align: right; font-weight: 500;">${p.subtotalLabel}</td>
+      </tr>
+      <tr>
+        <td style="${ESTILO_CELDA}">Preparación del logo — ${escapar(p.productName)}<br><span style="color: #666; font-size: 13px;">una vez por producto (estimado)</span></td>
+        <td style="${ESTILO_CELDA} text-align: right;">1</td>
+        <td style="${ESTILO_CELDA} text-align: right;">${p.setupLabel}</td>
+        <td style="${ESTILO_CELDA} text-align: right; font-weight: 500;">${p.setupLabel}</td>
+      </tr>${
+        p.surchargeLabel
+          ? `
+      <tr>
+        <td colspan="3" style="${ESTILO_CELDA}">${LEYENDAS_PRECIO.adicionalCantidadChica} — ${escapar(p.productName)}${p.sinRecargoDesde ? `<br><span style="color: #b45309; font-size: 13px; font-weight: 500;">Interno: ${textoRecargoProveedor(p.sinRecargoDesde)}</span>` : ""}</td>
+        <td style="${ESTILO_CELDA} text-align: right; font-weight: 500;">${p.surchargeLabel}</td>
+      </tr>`
+          : ""
+      }`
+    )
+    .join("");
+
+  const descartadas = input.droppedPrintingNames ?? [];
 
   const html = `
 <div style="${ESTILO_BASE} max-width: 640px;">
@@ -232,12 +293,19 @@ export async function sendQuoteNotification(
         <th style="padding: 8px 12px; text-align: right;">Subtotal</th>
       </tr>
     </thead>
-    <tbody>${filas}</tbody>
+    <tbody>${filas}${filasImpresion}</tbody>
   </table>
 
+  ${
+    descartadas.length > 0
+      ? `<p style="margin: 0 0 16px; color: #b45309; font-size: 14px; font-weight: 500;">${escapar(TEXTO_SELECCION_DESCARTADA)} (${descartadas.map((n) => escapar(n)).join(", ")})</p>`
+      : ""
+  }
+
   <p style="text-align: right; font-size: 16px; margin: 0 0 20px;">
-    Total: <strong>${input.totalLabel}</strong> <span style="color: #666;">+ IVA ${LEYENDAS_PRECIO.totalMensaje}</span>
+    Total: <strong>${input.totalLabel}</strong> <span style="color: #666;">+ IVA ${input.sufijoTotal ?? LEYENDAS_PRECIO.totalMensaje}</span>
   </p>
+
 
   ${
     input.notes

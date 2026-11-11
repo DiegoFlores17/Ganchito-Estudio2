@@ -15,6 +15,27 @@ export function formatPriceArs(value: Prisma.Decimal | number): string {
   return currencyFormatter.format(Number(value));
 }
 
+const centavosFormatter = new Intl.NumberFormat("es-AR", {
+  style: "currency",
+  currency: "ARS",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/// Precio con centavos ("$ 1.272,23"). Para la cotizacion: ahi el cliente ve
+/// "cantidad x unitario = subtotal" y un total, y las cuentas tienen que
+/// cerrar a la vista. Sin centavos, 3 x $ 1.272 se mostraba como $ 3.817.
+export function formatPriceArsCentavos(value: Prisma.Decimal | number): string {
+  return centavosFormatter.format(Number(value));
+}
+
+/// Pasa un monto a centavos enteros, redondeando HALF_UP. Las sumas de
+/// /cotizar se hacen en centavos para que el total sea EXACTAMENTE la suma de
+/// las lineas mostradas (en coma flotante, 0,1 + 0,2 no da 0,3).
+export function aCentavos(value: Prisma.Decimal | number): number {
+  return Math.round(Number(value) * 100 + Number.EPSILON);
+}
+
 /// Fecha y hora para el panel. Existe por una sola razon: `hour12: false`.
 ///
 /// `toLocaleString("es-AR")` a secas devuelve formato de 12 horas SIN AM/PM,

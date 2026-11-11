@@ -42,8 +42,12 @@ export interface QuoteMessageInput {
   companyName: string | null;
   customerEmail: string;
   lines: QuoteMessageLine[];
-  /// Suma de (unitPrice congelado x quantity). SIN IVA: se menciona aparte.
+  /// Suma de (unitPrice congelado x quantity) mas la personalizacion elegida
+  /// (unitario x cantidad + preparacion). SIN IVA: se menciona aparte.
   total: number;
+  /// Aclaracion que sigue al "+ IVA" (ver leyendaTotalMensaje). Por defecto,
+  /// la de un total sin personalizacion.
+  sufijoTotal?: string;
   formatPrice: (value: number) => string;
 }
 
@@ -84,7 +88,7 @@ export function buildQuoteMessage(input: QuoteMessageInput): string {
   const footer = [
     "",
     "",
-    `Total estimado: ${input.formatPrice(input.total)} + IVA ${LEYENDAS_PRECIO.totalMensaje}`,
+    `Total estimado: ${input.formatPrice(input.total)} + IVA ${input.sufijoTotal ?? LEYENDAS_PRECIO.totalMensaje}`,
   ].join("\n");
 
   const itemLines = input.lines.map((line) => {

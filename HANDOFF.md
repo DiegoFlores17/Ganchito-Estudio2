@@ -495,6 +495,48 @@ Lo que trae:
   proveedor, mientras que el caso realista de error (un campo renombrado o un
   formato roto) deja al producto sin ningún nivel. Si algún día hace falta
   cubrir la caída parcial, se extiende la guarda.
+- **Manda el campo numérico `area`, no la etiqueta.** En 3965 la etiqueta dice
+  "Transfer DTF 900 cm2" y `area` es 1100. El sync loguea un warn ("etiqueta y
+  area de personalizacion no coinciden") para tener la lista, sin romper el set.
+
+### Personalización en la cotización (tanda 4b)
+
+- **Precio:** `computePrintingPrice` (`src/lib/pricing.ts`) es la única función.
+  Unitario, preparación y recargo = costo de Zecat × (1 + margen), cada uno
+  redondeado a 2 decimales con ROUND_HALF_UP antes de congelarse en
+  `QuotePrinting` (una fila por cotización y producto).
+- **Por producto:** el setup (verificado con un presupuesto real de Zecat de dos
+  productos: cada uno lleva sus 46.600) y el recargo de 95.000 (decisión
+  conservadora, sin evidencia directa: Zecat lo manda por producto). Dos
+  ubicaciones son dos setups y dos unitarios; la Fase 1 ofrece una sola y pide
+  el resto en las notas.
+- **El recargo se le muestra al cliente; el umbral no** (decisión de Diego,
+  2026-11-11). Cuando un producto con personalización queda debajo de
+  `minOrderQuantity`, /cotizar muestra "Adicional del proveedor por cantidad
+  chica" con su monto y lo suma al total; el WhatsApp y el mail también lo
+  incluyen. Viaja el MONTO, nunca la regla: el umbral ("sin recargo desde X
+  un.") sigue solo en el mail interno y en el panel.
+  El monto permite deducir el umbral probando cantidades; se acepta: lo que no
+  hacemos es publicarlo ni prometer personalización sin recargo.
+- **Precios con centavos en la cotización.** /cotizar, el mail interno, el
+  panel y el WhatsApp muestran "$ 1.272,23": el subtotal es el unitario
+  congelado × cantidad exacto y el total se suma en centavos, así lo que el
+  cliente ve multiplicado da lo que ve sumado. Lo congelado no cambió
+  (Decimal(12,2), mismo redondeo que ya hacía Postgres).
+- **Los nombres de área de Zecat vienen sucios** ("DORSO Bordado",
+  "BORDADO"). Por ahora solo se muestran en formato título (`tituloArea`), sin
+  mapeos ni limpiezas por texto. Limpiarlos de verdad queda para una fase
+  posterior.
+- **Selección inválida = sin personalizar, nunca rechazo.** Una técnica, área o
+  tamaño que no son de ese producto se quitan y quedan en
+  `Quote.printingDroppedProductIds`, con aviso en el mail y en el panel.
+- **Lo que no modelamos: el "descuento por HIT" de Zecat.** Para un logo de
+  28,8 cm² Zecat cobró 1.636,36 de unitario, no los 1.749,31 del nivel 6KP
+  (~6,5% menos). No lo perseguimos: nuestro precio queda apenas arriba y va
+  marcado "estimado"; el presupuesto final lo corrige.
+- **El PDF de presupuesto de Zecat multiplica la ficha por 1,45** (el margen de
+  partner configurado en SU herramienta). Por eso los números del PDF no
+  coinciden con los de la ficha ni con los nuestros: no es un error de datos.
 
 ### Ausentes que no se pueden verificar (`736db8a`)
 

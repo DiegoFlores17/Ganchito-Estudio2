@@ -5,7 +5,7 @@ import { prisma } from "../src/lib/prisma";
 import { computeSellPriceForQuantity, getPricingConfig } from "../src/lib/pricing";
 import { POLITICA_PRIVACIDAD_VERSION } from "../src/lib/privacidad";
 import { productosConRecargo } from "../src/lib/quote-minimum";
-import { QuoteStatus } from "@prisma/client";
+import { Prisma, QuoteStatus } from "@prisma/client";
 import { cantidadRestante, esCotizacionCerrada, lineasSobreElStock } from "../src/lib/quote-stock";
 import {
   getQuoteItemsSummary,
@@ -198,9 +198,11 @@ async function main() {
       rc.success && qc?.items[0]?.minOrderQuantity === 10 && qc.items[0].quantity === 2,
       `snapshot=${qc?.items[0]?.minOrderQuantity}`
     );
-    const RECARGO = "Personalización con recargo del proveedor (sin recargo desde 10 un.)";
+    // Estas cotizaciones van SIN personalizacion: desde la tanda 4b la marca
+    // no afirma un recargo, avisa que lo llevaria si se personaliza.
+    const RECARGO = "Bajo el umbral del proveedor: si se personaliza, lleva recargo (sin recargo desde 10 un.)";
     check(
-      "c) el mail a Ganchito lleva la leyenda de recargo",
+      "c) el mail a Ganchito lleva la marca del umbral (sin personalizacion: condicional)",
       enviados.at(-1)?.includes(RECARGO) === true && !enviados.at(-1)?.includes("Debajo del mínimo"),
       `mails=${enviados.length}`
     );
@@ -264,7 +266,7 @@ async function main() {
     check("g) cantidad 3 == disponible 3: sin marca", g2.ok && g2.mail !== null && !g2.mail.includes("Pedido mayor al stock"));
     const g3 = await cotizarMail([2, 2]);
     check("g) dos lineas del mismo sku (2+2 > 3): marca", g3.ok && g3.mail?.includes(STOCK) === true);
-    check("g) la marca de stock no depende de la de recargo (cantidad 3 < 10 lleva recargo)", g2.mail?.includes("con recargo del proveedor") === true);
+    check("g) la marca de stock no depende de la del umbral (cantidad 3 < 10 lleva la marca)", g2.mail?.includes("Bajo el umbral del proveedor") === true);
     // Carrito viejo: la tienda ahora recorta la cantidad al stock, pero un
     // borrador guardado ayer puede superar el stock de hoy. El server NO
     // rechaza (es una cotizacion) y el mail lo marca: es la red de seguridad.
@@ -344,9 +346,9 @@ async function main() {
       );
       const sm = await getQuoteItemsSummary(lineas as never);
       check(
-        "tramo: getQuoteItemsSummary cobra el mismo tramo (subtotal exacto, no el rotulo redondeado)",
-        sm.items.length === 1 && sm.items[0].subtotal === Number(p1),
-        `subtotal=${sm.items[0]?.subtotal} esperado=${Number(p1)}`
+        "tramo: getQuoteItemsSummary cobra el mismo tramo (subtotal exacto en centavos, el unitario congelado)",
+        sm.items.length === 1 && sm.items[0].subtotalCentavos === Math.round(Number(p1.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)) * 100),
+        `subtotalCentavos=${sm.items[0]?.subtotalCentavos} esperado=${p1}`
       );
     }
   } finally {

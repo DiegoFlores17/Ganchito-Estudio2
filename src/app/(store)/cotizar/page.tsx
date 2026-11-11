@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useRef,
   type FormEvent,
   type ReactNode,
   useState,
@@ -10,23 +11,32 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { QuoteSkeleton } from "@/components/quote-skeleton";
-import { formatPriceArs } from "@/lib/format";
-import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
+import { aCentavos, formatPriceArsCentavos } from "@/lib/format";
+import { impresionEnTotal, leyendaTotalCotizar } from "@/lib/leyendas-precio";
 import {
   clearQuoteCart,
   getQuoteCart,
+  getQuotePrinting,
   removeFromQuoteCart,
   replaceQuoteCart,
+  setQuotePrinting,
 } from "@/lib/quote-cart";
+import { QuotePrintingPicker } from "@/components/quote-printing";
 import { isOptimizableImage } from "@/lib/product-image";
 import {
   getQuoteItemsSummary,
   submitQuote,
+  type ProductPrintingSummary,
   type QuoteItemSummary,
 } from "./actions";
 
 export default function CotizarPage() {
   const [items, setItems] = useState<QuoteItemSummary[]>([]);
+  // Personalizacion ofrecida por producto y lo elegido (clave de la opcion o
+  // "ninguna"). Lo elegido se guarda en el navegador para no perderlo al
+  // recargar; el servidor lo revalida igual al enviar.
+  const [printing, setPrinting] = useState<ProductPrintingSummary[]>([]);
+  const [selecciones, setSelecciones] = useState<Record<string, string>>({});
   const [loadingItems, setLoadingItems] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,18 +63,28 @@ export default function CotizarPage() {
   // `intento` en las deps permite el boton "Reintentar".
   const [loadFailed, setLoadFailed] = useState(false);
   const [intento, setIntento] = useState(0);
+  // Id del ultimo pedido de resumen. Cada pedido (la carga y cada refetch al
+  // quitar una linea) toma el siguiente, y al volver solo aplica su respuesta
+  // si sigue siendo el ultimo: dos "Quitar" seguidos pueden volver en
+  // cualquier orden, y una respuesta vieja pisaria a la nueva.
+  const ultimoResumen = useRef(0);
   useEffect(() => {
     let cancelado = false;
+    const pedido = ++ultimoResumen.current;
 
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("timeout")), 10_000)
     );
 
     const cart = getQuoteCart();
-    Promise.race([getQuoteItemsSummary(cart), timeout])
+    Promise.race([getQuoteItemsSummary(cart, getQuotePrinting()), timeout])
       .then((summary) => {
-        if (cancelado) return;
+        if (cancelado || pedido !== ultimoResumen.current) return;
         setItems(summary.items);
+        setPrinting(summary.printing);
+        setSelecciones(
+          Object.fromEntries(summary.printing.map((p) => [p.productId, p.seleccion]))
+        );
         setWhatsappAvailable(summary.whatsappAvailable);
         if (summary.unavailableNames.length > 0) {
           setUnavailable(summary.unavailableNames);
@@ -82,7 +102,7 @@ export default function CotizarPage() {
         setLoadingItems(false);
       })
       .catch(() => {
-        if (cancelado) return;
+        if (cancelado || pedido !== ultimoResumen.current) return;
         setLoadFailed(true);
         setLoadingItems(false);
       });
@@ -92,9 +112,37 @@ export default function CotizarPage() {
     };
   }, [intento]);
 
+  function handleSeleccion(productId: string, seleccion: string) {
+    setSelecciones((prev) => ({ ...prev, [productId]: seleccion }));
+    const opcion = printing
+      .find((p) => p.productId === productId)
+      ?.opciones.find((o) => o.key === seleccion);
+    setQuotePrinting(
+      productId,
+      opcion
+        ? { zecatTypeId: opcion.zecatTypeId, zecatAreaId: opcion.zecatAreaId }
+        : "ninguna"
+    );
+  }
+
   function handleRemove(index: number) {
-    removeFromQuoteCart(index);
+    const restantes = removeFromQuoteCart(index);
     setItems((prev) => prev.filter((_, i) => i !== index));
+    // Quitar una linea baja la cantidad del producto, y con eso pueden cambiar
+    // el escalon de precio de sus otras lineas y aparecer el adicional por
+    // cantidad chica. Lo decide el servidor (el umbral no esta en el
+    // navegador), asi que se vuelve a pedir el resumen en silencio. Si falla,
+    // queda el anterior: el envio revalida todo igual.
+    const pedido = ++ultimoResumen.current;
+    getQuoteItemsSummary(restantes, getQuotePrinting())
+      .then((summary) => {
+        if (pedido !== ultimoResumen.current) return;
+        setPrinting(summary.printing);
+        // Solo si el resumen trae las MISMAS lineas: si el servidor descarto
+        // alguna, los indices de "Quitar" se correrian (ver la carga).
+        if (summary.items.length === restantes.length) setItems(summary.items);
+      })
+      .catch(() => {});
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -115,6 +163,25 @@ export default function CotizarPage() {
           variantSku: item.variantSku,
           quantity: item.quantity,
         }))
+      )
+    );
+    // Lo elegido de cada producto que sigue en el pedido. El servidor no
+    // confia en esto: lo revalida contra las opciones del producto y, si no
+    // es una de ellas, lo quita y lo marca.
+    formData.set(
+      "printing",
+      JSON.stringify(
+        Object.fromEntries(
+          impresionVisible.map(({ printing: p }) => {
+            const opcion = p.opciones.find((o) => o.key === selecciones[p.productId]);
+            return [
+              p.productId,
+              opcion
+                ? { zecatTypeId: opcion.zecatTypeId, zecatAreaId: opcion.zecatAreaId }
+                : "ninguna",
+            ];
+          })
+        )
       )
     );
 
@@ -162,7 +229,47 @@ export default function CotizarPage() {
     });
   }
 
-  const total = items.reduce((sum, item) => sum + item.subtotal, 0);
+  // Unidades por producto HOY (el cliente puede quitar lineas): la
+  // personalizacion se cobra por unidad sobre el total del producto.
+  const unidadesPorProducto = new Map<string, number>();
+  for (const item of items) {
+    unidadesPorProducto.set(
+      item.productId,
+      (unidadesPorProducto.get(item.productId) ?? 0) + item.quantity
+    );
+  }
+  const impresionVisible = printing.flatMap((p) => {
+    const quantity = unidadesPorProducto.get(p.productId);
+    return quantity ? [{ printing: p, quantity }] : [];
+  });
+  // En centavos: el total es EXACTAMENTE la suma de las lineas mostradas.
+  const totalImpresionCentavos = impresionVisible.reduce(
+    (sum, { printing: p, quantity }) => {
+      const o = p.opciones.find((x) => x.key === selecciones[p.productId]);
+      return o
+        ? sum +
+            aCentavos(o.unitPrice) * quantity +
+            aCentavos(o.setupPrice) +
+            aCentavos(p.surcharge ?? 0)
+        : sum;
+    },
+    0
+  );
+  const conImpresion = impresionVisible.filter(({ printing: p }) =>
+    p.opciones.some((o) => o.key === selecciones[p.productId])
+  ).length;
+  // Personalizables sin precio en la tienda (CDO, o Zecat sin niveles): su
+  // personalizacion se cotiza aparte. Los "Sin personalizar" elegidos no.
+  const conOpciones = new Set(printing.map((p) => p.productId));
+  const sinPrecio = new Set(
+    items
+      .filter((i) => i.personalizable && !conOpciones.has(i.productId))
+      .map((i) => i.productId)
+  ).size;
+  const total =
+    (items.reduce((sum, item) => sum + item.subtotalCentavos, 0) +
+      totalImpresionCentavos) /
+    100;
 
   if (submitted) {
     return (
@@ -360,12 +467,31 @@ export default function CotizarPage() {
         ))}
       </div>
 
-      <p className="mt-4 text-right text-lg font-medium text-foreground">
-        Total: {formatPriceArs(total)}{" "}
+      {impresionVisible.length > 0 && (
+        <div className="mt-8 flex flex-col gap-4">
+          <h2 className="text-lg font-medium text-foreground">
+            Personalización
+          </h2>
+          {impresionVisible.map(({ printing: p, quantity }) => (
+            <QuotePrintingPicker
+              key={p.productId}
+              printing={p}
+              quantity={quantity}
+              seleccion={selecciones[p.productId] ?? "ninguna"}
+              onChange={(v) => handleSeleccion(p.productId, v)}
+            />
+          ))}
+        </div>
+      )}
+
+      <p className="mt-6 text-right text-lg font-medium text-foreground">
+        Total: {formatPriceArsCentavos(total)}{" "}
         <span className="text-sm text-foreground/50">+ IVA</span>
       </p>
       <p className="mt-1 text-right text-xs text-foreground/50">
-        {LEYENDAS_PRECIO.totalCotizar}
+        {leyendaTotalCotizar(
+          impresionEnTotal({ conImpresion, sinPrecio })
+        )}
       </p>
 
       <form

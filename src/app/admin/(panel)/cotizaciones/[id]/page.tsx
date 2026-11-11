@@ -1,19 +1,31 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { formatDate, formatDateTime, formatPriceArs } from "@/lib/format";
+import {
+  aCentavos,
+  formatDate,
+  formatDateTime,
+  formatPriceArsCentavos,
+} from "@/lib/format";
 import { requireAdmin } from "@/lib/admin-auth";
 import {
   getEstadoVivoDeVariantes,
+  getNombresDeProductos,
   getQuoteById,
   getQuoteHistoryByEmail,
 } from "@/lib/admin-quotes";
 import { AdminRole } from "@prisma/client";
-import { productosConRecargo, textoRecargoProveedor } from "@/lib/quote-minimum";
+import {
+  productosConRecargo,
+  textoRecargoProveedor,
+  textoUmbral,
+} from "@/lib/quote-minimum";
 import {
   esCotizacionCerrada,
   lineasSobreElStock,
   textoPedidoMayorAlStock,
 } from "@/lib/quote-stock";
+import { TEXTO_SELECCION_DESCARTADA } from "@/lib/quote-printing";
+import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
 import { QuoteEraseButton } from "@/components/admin/quote-erase-button";
 import { QuoteStatusSelect } from "@/components/admin/quote-status-select";
 import { StatusBadge } from "@/components/admin/status-badge";
@@ -64,10 +76,24 @@ export default async function CotizacionDetallePage({
     [...estadoVivo].flatMap(([sku, v]) => (v.active ? [[sku, v.disponible] as const] : []))
   );
   const sobreElStock = lineasSobreElStock(quote.items, disponiblePorSku);
-  const total = quote.items.reduce(
-    (sum, item) => sum + Number(item.unitPrice) * item.quantity,
-    0
-  );
+  // Total que vio el cliente: productos + personalizacion + preparacion del
+  // logo + adicional por cantidad chica. El umbral es lo unico interno.
+  // En centavos, como en /cotizar: el total cierra con las lineas mostradas.
+  const subtotalImpresion = (p: (typeof quote.printings)[number]) =>
+    aCentavos(p.unitPrice) * p.quantity +
+    aCentavos(p.setupPrice) +
+    aCentavos(p.surcharge ?? 0);
+  const total =
+    (quote.items.reduce(
+      (sum, item) => sum + aCentavos(item.unitPrice) * item.quantity,
+      0
+    ) +
+      quote.printings.reduce((sum, p) => sum + subtotalImpresion(p), 0)) /
+    100;
+  // Con o sin personalizacion decide el texto del umbral: sin ella no hay
+  // recargo, solo el aviso de que lo llevaria si se personaliza.
+  const conPersonalizacion = new Set(quote.printings.map((p) => p.productId));
+  const descartadas = await getNombresDeProductos(quote.printingDroppedProductIds);
 
   return (
     <div>
@@ -136,7 +162,10 @@ export default async function CotizacionDetallePage({
                       {item.product.name}
                       {conRecargo.has(item.productId) && (
                         <span className="mt-0.5 block text-xs font-medium text-amber-700">
-                          {textoRecargoProveedor(conRecargo.get(item.productId)!)}
+                          {textoUmbral(
+                            conRecargo.get(item.productId)!,
+                            conPersonalizacion.has(item.productId)
+                          )}
                         </span>
                       )}
                       {sobreElStock[i] !== null && (
@@ -159,20 +188,85 @@ export default async function CotizacionDetallePage({
                       {item.quantity}
                     </td>
                     <td className="px-4 py-3 text-foreground/70">
-                      {formatPriceArs(item.unitPrice)}
+                      {formatPriceArsCentavos(item.unitPrice)}
                     </td>
                     <td className="px-4 py-3 font-medium text-foreground">
-                      {formatPriceArs(Number(item.unitPrice) * item.quantity)}
+                      {formatPriceArsCentavos(
+                        (aCentavos(item.unitPrice) * item.quantity) / 100
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {quote.printings.length > 0 && (
+            <>
+              <h2 className="mt-8 text-sm font-medium text-foreground/60">
+                Personalización (estimada)
+              </h2>
+              <div className="mt-3 overflow-x-auto rounded-xl border border-foreground/10 bg-background">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b border-foreground/10 text-left text-xs text-foreground/50">
+                      <th className="px-4 py-3 font-medium">Producto</th>
+                      <th className="px-4 py-3 font-medium">Cant.</th>
+                      <th className="px-4 py-3 font-medium">Unit.</th>
+                      <th className="px-4 py-3 font-medium">Preparación</th>
+                      <th className="px-4 py-3 font-medium">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quote.printings.map((p) => (
+                      <tr
+                        key={p.id}
+                        className="border-b border-foreground/5 last:border-0"
+                      >
+                        <td className="px-4 py-3 text-foreground">
+                          {p.product.name}
+                          <span className="mt-0.5 block text-xs text-foreground/60">
+                            {p.publicLabel} · nivel {p.levelLabel}
+                          </span>
+                          {p.surcharge !== null && (
+                            <span className="mt-0.5 block text-xs font-medium text-amber-700">
+                              {LEYENDAS_PRECIO.adicionalCantidadChica}:{" "}
+                              {formatPriceArsCentavos(p.surcharge)} (incluido en el
+                              subtotal)
+                              {conRecargo.has(p.productId) &&
+                                ` · ${textoRecargoProveedor(conRecargo.get(p.productId)!)}`}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-foreground/70">{p.quantity}</td>
+                        <td className="px-4 py-3 text-foreground/70">
+                          {formatPriceArsCentavos(p.unitPrice)}
+                        </td>
+                        <td className="px-4 py-3 text-foreground/70">
+                          {formatPriceArsCentavos(p.setupPrice)}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-foreground">
+                          {formatPriceArsCentavos(subtotalImpresion(p) / 100)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {descartadas.length > 0 && (
+            <p className="mt-3 text-xs font-medium text-amber-700">
+              {TEXTO_SELECCION_DESCARTADA} ({descartadas.join(", ")})
+            </p>
+          )}
+
           <p className="mt-3 text-right text-sm font-medium text-foreground">
-            Total: {formatPriceArs(total)}{" "}
+            Total: {formatPriceArsCentavos(total)}{" "}
             <span className="text-foreground/50">+ IVA</span>
           </p>
+
 
           {quote.notes && (
             <div className="mt-8">

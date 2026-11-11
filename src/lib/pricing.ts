@@ -354,3 +354,74 @@ export function computeEscalones(
   }
   return escalones;
 }
+
+/// Lo que hace falta de un nivel de impresion (ProductPrintingLevel) para
+/// ponerle precio: sus dos costos de Zecat, en pesos.
+export interface PrintingLevelCost {
+  unitCost: Prisma.Decimal;
+  setupCost: Prisma.Decimal;
+}
+
+/// Lo que hace falta para decidir el recargo del proveedor. Solo existe del
+/// lado del servidor: el UMBRAL nunca viaja al navegador (ver
+/// lib/quote-minimum.ts). Lo que si se le muestra al cliente es el MONTO
+/// resultante, como "Adicional del proveedor por cantidad chica".
+export interface PrintingSurchargeInputs {
+  /// Total de unidades del PRODUCTO en la cotizacion (suma de sus lineas).
+  productQuantity: number;
+  /// Product.minOrderQuantity: el umbral sin recargo. Null o 0, sin recargo.
+  minOrderQuantity: number | null;
+  /// Product.printingUnderMinimumCost: el recargo de Zecat. Null, sin recargo.
+  underMinimumCost: Prisma.Decimal | null;
+}
+
+export interface PrintingPrice {
+  /// Precio de venta por unidad personalizada.
+  unitPrice: Prisma.Decimal;
+  /// Preparacion del logo: una vez por producto.
+  setupPrice: Prisma.Decimal;
+  /// Recargo por personalizar debajo del umbral, por producto. Null si no
+  /// corresponde o si no se pasaron los datos del recargo.
+  surcharge: Prisma.Decimal | null;
+}
+
+/// Precio de venta de la personalizacion de un producto (tanda 4b).
+///
+/// Mismo margen que el producto: cada costo x (1 + margen/100). Sin conversion
+/// de moneda (los precios de impresion solo vienen de Zecat, siempre en ARS)
+/// y sin descuento por cantidad (`discount_per_unit` es 0 en todas las
+/// muestras).
+///
+/// Cada monto se redondea a 2 decimales con ROUND_HALF_UP ACA, antes de
+/// congelarlo: el total de una linea es despues monto congelado x cantidad, asi
+/// la pantalla, el mail y la base dan exactamente el mismo numero.
+///
+/// Es la UNICA funcion de precio de personalizacion: la usan el resumen de
+/// /cotizar (que le muestra al cliente el monto del recargo, nunca el umbral)
+/// y submitQuote (que congela todo en QuotePrinting), con los mismos datos.
+export function computePrintingPrice(
+  level: PrintingLevelCost,
+  { defaultMarginPercent }: Pick<PricingInputs, "defaultMarginPercent">,
+  recargo?: PrintingSurchargeInputs
+): PrintingPrice {
+  const m = defaultMarginPercent.dividedBy(100).plus(1);
+  const redondear = (d: Prisma.Decimal) =>
+    d.times(m).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+
+  let surcharge: Prisma.Decimal | null = null;
+  if (
+    recargo &&
+    recargo.underMinimumCost !== null &&
+    recargo.underMinimumCost.greaterThan(0) &&
+    recargo.minOrderQuantity &&
+    recargo.productQuantity < recargo.minOrderQuantity
+  ) {
+    surcharge = redondear(recargo.underMinimumCost);
+  }
+
+  return {
+    unitPrice: redondear(level.unitCost),
+    setupPrice: redondear(level.setupCost),
+    surcharge,
+  };
+}

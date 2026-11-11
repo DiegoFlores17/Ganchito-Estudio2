@@ -11,6 +11,20 @@ export interface QuoteCartItem {
 
 const STORAGE_KEY = "ganchito:cotizacion";
 
+/// Personalizacion elegida en /cotizar, por producto. Va en una clave APARTE y
+/// no dentro de las lineas: la seleccion es por producto (el setup y el
+/// recargo tambien), mientras que las lineas son por variante, y el formato de
+/// `ganchito:cotizacion` lo leen la ficha y el header. Un carrito sin esta
+/// clave (anterior a la tanda 4b) se cotiza sin personalizacion.
+///
+/// Valor por producto: { zecatTypeId, zecatAreaId }, o "ninguna" si el cliente
+/// eligio no personalizar. Un producto sin entrada usa la opcion por defecto.
+const PRINTING_KEY = "ganchito:cotizacion:impresion";
+
+export type QuotePrintingChoice =
+  | { zecatTypeId: string; zecatAreaId: string }
+  | "ninguna";
+
 // localStorage no dispara su evento "storage" en la misma pestana que hizo
 // el cambio (solo en las otras pestanas abiertas). El header necesita
 // enterarse en la MISMA pestana cuando se agrega/saca un item, asi que
@@ -79,6 +93,40 @@ export function removeFromQuoteCart(index: number): QuoteCartItem[] {
 
 export function clearQuoteCart(): void {
   writeRaw([]);
+  try {
+    window.localStorage.removeItem(PRINTING_KEY);
+  } catch {
+    // Sin storage no hay nada que limpiar.
+  }
+}
+
+/// Selecciones guardadas. Tolera la clave ausente o un JSON roto (vacio).
+export function getQuotePrinting(): Record<string, QuotePrintingChoice> {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed: unknown = JSON.parse(
+      window.localStorage.getItem(PRINTING_KEY) ?? "{}"
+    );
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, QuotePrintingChoice>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setQuotePrinting(
+  productId: string,
+  choice: QuotePrintingChoice
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const actual = getQuotePrinting();
+    actual[productId] = choice;
+    window.localStorage.setItem(PRINTING_KEY, JSON.stringify(actual));
+  } catch {
+    // Sin storage la eleccion vale para esta pantalla y se pierde al recargar.
+  }
 }
 
 /// Suscripcion al carrito para `useSyncExternalStore`: cubre la misma pestana

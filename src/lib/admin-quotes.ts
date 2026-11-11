@@ -44,8 +44,24 @@ export async function getQuoteById(id: string) {
           },
         },
       },
+      printings: {
+        include: { product: { select: { name: true } } },
+      },
     },
   });
+}
+
+/// Nombres de los productos cuya seleccion de personalizacion se quito al
+/// cotizar (Quote.printingDroppedProductIds). Sin filtro de active/deletedAt:
+/// es para el aviso, y un producto pausado despues sigue teniendo nombre.
+export async function getNombresDeProductos(ids: string[]) {
+  if (ids.length === 0) return [];
+  const filas = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true },
+  });
+  const porId = new Map(filas.map((f) => [f.id, f.name]));
+  return ids.map((id) => porId.get(id) ?? "un producto eliminado");
 }
 
 /// Otras cotizaciones del mismo email (historial del cliente), sin contar

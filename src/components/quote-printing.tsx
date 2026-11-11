@@ -1,6 +1,7 @@
 "use client";
 
-import { aCentavos, formatPriceArsCentavos } from "@/lib/format";
+import { formatPriceArsCentavos } from "@/lib/format";
+import { centavosDeImpresion } from "@/lib/quote-printing";
 import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
 import type {
   OpcionImpresion,
@@ -119,7 +120,9 @@ export function QuotePrintingPicker({
             <span className="font-medium text-foreground">
               {/* En centavos: unitario x cantidad exacto, sin error de coma
                   flotante. */}
-              {formatPriceArsCentavos((aCentavos(elegida.unitPrice) * quantity) / 100)}
+              {formatPriceArsCentavos(
+                centavosDeImpresion(elegida, quantity, null).personalizacion / 100
+              )}
             </span>
           </p>
           <p className="flex justify-between gap-4 text-foreground/80">

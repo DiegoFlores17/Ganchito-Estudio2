@@ -11,7 +11,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { QuoteSkeleton } from "@/components/quote-skeleton";
-import { aCentavos, formatPriceArsCentavos } from "@/lib/format";
+import { formatPriceArsCentavos } from "@/lib/format";
 import { impresionEnTotal, leyendaTotalCotizar } from "@/lib/leyendas-precio";
 import {
   clearQuoteCart,
@@ -22,6 +22,7 @@ import {
   setQuotePrinting,
 } from "@/lib/quote-cart";
 import { QuotePrintingPicker } from "@/components/quote-printing";
+import { centavosDeImpresion } from "@/lib/quote-printing";
 import { isOptimizableImage } from "@/lib/product-image";
 import {
   getQuoteItemsSummary,
@@ -246,12 +247,7 @@ export default function CotizarPage() {
   const totalImpresionCentavos = impresionVisible.reduce(
     (sum, { printing: p, quantity }) => {
       const o = p.opciones.find((x) => x.key === selecciones[p.productId]);
-      return o
-        ? sum +
-            aCentavos(o.unitPrice) * quantity +
-            aCentavos(o.setupPrice) +
-            aCentavos(p.surcharge ?? 0)
-        : sum;
+      return o ? sum + centavosDeImpresion(o, quantity, p.surcharge).total : sum;
     },
     0
   );

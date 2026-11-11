@@ -7,9 +7,13 @@ type PrintingType = Prisma.ProductPrintingTypeGetPayload<Record<string, never>>;
 export function PrintingInfo({
   areas,
   types,
+  leyenda = LEYENDAS_PRECIO.impresion,
 }: {
   areas: PrintingArea[];
   types: PrintingType[];
+  /// Cierre de la seccion (ver leyendasDePrecio): cambia si la ficha ya mostro
+  /// el costo estimado de la personalizacion.
+  leyenda?: string;
 }) {
   if (areas.length === 0 && types.length === 0) return null;
 
@@ -53,7 +57,7 @@ export function PrintingInfo({
       )}
 
       <p className="text-xs text-foreground/50">
-        {LEYENDAS_PRECIO.impresion}
+        {leyenda}
       </p>
     </div>
   );

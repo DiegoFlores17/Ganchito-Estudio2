@@ -44,6 +44,13 @@ check("sufijos del mensaje por caso",
   leyendaTotalMensaje("ninguna") === LEYENDAS_PRECIO.totalMensaje);
 check("el adicional no menciona el umbral ni promete personalizacion gratis",
   LEYENDAS_PRECIO.adicionalCantidadChica === "Adicional del proveedor por cantidad chica");
+// Ficha con niveles (tanda 4c).
+const niv = leyendasDePrecio({ personalizable: true, conNiveles: true });
+check("con niveles: la ficha usa la rama de personalizacion estimada", niv.ficha === "Precio sin logo. Abajo, con personalización estimada · el envío se cotiza aparte.");
+check("con niveles: el pie de impresion dice estimado y se confirma al ver el logo", niv.impresion === LEYENDAS_PRECIO.impresionConNiveles && niv.impresion.includes("lo confirmamos al ver tu logo"));
+check("con niveles: la card del catalogo no cambia", niv.card === con.card);
+check("sin niveles (CDO): la ficha y el pie de siempre", con.ficha === LEYENDAS_PRECIO.ficha.personalizable && con.impresion === LEYENDAS_PRECIO.impresion);
+check("sin personalizar elegido en /cotizar: nota corta", LEYENDAS_PRECIO.ficha.sinPersonalizarElegido.startsWith("Elegiste sin personalizar en tu cotización"));
 check("ninguna leyenda queda vacia", Object.values(LEYENDAS_PRECIO).every((v) => typeof v === "string" ? v.length > 0 : Object.values(v).every((s) => s.length > 0)));
 
 if (fallos > 0) {

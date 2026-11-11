@@ -1,3 +1,5 @@
+import { aCentavos } from "@/lib/format";
+
 // Personalizacion en /cotizar (tanda 4b): que opciones se le ofrecen al
 // cliente para un producto, como se rotulan y como se valida lo que vuelve.
 //
@@ -189,3 +191,46 @@ export function leerSeleccionesCrudas(raw: unknown): Record<string, unknown> {
 /// Texto de la marca interna cuando el servidor descarto una seleccion.
 export const TEXTO_SELECCION_DESCARTADA =
   "La selección de personalización no era válida y se quitó: se cotizó sin personalizar.";
+
+/// Montos de la personalizacion de UN producto, en centavos enteros, a partir
+/// de lo que devuelve el resumen (precios de venta ya congelables). Es la
+/// UNICA cuenta de la personalizacion del lado del cliente: la usan /cotizar y
+/// el total de la ficha, asi las dos pantallas dan lo mismo al centavo.
+export function centavosDeImpresion(
+  opcion: { unitPrice: number; setupPrice: number },
+  quantity: number,
+  surcharge: number | null
+): { personalizacion: number; preparacion: number; adicional: number; total: number } {
+  const personalizacion = aCentavos(opcion.unitPrice) * quantity;
+  const preparacion = aCentavos(opcion.setupPrice);
+  const adicional = surcharge === null ? 0 : aCentavos(surcharge);
+  return {
+    personalizacion,
+    preparacion,
+    adicional,
+    total: personalizacion + preparacion + adicional,
+  };
+}
+
+/// Titulo del recuadro, con las cantidades que valuo el servidor.
+/// - Vista previa (nada armado todavia): "Tu total estimado · si llevás 5
+///   unidades (más 10 ya en tu cotización)".
+/// - Con combinaciones: "Tu total estimado · 11 unidades (10 ya en tu
+///   cotización)".
+export function tituloDelTotal(
+  d: { cantidad: number; enCotizacion: number },
+  vistaPrevia: boolean
+): string {
+  const u = (n: number) => `${n} ${n === 1 ? "unidad" : "unidades"}`;
+  if (vistaPrevia) {
+    const nuevas = d.cantidad - d.enCotizacion;
+    return (
+      `Tu total estimado · si llevás ${u(nuevas)}` +
+      (d.enCotizacion > 0 ? ` (más ${d.enCotizacion} ya en tu cotización)` : "")
+    );
+  }
+  return (
+    `Tu total estimado · ${u(d.cantidad)}` +
+    (d.enCotizacion > 0 ? ` (${d.enCotizacion} ya en tu cotización)` : "")
+  );
+}

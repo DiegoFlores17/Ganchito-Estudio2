@@ -30,11 +30,15 @@ import {
   leerSeleccionesCrudas,
   tituloArea,
   opcionPorDefecto,
-  opcionesDeImpresion,
   resolverSeleccion,
   type OpcionInterna,
 } from "@/lib/quote-printing";
 import { impresionEnTotal, leyendaTotalMensaje } from "@/lib/leyendas-precio";
+import {
+  aCongelar,
+  impresionDelProducto,
+  SELECT_IMPRESION,
+} from "@/lib/impresion-producto";
 import {
   QUOTE_LOGO_EXTENSIONS,
   saveUploadedFile,
@@ -115,61 +119,11 @@ async function getUnavailableNames(productIds: string[]): Promise<string[]> {
   return names;
 }
 
-/// Lo que se lee de la base para ofrecer y cotizar la personalizacion. Los
-/// costos se quedan en el servidor: al navegador viaja `OpcionImpresion`.
-const SELECT_IMPRESION = {
-  printingLevels: {
-    select: {
-      zecatTypeId: true,
-      technique: true,
-      label: true,
-      areaCm2: true,
-      zecatAreaIds: true,
-      unitCost: true,
-      setupCost: true,
-    },
-  },
-  printingAreas: {
-    select: { zecatAreaId: true, name: true, widthCm: true, heightCm: true },
-  },
-} satisfies Prisma.ProductSelect;
-
-type ProductoConImpresion = Prisma.ProductGetPayload<{ select: typeof SELECT_IMPRESION }>;
-
-/// Precio unitario de una linea tal como se congela: Decimal(12,2). Postgres
-/// redondea igual al guardar (HALF_UP para positivos); se hace ACA para que
-/// lo que el cliente ve multiplicado sea exactamente lo que se guarda, y que
-/// "cantidad x unitario" de el subtotal mostrado.
-function aCongelar(precio: Prisma.Decimal): Prisma.Decimal {
-  return precio.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-}
-
 /// Personalizable: tiene al menos una tecnica (ProductPrintingType), tenga o
 /// no precios. Mismo criterio que la leyenda de la card.
 const SELECT_PERSONALIZABLE = {
   _count: { select: { printingTypes: true } },
 } satisfies Prisma.ProductSelect;
-
-/// Opciones de personalizacion del producto, y el costo de cada nivel.
-function impresionDelProducto(p: ProductoConImpresion) {
-  const opciones = opcionesDeImpresion(
-    p.printingLevels.map((l) => ({
-      zecatTypeId: l.zecatTypeId,
-      technique: l.technique,
-      label: l.label,
-      areaCm2: l.areaCm2 === null ? null : Number(l.areaCm2),
-      zecatAreaIds: l.zecatAreaIds,
-    })),
-    p.printingAreas.map((a) => ({
-      zecatAreaId: a.zecatAreaId,
-      name: a.name,
-      widthCm: a.widthCm === null ? null : Number(a.widthCm),
-      heightCm: a.heightCm === null ? null : Number(a.heightCm),
-    }))
-  );
-  const costoPorNivel = new Map(p.printingLevels.map((l) => [l.zecatTypeId, l]));
-  return { opciones, costoPorNivel };
-}
 
 /// Una opcion de personalizacion tal como la ve el cliente. Sin costos, sin la
 /// etiqueta de Zecat y sin umbral: solo precio de venta y medidas.

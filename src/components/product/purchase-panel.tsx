@@ -6,10 +6,23 @@ import {
   addToQuoteCart,
   cantidadesEnCarritoPorSku,
   getQuoteCartSnapshot,
+  getQuotePrinting,
+  lineasPorAgregar,
   subscribeQuoteCart,
 } from "@/lib/quote-cart";
 import { cantidadRestante } from "@/lib/quote-stock";
 import type { EscalonPrecio } from "@/lib/pricing";
+import type { FichaImpresion } from "@/lib/impresion-producto";
+import {
+  tarjetasDeLaFicha,
+  totalDeLaFicha,
+  type DesgloseFicha,
+} from "@/app/(store)/producto/[id]/actions";
+import { LEYENDAS_PRECIO } from "@/lib/leyendas-precio";
+import { tituloDelTotal } from "@/lib/quote-printing";
+
+/// Espera entre que el cliente deja de tocar la cantidad y se pide el total.
+const DEBOUNCE_TOTAL_MS = 350;
 
 const TOAST_MS = 3200;
 
@@ -70,6 +83,7 @@ export function PurchasePanel({
   bulkFromQuantity,
   fallbackPriceLabel,
   leyendaPrecio,
+  impresion = null,
 }: {
   productId: string;
   variants: VariantData[];
@@ -95,6 +109,11 @@ export function PurchasePanel({
   /// Aclaracion de lo que el precio NO incluye (personalizacion y envio).
   /// Viene resuelta del server (lib/leyendas-precio.ts).
   leyendaPrecio: string;
+  /// Personalizacion estimada para las tarjetas por cantidad (tanda 4c), ya
+  /// calculada y formateada en el server. Null sin niveles (CDO, Zecat sin
+  /// tecnicas): la ficha muestra la tabla de precios de siempre. No trae
+  /// costos ni el umbral: solo precios de venta y el monto del adicional.
+  impresion?: FichaImpresion | null;
 }) {
   const activeVariants = useMemo(
     () => variants.filter((v) => v.active),
@@ -365,7 +384,40 @@ export function PurchasePanel({
   // precio baja, sin tener que agregar la combinacion para enterarse. En un
   // producto sin variantes no hay lineas, asi que el total es `quantity` a
   // secas y la formula sirve igual.
-  const totalDelProducto = linesTotal + quantity;
+  //
+  // Ahora (tanda 4c) cuenta tambien lo que YA esta en la cotizacion del
+  // cliente: /cotizar elige el escalon y el adicional sobre el total del
+  // producto en el carrito, y la ficha tiene que mostrar lo mismo.
+  const enCarritoDelProducto = Object.values(enCarrito).reduce((s, q) => s + q, 0);
+
+  // Lo que el boton va a agregar: misma funcion para el boton y el total.
+  const skuElegido = selectedVariant?.sku;
+  const porAgregar = useMemo(
+    () =>
+      lineasPorAgregar({
+        conVariantes: hasVariantOptions,
+        combinaciones: lines,
+        sku: skuElegido,
+        cantidad: quantity,
+        cupo: restante,
+      }),
+    [hasVariantOptions, lines, skuElegido, quantity, restante]
+  );
+  // Lo que se consulta al servidor: lo que se agrega; si todavia no hay nada
+  // (producto con talles, sin combinaciones), lo del selector como vista
+  // previa — en ese caso el recuadro no se muestra, pero la tarjeta activa
+  // igual sabe si a esa cantidad corresponde el adicional.
+  const consulta = useMemo(
+    () =>
+      porAgregar.length > 0
+        ? porAgregar
+        : skuElegido && !sinCupo
+          ? [{ variantSku: skuElegido, quantity }]
+          : [],
+    [porAgregar, skuElegido, sinCupo, quantity]
+  );
+  const totalDelProducto =
+    enCarritoDelProducto + consulta.reduce((s, l) => s + l.quantity, 0);
 
   // El precio sigue a la variante elegida Y a la cantidad: se busca el escalon
   // mas alto que no supere el total del producto. Si el SKU no esta en el mapa
@@ -424,23 +476,111 @@ export function PurchasePanel({
   const hayStockInformado = available > 0;
   const masQueElStock = (desde: number) => hayStockInformado && desde > available;
 
+  // Seleccion guardada en /cotizar: si el cliente ya eligio un tamano (u
+  // "Sin personalizar"), TODA la ficha la respeta — tarjetas, subtitulo y
+  // total —, o veria dos precios para la misma eleccion. Las tarjetas de la
+  // pagina salen con la opcion mas chica; para otra se piden al servidor (sin
+  // cache). Mientras cargan, o si lo guardado no es valido, quedan las de la
+  // pagina.
+  const [guardada, setGuardada] = useState<
+    { sinPersonalizar: true } | { sinPersonalizar: false; impresion: FichaImpresion } | null
+  >(null);
+  useEffect(() => {
+    if (!impresion) return;
+    const seleccion = getQuotePrinting()[productId];
+    if (seleccion === undefined) return;
+    let vigente = true;
+    tarjetasDeLaFicha(productId, seleccion)
+      .then((r) => {
+        if (vigente) setGuardada(r);
+      })
+      .catch(() => {});
+    return () => {
+      vigente = false;
+    };
+  }, [impresion, productId]);
+  const sinPersonalizarElegido = guardada?.sinPersonalizar === true;
+  const impresionVigente = sinPersonalizarElegido
+    ? null
+    : guardada && !guardada.sinPersonalizar
+      ? guardada.impresion
+      : impresion;
+
+  // Tarjetas por cantidad: las de la variante elegida. La tarjeta activa es la
+  // del escalon que rige para el total del producto (carrito + lo que se
+  // agrega), igual que el precio.
+  const tarjetas =
+    impresionVigente && selectedVariant
+      ? (impresionVigente.tarjetasPorSku[selectedVariant.sku] ?? [])
+      : [];
+  // Total estimado para la cantidad libre: lo calcula el servidor con la misma
+  // funcion que /cotizar (sin cache), con debounce. Cada pedido toma un id y
+  // solo se aplica la respuesta del ULTIMO: si el cliente sigue tocando, una
+  // respuesta vieja que llega tarde no pisa a la nueva.
+  //
+  // La respuesta se guarda junto con la CLAVE del pedido que la pidio (lo que
+  // se consulto + el carrito). Es vigente si esa clave es la de ahora: asi no
+  // se muestra un total de una cantidad anterior mientras el nuevo esta en
+  // vuelo. NO se compara la cantidad que respondio el servidor con la del
+  // cliente: si el carrito tiene una linea que el servidor descarta (una
+  // variante desactivada), no coincidirian nunca y el recuadro no aparecia.
+  const claveTotal = useMemo(() => JSON.stringify([consulta, enCarrito]), [consulta, enCarrito]);
+  const [respuesta, setRespuesta] = useState<{
+    clave: string;
+    desglose: DesgloseFicha | null;
+  } | null>(null);
+  const ultimoTotal = useRef(0);
+  useEffect(() => {
+    if (!impresion || consulta.length === 0) return;
+    const pedido = ++ultimoTotal.current;
+    const t = setTimeout(() => {
+      totalDeLaFicha(productId, consulta, getQuotePrinting()[productId], enCarrito)
+        .then((desglose) => {
+          if (pedido === ultimoTotal.current) setRespuesta({ clave: claveTotal, desglose });
+        })
+        .catch(() => {
+          if (pedido === ultimoTotal.current) setRespuesta({ clave: claveTotal, desglose: null });
+        });
+    }, DEBOUNCE_TOTAL_MS);
+    return () => clearTimeout(t);
+  }, [impresion, productId, consulta, enCarrito, claveTotal]);
+  const desgloseVigente =
+    respuesta && respuesta.clave === claveTotal ? respuesta.desglose : null;
+  // Vista previa: todavia no hay combinaciones armadas, asi que el recuadro
+  // muestra la variante y la cantidad del selector ("si llevas N"). Con
+  // combinaciones, muestra exactamente las que agrega el boton. Nunca las dos
+  // cosas sumadas.
+  const vistaPrevia = porAgregar.length === 0;
+  // La cantidad que valuo el SERVIDOR manda. Si difiere de la que cuenta el
+  // navegador, el carrito tiene algo que ya no se puede cotizar.
+  const cantidadValuada = desgloseVigente?.cantidad ?? totalDelProducto;
+  const carritoConDescartes =
+    desgloseVigente !== null && desgloseVigente.cantidad !== totalDelProducto;
+
+  // La tarjeta activa sigue el escalon de la cantidad que valuo el servidor,
+  // la misma del recuadro.
+  let tarjetaActiva = -1;
+  tarjetas.forEach((t, i) => {
+    if (cantidadValuada >= t.desde) tarjetaActiva = i;
+  });
+
   function handleAddToQuote() {
     if (hasVariantOptions) {
-      if (lines.length === 0) return;
+      if (porAgregar.length === 0) return;
       // Se vuelve a medir el cupo contra el carrito guardado de AHORA: otra
       // pestaña pudo sumar el mismo sku despues de armar este borrador.
       const enCarritoAhora = cantidadesEnCarritoPorSku(getQuoteCartSnapshot(), productId);
-      for (const line of lines) {
-        const variante = variants.find((v) => v.sku === line.sku);
-        const cupo = cantidadRestante(variante?.availableStock ?? 0, enCarritoAhora[line.sku] ?? 0);
+      for (const line of porAgregar) {
+        const variante = variants.find((v) => v.sku === line.variantSku);
+        const cupo = cantidadRestante(variante?.availableStock ?? 0, enCarritoAhora[line.variantSku] ?? 0);
         const cantidad = Math.min(line.quantity, cupo);
         if (cantidad <= 0) continue;
         addToQuoteCart({
           productId,
-          variantSku: line.sku,
+          variantSku: line.variantSku,
           quantity: cantidad,
         });
-        enCarritoAhora[line.sku] = (enCarritoAhora[line.sku] ?? 0) + cantidad;
+        enCarritoAhora[line.variantSku] = (enCarritoAhora[line.variantSku] ?? 0) + cantidad;
       }
       showAddedToast(
         lines.length === 1
@@ -450,12 +590,11 @@ export function PurchasePanel({
       setLines([]);
       setNotice(null);
     } else {
-      if (sinCupo) return;
-      addToQuoteCart({
-        productId,
-        variantSku: selectedVariant?.sku,
-        quantity: Math.min(quantity, restante),
-      });
+      if (sinCupo || porAgregar.length === 0) return;
+      // La misma linea que suma el total estimado (lineasPorAgregar).
+      for (const line of porAgregar) {
+        addToQuoteCart({ productId, variantSku: line.variantSku, quantity: line.quantity });
+      }
       showAddedToast("Agregado a tu cotización.");
       aplicarCantidad(lineFloor);
     }
@@ -470,7 +609,11 @@ export function PurchasePanel({
           {precioMostrado}{" "}
           <span className="text-base text-foreground/50">+ IVA</span>
         </p>
-        <p className="mt-1 text-xs text-foreground/50">{leyendaPrecio}</p>
+        <p className="mt-1 text-xs text-foreground/50">
+          {sinPersonalizarElegido
+            ? LEYENDAS_PRECIO.ficha.sinPersonalizarElegido
+            : leyendaPrecio}
+        </p>
         {/* Sobria a proposito: dice QUE el precio cambia, no por que ni
             cuanto. El porcentaje del proveedor no se muestra — es su
             estructura de costos, no información para el cliente. */}
@@ -488,7 +631,90 @@ export function PurchasePanel({
             Es de la variante SELECCIONADA y cambia al elegir otro talle —
             mostrar la escala del S cuando el cliente eligio 3XL seria mostrarle
             un precio que no va a pagar. */}
-        {mostrarTabla && (
+        {impresionVigente && tarjetas.length > 0 && (
+          <div className="mt-5">
+            <p className="text-sm font-medium text-foreground">
+              Precio por cantidad con tu logo
+            </p>
+            <p className="mt-0.5 text-xs text-foreground/60">
+              {impresionVigente.technique} ·{" "}
+              {impresionVigente.sizeLabel.charAt(0).toLowerCase()}
+              {impresionVigente.sizeLabel.slice(1)} · {impresionVigente.areaName}{" "}
+              (estimado)
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {tarjetas.map((t, i) => {
+                const activa = i === tarjetaActiva;
+                // La activa muestra el adicional del TOTAL que respondio el
+                // servidor (carrito + lo que se agrega), no el de su propia
+                // cantidad: si el total ya supera el umbral, no lo lleva. Las
+                // demas describen su propia cantidad.
+                const adicional = activa ? (desgloseVigente?.adicional ?? null) : t.adicional;
+                const inalcanzable = masQueElStock(t.desde);
+                return (
+                  <button
+                    key={t.desde}
+                    type="button"
+                    disabled={inalcanzable || sinCupo}
+                    // Fija el selector para que el total del producto (lo ya
+                    // cotizado + lo armado) llegue a esta cantidad.
+                    onClick={() =>
+                      aplicarCantidad(
+                        Math.max(
+                          t.desde -
+                            enCarritoDelProducto -
+                            (hasVariantOptions && lines.length > 0 ? linesTotal : 0),
+                          lineFloor
+                        )
+                      )
+                    }
+                    title={inalcanzable ? "Más unidades que el stock informado" : undefined}
+                    aria-pressed={activa}
+                    className={
+                      "flex flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed " +
+                      (activa
+                        ? "border-primary bg-primary text-white shadow-sm"
+                        : inalcanzable
+                          ? "border-foreground/10 text-foreground/35"
+                          : "border-foreground/15 text-foreground hover:border-primary")
+                    }
+                  >
+                    <span
+                      className={
+                        "text-xs font-medium " +
+                        (activa ? "text-accent" : "text-foreground/60")
+                      }
+                    >
+                      {t.desde === 1 ? "1 unidad" : `${t.desde} unidades`}
+                    </span>
+                    <span className="mt-1 text-base font-black tabular-nums">
+                      {t.unitario}
+                    </span>
+                    <span className={"text-[11px] " + (activa ? "text-white/80" : "text-foreground/55")}>
+                      c/u con logo
+                    </span>
+                    <span className={"mt-1.5 text-xs tabular-nums " + (activa ? "text-white" : "text-foreground/70")}>
+                      Subtotal {t.total}
+                    </span>
+                    {adicional && (
+                      <span className={"mt-1 text-[11px] leading-tight " + (activa ? "text-accent" : "text-primary-dark")}>
+                        + {adicional} {LEYENDAS_PRECIO.adicionalCantidadChica.toLowerCase()}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-3 rounded-lg bg-accent/20 px-3 py-2 text-xs text-foreground/80">
+              <span className="font-medium text-foreground">
+                Preparación del logo: {impresionVigente.preparacion}
+              </span>{" "}
+              · se cobra una vez por producto, no por unidad.
+            </p>
+          </div>
+        )}
+
+        {!impresionVigente && mostrarTabla && (
           <div className="mt-3 inline-flex flex-col gap-1 rounded-lg bg-foreground/[0.03] px-3 py-2">
             {filasTabla.map((e, i) => {
               const inalcanzable = masQueElStock(e.desde);
@@ -618,6 +844,55 @@ export function PurchasePanel({
         </div>
       </div>
 
+      {/* Mismas lineas que agrega el boton (lineasPorAgregar) mas lo que ya
+          esta en la cotizacion, dicho en el titulo: el recuadro nunca suma
+          algo distinto de lo que se agrega. */}
+      {impresion && desgloseVigente && (
+        <div className="rounded-xl border border-primary/20 bg-primary/[0.03] p-4 text-sm">
+          <p className="font-medium text-foreground">
+            {tituloDelTotal(desgloseVigente, vistaPrevia)}
+          </p>
+          {carritoConDescartes && (
+            <p className="mt-0.5 text-xs text-primary-dark">
+              Una de las variantes de tu cotización ya no está disponible.
+            </p>
+          )}
+          <dl className="mt-2 flex flex-col gap-1 text-foreground/80">
+            <FilaDesglose etiqueta="Producto" valor={desgloseVigente.producto} />
+            {desgloseVigente.personalizacion && (
+              <FilaDesglose
+                etiqueta={`Personalización (${desgloseVigente.personalizacionDetalle})`}
+                valor={desgloseVigente.personalizacion}
+              />
+            )}
+            {desgloseVigente.preparacion && (
+              <FilaDesglose
+                etiqueta="Preparación del logo (una vez)"
+                valor={desgloseVigente.preparacion}
+              />
+            )}
+            {desgloseVigente.adicional && (
+              <FilaDesglose
+                etiqueta={LEYENDAS_PRECIO.adicionalCantidadChica}
+                valor={desgloseVigente.adicional}
+              />
+            )}
+          </dl>
+          <p className="mt-2 flex justify-between gap-4 border-t border-primary/15 pt-2 font-medium text-foreground">
+            <span>Total</span>
+            <span className="tabular-nums">
+              {desgloseVigente.total}{" "}
+              <span className="text-xs font-normal text-foreground/50">+ IVA</span>
+            </span>
+          </p>
+          <p className="mt-1 text-xs text-foreground/55">
+            {desgloseVigente.personalizacion
+              ? "Personalización estimada: la confirmamos al ver tu logo. El envío se cotiza aparte."
+              : "El envío se cotiza aparte."}
+          </p>
+        </div>
+      )}
+
       {/* Region viva SIEMPRE montada: un lector de pantalla anuncia el cambio
           de contenido, cosa que no hace con un nodo que aparece de golpe. */}
       <div aria-live="polite">
@@ -736,6 +1011,15 @@ export function PurchasePanel({
   );
 }
 
+
+function FilaDesglose({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt>{etiqueta}</dt>
+      <dd className="tabular-nums text-foreground">{valor}</dd>
+    </div>
+  );
+}
 
 /// Indice del escalon que rige para una cantidad: el mas alto cuyo `desde` no
 /// la supera. Devuelve 0 (el de 1 unidad) si no hay ninguno.

@@ -16,6 +16,12 @@ export const LEYENDAS_PRECIO = {
   ficha: {
     personalizable: "La personalización y el envío se cotizan aparte.",
     sinPersonalizacion: "Producto que se entrega sin personalizar. El envío se cotiza aparte.",
+    /// Producto con niveles (tanda 4c): la ficha muestra las tarjetas con la
+    /// personalizacion estimada, asi que ya no se "cotiza aparte". El precio
+    /// grande sigue siendo el del producto solo, y se dice.
+    conImpresion: "Precio sin logo. Abajo, con personalización estimada · el envío se cotiza aparte.",
+    /// El cliente eligio "Sin personalizar" en /cotizar para este producto.
+    sinPersonalizarElegido: "Elegiste sin personalizar en tu cotización. El envío se cotiza aparte.",
   },
   /// Aclaracion del total en /cotizar, sin ninguna personalizacion elegida.
   totalCotizar:
@@ -45,6 +51,9 @@ export const LEYENDAS_PRECIO = {
   /// Cierre de la seccion de personalizacion de la ficha.
   impresion:
     "El logo se carga en el paso de cotización; el costo de la personalización va en el presupuesto final.",
+  /// Idem, para un producto con niveles: el costo ya se mostro, estimado.
+  impresionConNiveles:
+    "El logo se carga en el paso de cotización. El costo de personalización que ves es estimado: lo confirmamos al ver tu logo.",
 } as const;
 
 /// Que dice la leyenda del total, segun los productos del pedido:
@@ -83,15 +92,26 @@ export function leyendaTotalMensaje(impresion: ImpresionEnTotal): string {
 }
 
 /// Un producto es personalizable si tiene al menos una tecnica de impresion
-/// (`ProductPrintingType`). El llamador resuelve ese booleano.
-export function leyendasDePrecio({ personalizable }: { personalizable: boolean }) {
+/// (`ProductPrintingType`). `conNiveles`: ademas tiene precios de
+/// personalizacion que la ficha muestra (tanda 4c). El llamador resuelve los
+/// dos booleanos. La card del catalogo no cambia: no lee los niveles.
+export function leyendasDePrecio({
+  personalizable,
+  conNiveles = false,
+}: {
+  personalizable: boolean;
+  conNiveles?: boolean;
+}) {
   return {
     card: personalizable
       ? LEYENDAS_PRECIO.card.personalizable
       : LEYENDAS_PRECIO.card.sinPersonalizacion,
-    ficha: personalizable
-      ? LEYENDAS_PRECIO.ficha.personalizable
-      : LEYENDAS_PRECIO.ficha.sinPersonalizacion,
+    ficha: conNiveles
+      ? LEYENDAS_PRECIO.ficha.conImpresion
+      : personalizable
+        ? LEYENDAS_PRECIO.ficha.personalizable
+        : LEYENDAS_PRECIO.ficha.sinPersonalizacion,
+    impresion: conNiveles ? LEYENDAS_PRECIO.impresionConNiveles : LEYENDAS_PRECIO.impresion,
     totalCotizar: LEYENDAS_PRECIO.totalCotizar,
     totalMensaje: LEYENDAS_PRECIO.totalMensaje,
   };

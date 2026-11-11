@@ -15,6 +15,7 @@ import {
 } from "@/lib/pricing";
 import { RANGE_DISCOUNT_MIN_QUANTITY } from "@/lib/zecat/normalize";
 import { formatPriceArs } from "@/lib/format";
+import { fichaDeImpresion } from "@/lib/impresion-producto";
 import { leyendasDePrecio } from "@/lib/leyendas-precio";
 
 /// La URL canonica de la ficha es SIEMPRE /producto/{id}, sin query: `desde`
@@ -70,6 +71,18 @@ export default async function ProductoPage({
       formatPriceArs
     );
   }
+
+  // Tarjetas por cantidad con la personalizacion estimada (tanda 4c). Se
+  // calculan ACA, del lado del servidor, y cruzan ya formateadas: los niveles
+  // (con sus costos), el umbral y el recargo crudo del producto cacheado no
+  // pasan a ningun client component. Null sin niveles (CDO, Zecat sin
+  // tecnicas): la ficha sigue con la tabla y las leyendas de siempre.
+  const impresion = fichaDeImpresion(product, pricingConfig);
+
+  const leyendas = leyendasDePrecio({
+    personalizable: product.printingTypes.length > 0,
+    conNiveles: impresion !== null,
+  });
 
   const rango = computePriceRange(
     product.variants,
@@ -136,14 +149,11 @@ export default async function ProductoPage({
             }))}
             escalonesPorSku={escalonesPorSku}
             bulkFromQuantity={RANGE_DISCOUNT_MIN_QUANTITY}
-            leyendaPrecio={
-              leyendasDePrecio({
-                personalizable: product.printingTypes.length > 0,
-              }).ficha
-            }
+            leyendaPrecio={leyendas.ficha}
             fallbackPriceLabel={
               rango ? formatPriceArs(rango.min) : formatPriceArs(0)
             }
+            impresion={impresion}
           />
 
           {/* Solo para lo que cotiza en dólares (hoy CDO): su precio en pesos
@@ -164,7 +174,11 @@ export default async function ProductoPage({
               después cómo se personaliza. */}
           <ProductAttributes attributes={product.attributes} />
 
-          <PrintingInfo areas={product.printingAreas} types={product.printingTypes} />
+          <PrintingInfo
+            areas={product.printingAreas}
+            types={product.printingTypes}
+            leyenda={leyendas.impresion}
+          />
         </div>
       </div>
     </div>

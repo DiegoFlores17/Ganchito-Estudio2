@@ -173,3 +173,33 @@ export function cantidadesEnCarritoPorSku(
   }
   return porSku;
 }
+
+/// Lineas que el boton "Agregar a mi cotizacion" de la ficha va a agregar,
+/// ANTES del recorte final contra el carrito de ese momento. Es la UNICA
+/// fuente de esas lineas: la usan el boton y el total estimado de la ficha,
+/// asi el recuadro nunca suma algo distinto de lo que se agrega.
+///
+/// - Producto con color/talle: las combinaciones ya armadas (el selector de
+///   cantidad todavia no es una linea hasta "+ Agregar combinacion").
+/// - Producto sin variantes a elegir: lo del selector, topeado al cupo.
+export function lineasPorAgregar({
+  conVariantes,
+  combinaciones,
+  sku,
+  cantidad,
+  cupo,
+}: {
+  conVariantes: boolean;
+  combinaciones: Array<{ sku: string; quantity: number }>;
+  sku: string | undefined;
+  cantidad: number;
+  cupo: number;
+}): Array<{ variantSku: string; quantity: number }> {
+  if (conVariantes) {
+    return combinaciones
+      .filter((l) => l.quantity > 0)
+      .map((l) => ({ variantSku: l.sku, quantity: l.quantity }));
+  }
+  const q = Math.min(cantidad, cupo);
+  return sku && q > 0 ? [{ variantSku: sku, quantity: q }] : [];
+}

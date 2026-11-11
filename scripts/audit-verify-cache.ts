@@ -118,6 +118,12 @@ async function main() {
   const cotizar = archivosBajo(path.join(raiz, "src/app/(store)/cotizar"));
   const rCot = alcanza(cotizar);
   check("[estatico] cotizar/** no llega (transitivamente) a lectura-publica ni cache-publico", rCot.cadena === null, rCot.cadena ? rCot.cadena.join(" -> ") : `${rCot.visitados} archivos recorridos`);
+  // La server action del total de la ficha (tanda 4c) es del mismo tipo que
+  // /cotizar: precio para una cantidad concreta, leido de la base en cada
+  // llamada. Tampoco puede salir de una cache.
+  const accionFicha = path.join(raiz, "src/app/(store)/producto/[id]/actions.ts");
+  const rFicha = alcanza([accionFicha]);
+  check("[estatico] producto/[id]/actions.ts (total de la ficha) no llega a lectura-publica ni cache-publico", rFicha.cadena === null, rFicha.cadena ? rFicha.cadena.join(" -> ") : `${rFicha.visitados} archivos recorridos`);
   const admin = archivosBajo(path.join(raiz, "src/app/admin"));
   const rAdm = alcanza(admin);
   check("[estatico] admin/** no llega a lectura-publica ni cache-publico", rAdm.cadena === null, rAdm.cadena ? rAdm.cadena.join(" -> ") : `${rAdm.visitados} archivos recorridos`);
@@ -132,12 +138,12 @@ async function main() {
   const usaUnstable = archivosBajo(path.join(raiz, "src")).filter((f) => fs.readFileSync(f, "utf8").includes("unstable_cache(") && !f.endsWith("cache-publico.ts"));
   check("[estatico] unstable_cache se usa solo en cache-publico.ts", usaUnstable.length === 0, usaUnstable.join(", "));
 
-  const tienda = archivosBajo(path.join(raiz, "src/app/(store)")).filter((f) => !f.includes("/cotizar/"));
+  const tienda = archivosBajo(path.join(raiz, "src/app/(store)")).filter((f) => !f.includes("/cotizar/") && f !== accionFicha);
   const componentes = ["header.tsx", "footer.tsx"].map((n) => path.join(raiz, "src/components/layout", n));
   const crudos = [...tienda, ...componentes].filter((f) =>
     /\b(getPricingConfig|getSiteConfig|getMenuGroups|getProducts|getProductById|getCatalogFilterOptions|getFeaturedProducts|getHomeCategoryShowcase)\(/.test(fs.readFileSync(f, "utf8"))
   );
-  check("[estatico] las paginas y componentes de la tienda (salvo cotizar) usan solo los lectores publicos", crudos.length === 0, crudos.map((f) => path.relative(raiz, f)).join(", "));
+  check("[estatico] las paginas y componentes de la tienda (salvo cotizar y el total de la ficha) usan solo los lectores publicos", crudos.length === 0, crudos.map((f) => path.relative(raiz, f)).join(", "));
 
   // --- Preparar la base de prueba -------------------------------------------
   await prisma.syncRun.deleteMany({});

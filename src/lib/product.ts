@@ -39,6 +39,20 @@ export async function getProductById(id: string) {
       },
       printingAreas: true,
       printingTypes: true,
+      // Niveles de personalizacion (tanda 4c): con ellos la ficha arma las
+      // tarjetas por cantidad con la personalizacion estimada. Llevan COSTOS:
+      // se usan solo del lado del servidor, nunca cruzan a un client component.
+      printingLevels: {
+        select: {
+          zecatTypeId: true,
+          technique: true,
+          label: true,
+          areaCm2: true,
+          zecatAreaIds: true,
+          unitCost: true,
+          setupCost: true,
+        },
+      },
       // Caracteristicas del producto (Reciclable, BPA Free, Apto
       // lavavajillas). Hoy solo las traen los productos de CDO: la API de
       // Zecat no las expone como dato (ver HANDOFF).

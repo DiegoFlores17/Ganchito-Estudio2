@@ -365,7 +365,7 @@ export interface PrintingLevelCost {
 /// Lo que hace falta para decidir el recargo del proveedor. Solo existe del
 /// lado del servidor: el UMBRAL nunca viaja al navegador (ver
 /// lib/quote-minimum.ts). Lo que si se le muestra al cliente es el MONTO
-/// resultante, como "Adicional del proveedor por cantidad chica".
+/// resultante, como "Adicional por cantidad chica".
 export interface PrintingSurchargeInputs {
   /// Total de unidades del PRODUCTO en la cotizacion (suma de sus lineas).
   productQuantity: number;

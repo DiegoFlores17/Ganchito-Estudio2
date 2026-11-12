@@ -698,7 +698,7 @@ export function PurchasePanel({
                     </span>
                     {adicional && (
                       <span className={"mt-1 text-[11px] leading-tight " + (activa ? "text-accent" : "text-primary-dark")}>
-                        + {adicional} {LEYENDAS_PRECIO.adicionalCantidadChica.toLowerCase()}
+                        + {adicional} adicional
                       </span>
                     )}
                   </button>

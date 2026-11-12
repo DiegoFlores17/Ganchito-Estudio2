@@ -43,7 +43,7 @@ check("sufijos del mensaje por caso",
   leyendaTotalMensaje("parcial") === LEYENDAS_PRECIO.totalMensajeImpresionParcial &&
   leyendaTotalMensaje("ninguna") === LEYENDAS_PRECIO.totalMensaje);
 check("el adicional no menciona el umbral ni promete personalizacion gratis",
-  LEYENDAS_PRECIO.adicionalCantidadChica === "Adicional del proveedor por cantidad chica");
+  LEYENDAS_PRECIO.adicionalCantidadChica === "Adicional por cantidad chica");
 // Ficha con niveles (tanda 4c).
 const niv = leyendasDePrecio({ personalizable: true, conNiveles: true });
 check("con niveles: la ficha usa la rama de personalizacion estimada", niv.ficha === "Precio sin logo. Abajo, con personalización estimada · el envío se cotiza aparte.");

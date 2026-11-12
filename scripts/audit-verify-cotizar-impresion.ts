@@ -203,7 +203,7 @@ async function main() {
     check("a) sin descartadas", qa?.printingDroppedProductIds.length === 0);
     const mailA = enviados.join("\n");
     check("a) mail: Personalizacion y Preparacion del logo", mailA.includes("Personalización —") && mailA.includes("Preparación del logo —"));
-    check("a) mail: linea de adicional con su monto", mailA.includes("Adicional del proveedor por cantidad chica") && mailA.includes("137.750"));
+    check("a) mail: linea de adicional con su monto", mailA.includes("Adicional por cantidad chica") && mailA.includes("137.750"));
     check("a) mail: el umbral queda como nota interna", mailA.includes("Interno: Personalización con recargo del proveedor (sin recargo desde 100 un.)"));
     check("a) mail: nivel interno visible para Ganchito", mailA.includes("nivel Bordado 2KP"));
     check("a) mail: leyenda de total con personalizacion", mailA.includes(leyendaTotalMensaje("toda")));
@@ -267,7 +267,7 @@ async function main() {
     const mailD = enviados.join("\n");
     check("d) mail: sin personalizar bajo el umbral -> nota condicional", mailD.includes("Bajo el umbral del proveedor: si se personaliza, lleva recargo (sin recargo desde 100 un.)"));
     check("d) mail: no afirma 'Personalización con recargo'", !mailD.includes("Personalización con recargo del proveedor"));
-    check("d) mail: sin adicional", !mailD.includes("Adicional del proveedor por cantidad chica"));
+    check("d) mail: sin adicional", !mailD.includes("Adicional por cantidad chica"));
     check("d) mail: leyenda 'solo envio'", mailD.includes(`+ IVA ${leyendaTotalMensaje("soloEnvio")}`));
 
     // h) Con personalizacion + un producto personalizable SIN precios (CDO):

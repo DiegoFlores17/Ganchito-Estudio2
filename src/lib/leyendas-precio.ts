@@ -46,8 +46,10 @@ export const LEYENDAS_PRECIO = {
   /// Linea del recargo del proveedor por personalizar pocas unidades, en
   /// /cotizar y en el total que ve el cliente. Sin el umbral (es una
   /// condicion comercial del proveedor, ver lib/quote-minimum.ts) y sin
-  /// prometer que con mas unidades la personalizacion sea gratis.
-  adicionalCantidadChica: "Adicional del proveedor por cantidad chica",
+  /// prometer que con mas unidades la personalizacion sea gratis. Tampoco
+  /// menciona al proveedor: el cliente no tiene por que saber de quien es el
+  /// recargo (decision de Diego, 2026-11-12).
+  adicionalCantidadChica: "Adicional por cantidad chica",
   /// Cierre de la seccion de personalizacion de la ficha.
   impresion:
     "El logo se carga en el paso de cotización; el costo de la personalización va en el presupuesto final.",

@@ -527,6 +527,11 @@ Lo que trae:
   "BORDADO"). Por ahora solo se muestran en formato título (`tituloArea`), sin
   mapeos ni limpiezas por texto. Limpiarlos de verdad queda para una fase
   posterior.
+- **Pendiente cosmético: ficha sin stock.** Cuando la variante elegida tiene
+  stock 0, la ficha dice "Sin stock por ahora" y no muestra el total, pero las
+  tarjetas por cantidad y la línea de preparación del logo se siguen viendo
+  activas (visto en producción con el 5515, 2026-11-12). Atenuarlas queda para
+  una fase posterior, junto con la limpieza de los nombres de área.
 - **Selección inválida = sin personalizar, nunca rechazo.** Una técnica, área o
   tamaño que no son de ese producto se quitan y quedan en
   `Quote.printingDroppedProductIds`, con aviso en el mail y en el panel.
